@@ -18,7 +18,6 @@ import {
   showExtensionGuidance,
   suggestedNameFor,
 } from "@dezoomify/shared-ui";
-import { createDesktopDownloads } from "./desktop-downloads.ts";
 import { buildHash, looksLikeUsableUrl, parseHash } from "./hash.ts";
 import { createProxyTransport } from "./proxyTransport.ts";
 import { PROXY_MAX_BYTES } from "./server/security.ts";
@@ -59,22 +58,16 @@ const wasm = import("@dezoomify/wasm-bindings").then(async (module) => {
   return module;
 });
 const root = document.getElementById("app");
-const clientHints = (
-  navigator as Navigator & {
-    userAgentData?: { mobile?: boolean; platform?: string };
-  }
-).userAgentData;
-const desktopDownloads = createDesktopDownloads(fetch, {
+const platformHints = {
   userAgent: navigator.userAgent,
-  platform: clientHints?.platform ?? navigator.platform,
-  mobile: clientHints?.mobile,
-});
+  platform: navigator.platform,
+};
 
 const app = root
   ? createBrowserApplication({
       root,
       product: "website",
-      desktopDownloads,
+      platformHints,
       wasm: () => wasm,
       resetToIdle: true,
       history: { store: historyStore, key: HISTORY_KEY_WEBSITE },
@@ -151,9 +144,7 @@ if (app) {
     ?.addEventListener("click", () => showExtensionGuidance(document));
   document
     .getElementById("dz-nav-btn-desktop")
-    ?.addEventListener("click", () =>
-      showDesktopAppGuidance(document, undefined, desktopDownloads),
-    );
+    ?.addEventListener("click", () => showDesktopAppGuidance(document, platformHints));
   const openHash = () => {
     const url = parseHash(location.hash);
     if (url && url !== app.currentUrl() && looksLikeUsableUrl(url)) app.submit(url);

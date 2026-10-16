@@ -1,11 +1,11 @@
 import {
   AccessRequestView,
   createHistory,
-  type DesktopDownloads,
   type DiagnosticRecorder,
   type HistoryEntry,
   type HistoryStore,
   isValidInputUrl,
+  type PlatformHints,
   type Presentation,
   presentFailure,
   presentIdle,
@@ -78,7 +78,7 @@ export interface BrowserCapabilities
   dispose?(): void;
 }
 export interface BrowserApplicationOptions {
-  desktopDownloads?: DesktopDownloads;
+  platformHints?: PlatformHints;
   root: HTMLElement;
   product: "website" | "extension";
   version?: string;
@@ -394,7 +394,7 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
         ...(a ? { ...a.view, diagnosticReport: report } : { initialUrl }),
         sourceUrl: a?.progress?.source_url ?? a?.url,
         desktopSourceUrl: a?.progress?.source_url ?? a?.url,
-        desktopDownloads: options.desktopDownloads,
+        platformHints: options.platformHints,
         product: options.product,
         history: history.entries(),
         historyNow: Date.now(),

@@ -128,25 +128,12 @@ const en = {
   "view.modal.closeTitle": "Close",
   // Desktop-app guidance modal.
   "view.desktop.title": "Dezoomify Desktop App",
-  "view.desktop.downloadLoading": "Finding desktop installers…",
-  "view.desktop.downloadFailed": "Could not load the desktop installers. Try again.",
-  "view.desktop.downloadRetry": "Try again",
-  "view.desktop.downloadChoose":
-    "Download an installer. Check its system and processor before installing.",
   "view.desktop.download.windows": "Windows installer · x64 (MSI)",
   "view.desktop.download.macos": "macOS installer · Apple Silicon (DMG)",
   "view.desktop.download.linux": "Linux installer · x64 (DEB)",
-  "view.desktop.downloadInstall": "Download the installer above for your system, then install it.",
+  "view.desktop.step1": "Download the installer above for your system, then install it.",
   "view.desktop.subtitle":
     "High-performance native application for gigapixel museum artworks and local scans",
-  "view.desktop.installer": "The unsigned {installer} for {platform} is on",
-  "view.desktop.releasesLink": "GitHub Releases",
-  "view.desktop.releasesNote": "No auto-update; check GitHub Releases manually.",
-  "view.desktop.installerMsi": ".msi installer",
-  "view.desktop.installerDmg": "Apple silicon .dmg",
-  "view.desktop.installerDeb": ".deb installer",
-  "view.desktop.installerGeneric": "installer",
-  "view.desktop.platformGeneric": "your platform",
   "view.desktop.whyTitle": "Why use the Desktop App?",
   "view.desktop.why1Title": "Handles Larger Artworks:",
   "view.desktop.why1Body":
@@ -157,8 +144,6 @@ const en = {
   "view.desktop.why3Body":
     "The website stops the job with an error and points to the desktop app for the full-size image.",
   "view.desktop.howTitle": "How to use it",
-  "view.desktop.step1":
-    "Save the unsigned {installer} for {platform} from our GitHub Releases page, then install it. There is no auto-update.",
   "view.desktop.step2": "Launch Dezoomify and paste your zoomable image or manifest URL.",
   "view.desktop.step3":
     "Select your desired resolution and destination folder to save the complete composite image.",
@@ -232,7 +217,6 @@ const en = {
   "view.resolution.sizes": "Image size: {selected} pixels. Maximum available: {maximum} pixels.",
   "view.resolution.download": "Get full resolution with the desktop app",
   "view.desktop.handoffTitle": "Download this image in the desktop app",
-  "view.desktop.handoffDownload": "Download desktop app",
   "view.desktop.handoffInstall":
     "Choose the installer for your operating system, then open Dezoomify.",
   "view.desktop.handoffPaste": "Paste this URL into the desktop app’s URL field:",

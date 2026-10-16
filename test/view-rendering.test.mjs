@@ -596,7 +596,11 @@ test("desktop handoff shows and copies the discovered URL, handles failure and u
   });
   click(el.querySelector("#dz-btn-download-desktop"));
   let dialog = document.querySelector('[role="dialog"]');
-  assert.ok(dialog.querySelector('a[href="https://github.com/lovasoa/dezoomify/releases/latest"]'));
+  assert.ok(
+    dialog.querySelector(
+      'a[href="https://github.com/lovasoa/dezoomify/releases/latest/download/dezoomify-desktop.msi"]',
+    ),
+  );
   assert.equal(dialog.querySelector("input").value, source);
   assert.ok(dialog.querySelector("label").textContent.includes("Paste"));
   const copy = dialog.querySelector(".dz-btn-secondary");

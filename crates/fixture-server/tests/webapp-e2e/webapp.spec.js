@@ -18,16 +18,6 @@ const {
 } = require("../../../../test/support/png.mjs");
 
 const ADDR = process.env.DEZOOMIFY_E2E_ADDR;
-const DESKTOP_RELEASE_API = "https://api.github.com/repos/lovasoa/dezoomify/releases/latest";
-const DESKTOP_RELEASE = {
-  assets: ["windows-x86_64.msi", "macos-aarch64.dmg", "linux-x86_64.deb"].map((suffix) => {
-    const name = `dezoomify-desktop-v3.1.123-${suffix}`;
-    return {
-      name,
-      browser_download_url: `https://github.com/lovasoa/dezoomify/releases/download/rolling-v3.1.123/${name}`,
-    };
-  }),
-};
 const { formats } = require("../../../../test/support/formats.cjs");
 const {
   relayFixtureRequest,
@@ -448,52 +438,36 @@ const RESOLUTION_DZI =
   '<Image xmlns="http://schemas.microsoft.com/deepzoom/2008" TileSize="10000" Overlap="0" Format="jpg">' +
   '<Size Width="40000" Height="1000"/></Image>';
 
-test("desktop guidance retries release discovery and downloads directly without leaving the website", async ({ page }) => {
-  let requests = 0;
-  let releaseLookup;
-  await page.route(DESKTOP_RELEASE_API, async (route) => {
-    requests++;
-    if (requests === 1) {
-      await route.fulfill({ status: 503, body: "Temporarily unavailable" });
-      return;
-    }
-    await new Promise((resolve) => { releaseLookup = resolve; });
-    await route.fulfill({ json: DESKTOP_RELEASE });
+test("desktop guidance downloads directly without leaving the website", async ({ page }) => {
+  let apiRequests = 0;
+  await page.route("https://api.github.com/**", (route) => {
+    apiRequests++;
+    return route.abort();
   });
-  const installerUrl = DESKTOP_RELEASE.assets[0].browser_download_url;
+  const installerUrl = "https://github.com/lovasoa/dezoomify/releases/latest/download/dezoomify-desktop.msi";
   await page.route(installerUrl, (route) => route.fulfill({
     contentType: "application/octet-stream",
     headers: { "content-disposition": 'attachment; filename="dezoomify-test.msi"' },
     body: "Mock installer bytes",
   }));
   await page.goto(`${ADDR}/beta/`, { waitUntil: "networkidle" });
-  expect(requests).toBe(0);
   await page.locator("#dz-nav-btn-desktop").click();
   const dialog = page.getByRole("dialog");
   const downloads = dialog.locator(".dz-modal-download-box");
-  await expect(downloads.getByRole("alert")).toContainText("Could not load the desktop installers");
-  await downloads.getByRole("button", { name: "Try again" }).click();
-  await expect(downloads.getByRole("status")).toContainText("Finding desktop installers");
-  await expect.poll(() => requests).toBe(2);
-  releaseLookup();
   await expect(downloads.getByRole("link")).toHaveCount(3);
   const windows = downloads.getByRole("link", { name: "Windows installer · x64 (MSI)" });
   await expect(windows).toHaveAttribute("href", installerUrl);
-  await expect(downloads.getByRole("link", { name: "macOS installer · Apple Silicon (DMG)" })).toHaveAttribute("href", DESKTOP_RELEASE.assets[1].browser_download_url);
-  await expect(downloads.getByRole("link", { name: "Linux installer · x64 (DEB)" })).toHaveAttribute("href", DESKTOP_RELEASE.assets[2].browser_download_url);
-  await dialog.getByRole("button", { name: "Close dialog" }).click();
-  await page.locator("#dz-nav-btn-desktop").click();
-  await expect(windows).toBeVisible();
-  expect(requests).toBe(2);
+  await expect(downloads.getByRole("link", { name: "macOS installer · Apple Silicon (DMG)" })).toHaveAttribute("href", /\/releases\/latest\/download\/dezoomify-desktop\.dmg$/);
+  await expect(downloads.getByRole("link", { name: "Linux installer · x64 (DEB)" })).toHaveAttribute("href", /\/releases\/latest\/download\/dezoomify-desktop\.deb$/);
   const pending = page.waitForEvent("download");
   await windows.click();
   expect((await pending).suggestedFilename()).toBe("dezoomify-test.msi");
   await expect(page).toHaveURL(`${ADDR}/beta/`);
+  expect(apiRequests).toBe(0);
 });
 
 test("lower resolution opens a desktop handoff with the exact URL and keyboard navigation", async ({ page, context }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
-  await page.route(DESKTOP_RELEASE_API, (route) => route.fulfill({ json: DESKTOP_RELEASE }));
   let releaseTiles;
   const tilesReady = new Promise((resolve) => { releaseTiles = resolve; });
   await page.route(
@@ -532,7 +506,7 @@ test("lower resolution opens a desktop handoff with the exact URL and keyboard n
   const dialog = page.getByRole("dialog");
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole("link")).toHaveCount(3);
-  await expect(dialog.getByRole("link", { name: "Linux installer · x64 (DEB)" })).toHaveAttribute("href", DESKTOP_RELEASE.assets[2].browser_download_url);
+  await expect(dialog.getByRole("link", { name: "Linux installer · x64 (DEB)" })).toHaveAttribute("href", /\/releases\/latest\/download\/dezoomify-desktop\.deb$/);
   const source = dialog.getByRole("textbox");
   await expect(source).toHaveValue("https://fixtures.test/resolution/big.dzi");
   await expect(source).toHaveAttribute("readonly", "");

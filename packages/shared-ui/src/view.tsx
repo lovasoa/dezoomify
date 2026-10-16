@@ -2,7 +2,7 @@
 
 import type { Error as JobError } from "@dezoomify/wasm-bindings";
 import type { ReactElement, ReactNode } from "react";
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import type { Root } from "react-dom/client";
 import { createRoot } from "react-dom/client";
@@ -11,19 +11,10 @@ import { canRetry, isDiscoveryFailure, plainMessageFor } from "./failure.ts";
 import { HistorySection } from "./history-view.tsx";
 import type { Presentation, ResolutionChoice } from "./presentation.ts";
 import { displaySourceUrl, formatPixelCount, hostFromUrl } from "./view-helpers.ts";
-import type {
-  DesktopDownloads,
-  DesktopInstaller,
-  PlatformHints,
-  ViewCallbacks,
-  ViewContext,
-  ViewRenderOptions,
-} from "./view-types.ts";
+import type { PlatformHints, ViewCallbacks, ViewContext, ViewRenderOptions } from "./view-types.ts";
 
 export { DEFAULT_PAGE_TITLE, jobPageTitle } from "./view-helpers.ts";
 export type {
-  DesktopDownloads,
-  DesktopInstaller,
   PlatformHints,
   ViewCallbacks,
   ViewContext,
@@ -146,13 +137,13 @@ function ResolutionNotice({
   callbacks,
   sourceUrl,
   hostDocument,
-  downloads,
+  hints,
 }: {
   choice: ResolutionChoice;
   callbacks: ViewCallbacks;
   sourceUrl?: string;
   hostDocument: Document;
-  downloads?: DesktopDownloads;
+  hints?: PlatformHints;
 }) {
   const dims = (size: { width: number; height: number }) => `${size.width}×${size.height}`;
   return (
@@ -171,9 +162,7 @@ function ResolutionNotice({
           <NoticeAction
             primary
             id="dz-btn-download-desktop"
-            onClick={() =>
-              showDesktopHandoff(hostDocument, sourceUrl, callbacks.onCopyText, downloads)
-            }
+            onClick={() => showDesktopHandoff(hostDocument, sourceUrl, callbacks.onCopyText, hints)}
           >
             {t("view.resolution.download")}
           </NoticeAction>
@@ -197,7 +186,7 @@ function resolutionNoticeOf(
       choice={choice}
       callbacks={callbacks}
       sourceUrl={ctx?.desktopSourceUrl}
-      downloads={ctx?.desktopDownloads}
+      hints={ctx?.platformHints}
       hostDocument={hostDocument}
     />
   );
@@ -549,7 +538,7 @@ function DisplayOnlyView({
         <div className="dz-guidance-grid">
           <ExtensionGuideButton onOpen={() => showExtensionGuidance(hostDocument)} />
           <DesktopGuideButton
-            onOpen={() => showDesktopAppGuidance(hostDocument, undefined, ctx?.desktopDownloads)}
+            onOpen={() => showDesktopAppGuidance(hostDocument, ctx?.platformHints)}
             description={t("view.display.deskDescClean")}
           />
         </div>
@@ -784,9 +773,7 @@ function FailedView({
             <>
               <ExtensionGuideButton onOpen={() => showExtensionGuidance(hostDocument)} />
               <DesktopGuideButton
-                onOpen={() =>
-                  showDesktopAppGuidance(hostDocument, undefined, ctx?.desktopDownloads)
-                }
+                onOpen={() => showDesktopAppGuidance(hostDocument, ctx?.platformHints)}
                 description={t("view.fail.deskDescLimits")}
               />
             </>
@@ -1114,85 +1101,50 @@ export function openModal(
 
 // Guidance dialogs.
 
-function detectPlatform(hints?: PlatformHints): { name: string; installer: string } {
-  const ua = (hints?.userAgent ?? "").toLowerCase();
-  const platform = (hints?.platform ?? "").toLowerCase();
-  if (ua.includes("win") || platform.includes("win"))
-    return { name: "Windows", installer: t("view.desktop.installerMsi") };
-  if (ua.includes("mac") || platform.includes("mac"))
-    return { name: "macOS", installer: t("view.desktop.installerDmg") };
-  if (ua.includes("linux") || platform.includes("linux"))
-    return { name: "Linux", installer: t("view.desktop.installerDeb") };
-  return {
-    name: t("view.desktop.platformGeneric"),
-    installer: t("view.desktop.installerGeneric"),
-  };
+function detectPlatform(hints?: PlatformHints) {
+  const platform = `${hints?.userAgent ?? ""} ${hints?.platform ?? ""}`.toLowerCase();
+  if (/android|iphone|ipad|ipod|mobile/.test(platform)) return undefined;
+  if (platform.includes("win")) return "windows";
+  if (platform.includes("mac")) return "macos";
+  if (platform.includes("linux")) return "linux";
+  return undefined;
 }
 
 const RELEASES_URL = "https://github.com/lovasoa/dezoomify/releases/latest";
 
-function DesktopDownloadLinks({ downloads }: { downloads?: DesktopDownloads }) {
-  const [result, setResult] = useState<DesktopInstaller[] | "loading" | "failed">("loading");
-  const request = useRef(0);
-  const load = useCallback(() => {
-    if (!downloads) return;
-    const current = ++request.current;
-    setResult("loading");
-    void downloads.load().then(
-      (choices) => {
-        if (current === request.current) setResult(choices);
-      },
-      () => {
-        if (current === request.current) setResult("failed");
-      },
-    );
-  }, [downloads]);
-  useEffect(() => {
-    load();
-    return () => {
-      request.current++;
-    };
-  }, [load]);
-  if (!downloads)
-    return (
-      <a href={RELEASES_URL} target="_blank" rel="noopener">
-        {t("view.desktop.handoffDownload")}
-      </a>
-    );
-  if (result === "failed")
-    return (
-      <div>
-        <p role="alert">{t("view.desktop.downloadFailed")}</p>
-        <button type="button" className="dz-btn-secondary" onClick={load}>
-          {t("view.desktop.downloadRetry")}
-        </button>
-      </div>
-    );
-  if (result === "loading") return <p role="status">{t("view.desktop.downloadLoading")}</p>;
+function DesktopDownloadLinks({ hints }: { hints?: PlatformHints }) {
+  const preferred = detectPlatform(hints);
+  const installers = [
+    { platform: "windows", extension: "msi" },
+    { platform: "macos", extension: "dmg" },
+    { platform: "linux", extension: "deb" },
+  ] as const;
   return (
-    <div className="dz-desktop-downloads">
-      <p>{t("view.desktop.downloadChoose")}</p>
-      <ul className="dz-modal-list">
-        {result.map((installer) => (
-          <li key={installer.kind}>
-            <a href={installer.url} className={installer.preferred ? "dz-btn-tactile" : undefined}>
-              {t(`view.desktop.download.${installer.kind}`)}
+    <ul className="dz-modal-list">
+      {[...installers]
+        .sort((a, b) => Number(b.platform === preferred) - Number(a.platform === preferred))
+        .map(({ platform, extension }) => (
+          <li key={platform}>
+            <a
+              href={`${RELEASES_URL}/download/dezoomify-desktop.${extension}`}
+              className={platform === preferred ? "dz-btn-tactile dz-handoff-download" : undefined}
+            >
+              {t(`view.desktop.download.${platform}`)}
             </a>
           </li>
         ))}
-      </ul>
-    </div>
+    </ul>
   );
 }
 
 function DesktopHandoffBody({
   sourceUrl,
   onCopy,
-  downloads,
+  hints,
 }: {
   sourceUrl?: string;
   onCopy?: (text: string) => Promise<void>;
-  downloads?: DesktopDownloads;
+  hints?: PlatformHints;
 }) {
   const [copyState, setCopyState] = useState<"idle" | "pending" | "copied" | "failed">("idle");
   const urlId = useId();
@@ -1211,7 +1163,7 @@ function DesktopHandoffBody({
       <div className="dz-modal-step">
         <span className="dz-modal-step-num">1</span>
         <div>
-          <DesktopDownloadLinks downloads={downloads} />
+          <DesktopDownloadLinks hints={hints} />
           <p>{t("view.desktop.handoffInstall")}</p>
         </div>
       </div>
@@ -1262,36 +1214,19 @@ function showDesktopHandoff(
   hostDocument: Document,
   sourceUrl?: string,
   onCopy?: (text: string) => Promise<void>,
-  downloads?: DesktopDownloads,
+  hints?: PlatformHints,
 ): void {
   mountOverlay(hostDocument, (close) => (
     <ModalCard
       title={t("view.desktop.handoffTitle")}
       hostDocument={hostDocument}
       onClose={close}
-      body={<DesktopHandoffBody sourceUrl={sourceUrl} onCopy={onCopy} downloads={downloads} />}
+      body={<DesktopHandoffBody sourceUrl={sourceUrl} onCopy={onCopy} hints={hints} />}
     />
   ));
 }
 
-export function showDesktopAppGuidance(
-  hostDocument: Document,
-  hints?: PlatformHints,
-  downloads?: DesktopDownloads,
-): void {
-  const p = detectPlatform(hints);
-  const releases = (
-    <a href={RELEASES_URL} target="_blank" rel="noopener">
-      {t("view.desktop.releasesLink")}
-    </a>
-  );
-  const downloadNote = (
-    <>
-      {t("view.desktop.installer", { platform: p.name, installer: p.installer })} {releases}.{" "}
-      {t("view.desktop.releasesNote")}
-    </>
-  );
-  const stepOne = t("view.desktop.step1", { platform: p.name, installer: p.installer });
+export function showDesktopAppGuidance(hostDocument: Document, hints?: PlatformHints): void {
   mountOverlay(hostDocument, (close) => (
     <ModalCard
       title={t("view.desktop.title")}
@@ -1301,13 +1236,7 @@ export function showDesktopAppGuidance(
       body={
         <>
           <div className="dz-modal-download-box">
-            {downloads ? (
-              <DesktopDownloadLinks downloads={downloads} />
-            ) : (
-              <div style={{ fontSize: "0.9rem", color: "var(--dz-text-muted)" }}>
-                {downloadNote}
-              </div>
-            )}
+            <DesktopDownloadLinks hints={hints} />
           </div>
           <div className="dz-modal-section">
             <div className="dz-modal-section-title">{t("view.desktop.whyTitle")}</div>
@@ -1328,7 +1257,7 @@ export function showDesktopAppGuidance(
             <div className="dz-modal-steps">
               <div className="dz-modal-step">
                 <span className="dz-modal-step-num">1</span>
-                <div>{downloads ? t("view.desktop.downloadInstall") : stepOne}</div>
+                <div>{t("view.desktop.step1")}</div>
               </div>
               <div className="dz-modal-step">
                 <span className="dz-modal-step-num">2</span>
@@ -1347,7 +1276,7 @@ export function showDesktopAppGuidance(
             <p className="dz-modal-cli-desc">{t("view.desktop.cliDesc")}</p>
             <div className="dz-modal-cli-links">
               <a
-                href="https://github.com/lovasoa/dezoomify/releases/latest"
+                href={RELEASES_URL}
                 target="_blank"
                 rel="noopener"
                 className="dz-btn-secondary"

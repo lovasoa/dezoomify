@@ -38,27 +38,13 @@ export const fr = {
   "view.modal.closeTitle": "Fermer",
   // Desktop-app guidance modal.
   "view.desktop.title": "Application de bureau Dezoomify",
-  "view.desktop.downloadLoading": "Recherche des programmes d’installation…",
-  "view.desktop.downloadFailed": "Impossible de charger les programmes d’installation. Réessayez.",
-  "view.desktop.downloadRetry": "Réessayer",
-  "view.desktop.downloadChoose":
-    "Téléchargez un programme d’installation. Vérifiez le système et le processeur avant de l’installer.",
   "view.desktop.download.windows": "Programme d’installation Windows · x64 (MSI)",
   "view.desktop.download.macos": "Programme d’installation macOS · Apple Silicon (DMG)",
   "view.desktop.download.linux": "Programme d’installation Linux · x64 (DEB)",
-  "view.desktop.downloadInstall":
+  "view.desktop.step1":
     "Téléchargez le programme d’installation ci-dessus pour votre système, puis installez-le.",
   "view.desktop.subtitle":
     "Application native haute performance pour les œuvres muséales gigapixels et les numérisations locales",
-  "view.desktop.installer": "L’{installer} non signé pour {platform} est disponible sur",
-  "view.desktop.releasesLink": "GitHub Releases",
-  "view.desktop.releasesNote":
-    "Pas de mise à jour automatique ; consultez GitHub Releases manuellement.",
-  "view.desktop.installerMsi": "installeur .msi",
-  "view.desktop.installerDmg": "installeur .dmg Apple silicon",
-  "view.desktop.installerDeb": "installeur .deb",
-  "view.desktop.installerGeneric": "installeur",
-  "view.desktop.platformGeneric": "votre plateforme",
   "view.desktop.whyTitle": "Pourquoi utiliser l’application de bureau ?",
   "view.desktop.why1Title": "Prend en charge les œuvres très grandes :",
   "view.desktop.why1Body":
@@ -70,8 +56,6 @@ export const fr = {
   "view.desktop.why3Body":
     "Le site web interrompt la tâche avec une erreur et renvoie vers l’application de bureau pour l’image en pleine taille.",
   "view.desktop.howTitle": "Comment l’utiliser",
-  "view.desktop.step1":
-    "Téléchargez l’{installer} non signé pour {platform} depuis notre page GitHub Releases, puis installez-le. Il n’y a pas de mise à jour automatique.",
   "view.desktop.step2":
     "Lancez Dezoomify et collez l’adresse de votre image zoomable ou de votre manifeste.",
   "view.desktop.step3":
@@ -145,7 +129,6 @@ export const fr = {
     "Taille de l’image : {selected} pixels. Maximum disponible : {maximum} pixels.",
   "view.resolution.download": "Obtenir la résolution maximale avec l’application de bureau",
   "view.desktop.handoffTitle": "Télécharger cette image dans l’application de bureau",
-  "view.desktop.handoffDownload": "Télécharger l’application de bureau",
   "view.desktop.handoffInstall":
     "Choisissez l’installeur pour votre système, puis ouvrez Dezoomify.",
   "view.desktop.handoffPaste": "Collez cette URL dans le champ URL de l’application de bureau :",
