@@ -18,12 +18,14 @@ import {
   showExtensionGuidance,
   suggestedNameFor,
 } from "@dezoomify/shared-ui";
+import { localizeWebsite } from "./copy.ts";
 import { buildHash, looksLikeUsableUrl, parseHash } from "./hash.ts";
 import { createProxyTransport } from "./proxyTransport.ts";
 import { PROXY_MAX_BYTES } from "./server/security.ts";
 
 setLocale(pickLocale(navigator.languages?.length ? navigator.languages : navigator.language));
 document.documentElement.lang = getLocale();
+localizeWebsite(document);
 
 const preview = createPreviewControls();
 const proxyTransport = createProxyTransport(fetch, {

@@ -10,6 +10,22 @@
 // type-strip it directly in tests.
 
 export const fr = {
+  "page.brand": "Enregistrer des images zoomables",
+  "page.nav.label": "Navigation principale",
+  "page.nav.extension": "Extension de navigateur",
+  "page.nav.desktop": "Application de bureau",
+  "page.nav.help": "Aide",
+  "page.nav.donate": "Faire un don",
+  "page.nav.donateTitle": "Contribuer aux frais d’hébergement",
+  "page.footer.source": "Code source (GPL)",
+  "page.footer.faq": "Questions fréquentes",
+  "page.footer.privacy": "Confidentialité",
+  "page.footer.terms": "Conditions d’utilisation",
+  "page.preview.zoomOut": "Dézoomer",
+  "page.preview.zoomIn": "Zoomer",
+  "page.preview.reset": "Rétablir le zoom à 100 pour cent",
+  "page.preview.fit": "Ajuster",
+  "page.preview.fitLabel": "Adapter l’image à l’aperçu",
   "view.diagnostics.signedInNote":
     "Si ce site nécessite une connexion, ces détails peuvent contenir des informations sensibles. Vérifiez-les avant de les partager.",
   "view.diagnostics.save": "Enregistrer le rapport de diagnostic",
@@ -43,50 +59,48 @@ export const fr = {
   "view.desktop.download.linux": "Programme d’installation Linux · x64 (DEB)",
   "view.desktop.step1":
     "Téléchargez le programme d’installation ci-dessus pour votre système, puis installez-le.",
-  "view.desktop.subtitle":
-    "Application native haute performance pour les œuvres muséales gigapixels et les numérisations locales",
+  "view.desktop.subtitle": "Enregistrez de grandes images directement sur votre ordinateur",
   "view.desktop.whyTitle": "Pourquoi utiliser l’application de bureau ?",
-  "view.desktop.why1Title": "Prend en charge les œuvres très grandes :",
+  "view.desktop.why1Title": "Téléchargez de plus grandes images :",
   "view.desktop.why1Body":
-    "Un onglet de navigateur ne peut contenir qu’une certaine quantité d’image. L’application de bureau assemble l’image en mémoire (jusqu’à sa limite de canevas de 8 Gio, avec la mémoire libre correspondante) et écrit le résultat sur le disque.",
-  "view.desktop.why2Title": "Enregistre l’image terminée :",
+    "Enregistrez des images qui dépassent les limites de taille de votre navigateur. L’application peut construire le fichier au fil du téléchargement, sans garder toute l’image en mémoire. Les très grandes images peuvent tout de même nécessiter un autre format ou une taille réduite.",
+  "view.desktop.why2Title": "Utilisez votre propre connexion :",
   "view.desktop.why2Body":
-    "Chaque tâche est enregistrée dans un fichier de sortie sur votre ordinateur.",
-  "view.desktop.why3Title": "Quand le site web ne peut pas terminer :",
+    "L’application récupère les informations sur l’image et chacun de ses fragments directement sur le site d’origine, avec votre connexion internet. Cela peut aider lorsqu’un site bloque le serveur partagé de Dezoomify.",
+  "view.desktop.why3Title": "Choisissez votre format de fichier :",
   "view.desktop.why3Body":
-    "Le site web interrompt la tâche avec une erreur et renvoie vers l’application de bureau pour l’image en pleine taille.",
+    "Enregistrez en JPEG, PNG, TIFF ou dans d’autres formats pour consulter, retoucher ou archiver vos images. Choisissez le dossier où elles seront enregistrées.",
   "view.desktop.howTitle": "Comment l’utiliser",
-  "view.desktop.step2":
-    "Lancez Dezoomify et collez l’adresse de votre image zoomable ou de votre manifeste.",
+  "view.desktop.step2": "Ouvrez Dezoomify et collez l’adresse de la page ou de l’image zoomable.",
   "view.desktop.step3":
-    "Choisissez la résolution souhaitée et le dossier de destination pour enregistrer l’image complète assemblée.",
+    "Choisissez un dossier, un format de fichier et une taille d’image, puis lancez le téléchargement.",
   "view.desktop.cliTitle": "Besoin d’automatiser ? Essayez Dezoomify CLI",
   "view.desktop.cliDesc":
-    "Le CLI offre un enregistrement scriptable sans interface, idéal pour les chaînes automatisées et les serveurs sans écran.",
-  "view.desktop.cliLink": "Obtenir le CLI sur GitHub Releases",
+    "Utilisez la version en ligne de commande pour télécharger des images avec des scripts ou traiter une liste d’adresses.",
+  "view.desktop.cliLink": "Télécharger le CLI depuis GitHub Releases",
   // Browser-extension guidance modal.
   "view.ext.title": "Extension de navigateur Dezoomify",
   "view.ext.subtitle":
-    "Détection automatique des visionneuses pour les archives numériques protégées et les pages complexes",
+    "Enregistrez les images zoomables de la page que vous consultez, y compris sur les sites où vous êtes connecté",
   "view.ext.availableOn": "Disponible sur",
   "view.ext.chromeStore": "Chrome Web Store",
   "view.ext.firefoxStore": "Firefox Browser Add-ons",
   "view.ext.whyTitle": "Pourquoi utiliser l’extension de navigateur ?",
-  "view.ext.why1Title": "Pages avec connexion :",
+  "view.ext.why1Title": "Utilisez votre connexion au site :",
   "view.ext.why1Body":
-    "Pendant que vous regardez une image zoomable, elle retrouve automatiquement l’image derrière la visionneuse, y compris sur les pages où vous êtes connecté, comme les portails de bibliothèques, les abonnements muséaux et les archives universitaires.",
-  "view.ext.why2Title": "Simple d’utilisation :",
+    "Téléchargez les images auxquelles vous avez accès en étant connecté à une bibliothèque, un musée ou des archives. Si l’accès à un autre site est nécessaire, l’extension vous demande l’autorisation.",
+  "view.ext.why2Title": "Retrouvez l’image sans chercher son adresse :",
   "view.ext.why2Body":
-    "Appuyez sur le bouton Dezoomify dans la barre d’outils du navigateur et choisissez l’image à enregistrer, ou envoyez la tâche vers l’application de bureau si l’image est très grande.",
-  "view.ext.why3Title": "Respectueux de la vie privée :",
+    "Cliquez sur Dezoomify dans la barre d’outils du navigateur pour trouver l’image dans la visionneuse de la page. Le téléchargement démarre dans un nouvel onglet. Les limites de taille du navigateur s’appliquent toujours.",
+  "view.ext.why3Title": "Agit à votre demande :",
   "view.ext.why3Body":
-    "Elle examine uniquement la page que vous lui avez indiquée, et seulement après que vous avez appuyé sur le bouton. Elle n’observe pas votre navigation en arrière-plan.",
+    "L’extension examine la page uniquement lorsque vous cliquez sur son bouton. Elle ne surveille pas votre navigation en arrière-plan.",
   "view.ext.howTitle": "Comment l’utiliser en 3 étapes",
   "view.ext.step1": "Installez l’extension depuis le Chrome Web Store ou Firefox Browser Add-ons.",
   "view.ext.step2":
-    "Rendez-vous sur la page du musée ou de la bibliothèque qui montre votre œuvre, en vous connectant si besoin.",
+    "Ouvrez la page de votre image, connectez-vous si nécessaire et zoomez une fois pour laisser l’image se charger.",
   "view.ext.step3":
-    "Cliquez sur l’icône Dezoomify dans la barre d’outils de votre navigateur pour détecter et extraire automatiquement l’image en pleine résolution !",
+    "Cliquez sur Dezoomify dans la barre d’outils du navigateur. Autorisez l’accès si demandé et gardez l’onglet de téléchargement ouvert jusqu’à la fin de l’enregistrement.",
   // Access request (browser-session file access), shared access-request.tsx.
   "view.access.title": "Autoriser l’accès pour continuer",
   "view.access.usesOrigin": "Cette image utilise des fichiers de {origin}.",
@@ -102,7 +116,7 @@ export const fr = {
   "view.step.preflighting": "Vérification de la taille de l’image…",
   "view.step.downloading": "Téléchargement des fragments…",
   "view.step.saving": "Assemblage de l’image finale…",
-  "view.step.contactingDetail": "Contact de l’hôte de l’image…",
+  "view.step.contactingDetail": "Connexion au site d’origine…",
   // Live job section.
   "view.job.techDetails": "Détails techniques et journaux",
   "view.job.manyImages": "{count} images",
@@ -119,10 +133,10 @@ export const fr = {
   "view.display.waysTitle": "Moyens d’enregistrer cette œuvre",
   "view.display.extTitle": "Guide de l’extension de navigateur",
   "view.display.extDesc":
-    "Pour les pages demandant une connexion ou des cookies de session. Détecte automatiquement les visionneuses sur les pages actives.",
+    "Retrouvez l’image sur la page que vous consultez, y compris lorsque vous êtes connecté.",
   "view.display.deskTitle": "Guide de l’application de bureau",
   "view.display.deskDescClean":
-    "Pour un enregistrement propre en pleine taille quand le navigateur peut seulement montrer l’image.",
+    "Téléchargez directement depuis le site d’origine lorsque votre navigateur ne peut afficher qu’un aperçu.",
   "view.display.startOver": "Recommencer",
   "view.resolution.title": "Image de résolution réduite",
   "view.resolution.sizes":
@@ -131,36 +145,41 @@ export const fr = {
   "view.desktop.handoffTitle": "Télécharger cette image dans l’application de bureau",
   "view.desktop.handoffInstall":
     "Choisissez l’installeur pour votre système, puis ouvrez Dezoomify.",
-  "view.desktop.handoffPaste": "Collez cette URL dans le champ URL de l’application de bureau :",
-  "view.desktop.handoffCopy": "Copier l’URL",
-  "view.desktop.handoffCopied": "URL copiée. Collez-la dans l’application de bureau.",
+  "view.desktop.handoffPaste": "Collez cette adresse dans l’application de bureau :",
+  "view.desktop.handoffCopy": "Copier l’adresse",
+  "view.desktop.handoffCopied": "Adresse copiée. Collez-la dans l’application de bureau.",
   "view.desktop.handoffCopyFailed":
-    "Copie impossible. Sélectionnez l’URL ci-dessus et copiez-la manuellement.",
+    "Copie impossible. Sélectionnez l’adresse ci-dessus et copiez-la manuellement.",
   "view.desktop.handoffStart":
-    "Lancez le téléchargement et choisissez la plus grande résolution. Si plusieurs images apparaissent, choisissez celle souhaitée.",
+    "Choisissez Résolution complète dans le menu Taille, puis lancez le téléchargement.",
   "view.desktop.handoffAccess":
-    "L’application de bureau ne partage pas la session de connexion du navigateur. Cette URL doit être accessible depuis l’application.",
+    "L’application de bureau ne peut pas utiliser votre connexion au site dans le navigateur. Pour les images qui nécessitent de se connecter, essayez l’extension de navigateur.",
   "view.desktop.handoffUnavailable":
-    "Aucune URL source réutilisable n’est disponible pour cette tâche. Ouvrez la page d’origine et cherchez l’URL de l’image zoomable ou du manifeste à coller dans l’application.",
+    "Aucune adresse d’image n’est disponible pour ce téléchargement. Copiez l’adresse de la page d’origine et essayez-la dans l’application de bureau.",
   // Completion section.
   "view.done.ready": "Votre image est prête.",
   "view.done.readyTitle": "Prêt à enregistrer",
   "view.done.saveNow": "Enregistrer l’image maintenant",
   "view.done.another": "Dezoomifier une autre image",
+  "view.done.guidance":
+    "Utilisez le bouton d’enregistrement pour télécharger votre image. Les couleurs peuvent varier légèrement, car les téléchargements dans le navigateur ne conservent pas le profil colorimétrique d’origine. Pour les formats qui préservent ces profils, utilisez l’application de bureau.",
+  "view.done.summary": "{width} × {height} pixels ({mime})",
+  "view.display.guidance":
+    "Votre navigateur peut afficher cette image, mais le site d’origine ne l’autorise pas à créer un fichier téléchargeable. Essayez l’application de bureau ou l’extension de navigateur pour l’enregistrer.",
   // Failure section.
   "view.fail.title": "Impossible de dézoomifier l’image",
   "view.fail.deskDescLimits":
-    "Pour les images qui dépassent les limites mémoire du navigateur, dans la limite de canevas de 8 Gio (avec la mémoire libre correspondante). Traitées en natif sur votre ordinateur.",
-  "view.fail.helpTitle": "Aide et extraction d’URL",
+    "Enregistrez de plus grandes images ou utilisez votre propre connexion lorsqu’un site bloque notre serveur.",
+  "view.fail.helpTitle": "Aide pour trouver une image",
   "view.fail.helpDesc":
     "Comment trouver l’adresse de l’image sur les sites de musées et d’archives, et quoi essayer quand rien n’est trouvé.",
   "view.fail.reportBug": "Signaler un bogue sur GitHub",
   "view.fail.reportBugDesc": "Préparez un ticket GitHub avec les diagnostics de cette tentative.",
   "view.fail.retry": "Réessayer",
   "view.fail.canvasAllocation":
-    "Cette image est trop grande pour être assemblée dans cet onglet. L’application de bureau peut l’enregistrer en taille réelle.",
+    "Cette image est trop grande pour cet onglet. Essayez l’application de bureau pour enregistrer une image plus grande.",
   "view.fail.canvasContext":
-    "Cet onglet n’a pas pu créer la surface de l’image à cette taille. L’application de bureau peut l’enregistrer en taille réelle.",
+    "Votre navigateur n’a pas pu préparer une image de cette taille. Essayez l’application de bureau ou fermez d’autres onglets avant de réessayer.",
   // Cancelled section.
   "view.cancel.title": "Enregistrement annulé",
   "view.cancel.message": "L’enregistrement de l’image a été interrompu.",
@@ -196,15 +215,15 @@ export const fr = {
   "view.history.openImage": "Ouvrir {image}",
   "view.history.openFailed": "Impossible d’ouvrir le fichier.",
   "view.input.description":
-    "Dezoomify télécharge des images zoomables sous forme de fragments depuis des bibliothèques, des musées, des galeries et d’autres sites web. Collez ci-dessous l’adresse d’une image pour la télécharger.",
-  "view.input.placeholder": "Collez l’adresse d’une visionneuse ou d’un manifeste",
+    "Enregistrez des images zoomables de musées, de bibliothèques, d’archives et d’autres sites web. Collez l’adresse de la page qui affiche votre image pour commencer.",
+  "view.input.placeholder": "Collez l’adresse d’une page ou d’une image",
   "view.input.aria": "Adresse de la page contenant votre image zoomable",
   "view.input.start": "Trouver l’image",
   // Rate-limit explainers (see failure.ts plainMessageFor).
   "view.fail.rateProxy":
-    "Le site qui héberge cette image limite le nombre de pages que notre serveur peut lui demander, et cette limite vient d’être atteinte, donc la page n’a pas pu être ouverte. L’extension de navigateur et l’application de bureau téléchargent depuis votre propre connexion au lieu de notre serveur, elles ne sont donc pas concernées par cette limite.",
+    "Le site d’origine limite les téléchargements depuis notre serveur. Patientez quelques minutes, ou essayez l’application de bureau ou l’extension de navigateur pour télécharger avec votre propre connexion internet.",
   "view.fail.rateDirect":
-    "Le site qui héberge cette image reçoit actuellement trop de demandes depuis votre propre connexion. Attendre quelques minutes suffit généralement, et l’extension de navigateur ou l’application de bureau verront le même signal d’encombrement jusque-là.",
+    "Le site d’origine limite les téléchargements depuis votre propre connexion. Patientez quelques minutes avant de réessayer. L’application de bureau et l’extension utilisent la même connexion et ne résoudront pas forcément le problème.",
   // Fetch-failure family (see failure.ts plainMessageFor).
   "view.fail.httpNotFound": "Cette page est introuvable. Vérifiez l’adresse et réessayez.",
   "view.fail.httpRefused":
@@ -217,12 +236,12 @@ export const fr = {
   "view.fail.hintAddress": "Vérifiez l’adresse et réessayez.",
   "view.fail.hintPrivate": "Le site ne peut pas ouvrir les adresses privées ou locales.",
   "view.fail.hintContentType":
-    "Le site a répondu avec un type de fichier que le site ne vérifie pas ici.",
+    "Le site d’origine a renvoyé un type de fichier que Dezoomify ne peut pas lire ici.",
   "view.fail.hintRedirect": "Le site a redirigé d’une manière que le site ne peut pas suivre.",
   "view.fail.proxyBudget":
-    "Cette page est trop volumineuse à vérifier ici. Essayez l’application de bureau pour les très grandes images.",
+    "Ce fichier est trop volumineux pour notre serveur. Essayez l’application de bureau pour le télécharger directement.",
   "view.fail.proxyFetch":
-    "Le proxy de métadonnées n’a pas pu récupérer cette adresse. Réessayez bientôt.",
+    "Notre serveur n’a pas pu récupérer cette adresse. Réessayez dans un instant, ou utilisez l’application de bureau pour vous connecter directement au site d’origine.",
   // Desktop app user copy (apps/desktop/src/main.tsx). Logs and technical
   // diagnostics stay literal English and never use these keys.
   "desktop.url.invalid":

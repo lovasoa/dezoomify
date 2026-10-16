@@ -10,6 +10,22 @@
 // type-strip it directly in tests.
 
 export const it = {
+  "page.brand": "Salva immagini zoomabili",
+  "page.nav.label": "Navigazione principale",
+  "page.nav.extension": "Estensione del browser",
+  "page.nav.desktop": "Applicazione desktop",
+  "page.nav.help": "Aiuto",
+  "page.nav.donate": "Fai una donazione",
+  "page.nav.donateTitle": "Contribuisci ai costi di hosting",
+  "page.footer.source": "Codice sorgente (GPL)",
+  "page.footer.faq": "Domande frequenti",
+  "page.footer.privacy": "Privacy",
+  "page.footer.terms": "Condizioni d’uso",
+  "page.preview.zoomOut": "Riduci zoom",
+  "page.preview.zoomIn": "Aumenta zoom",
+  "page.preview.reset": "Ripristina lo zoom al 100 per cento",
+  "page.preview.fit": "Adatta",
+  "page.preview.fitLabel": "Adatta l’immagine all’anteprima",
   "view.diagnostics.signedInNote":
     "Se questo sito richiede l'accesso, questi dettagli potrebbero contenere informazioni sensibili. Controllali prima di condividerli.",
   "view.diagnostics.save": "Salva il rapporto diagnostico",
@@ -43,50 +59,49 @@ export const it = {
   "view.desktop.download.linux": "Programma di installazione Linux · x64 (DEB)",
   "view.desktop.step1":
     "Scarica il programma di installazione qui sopra per il tuo sistema, poi installalo.",
-  "view.desktop.subtitle":
-    "Applicazione nativa ad alte prestazioni per opere museali gigapixel e scansioni locali",
+  "view.desktop.subtitle": "Salva immagini di grandi dimensioni direttamente sul tuo computer",
   "view.desktop.whyTitle": "Perché usare l’applicazione desktop?",
-  "view.desktop.why1Title": "Gestisce opere molto grandi:",
+  "view.desktop.why1Title": "Scarica immagini più grandi:",
   "view.desktop.why1Body":
-    "Una scheda del browser può contenere solo una certa quantità di immagine. L’applicazione desktop compone l’immagine in memoria in base alla memoria disponibile e scrive il risultato sul disco.",
-  "view.desktop.why2Title": "Salva l’immagine finita:",
+    "Salva immagini che superano i limiti di dimensione del browser. L’applicazione può costruire il file durante il download, senza tenere l’intera immagine in memoria. Per immagini molto grandi potrebbe comunque servire un altro formato o una dimensione ridotta.",
+  "view.desktop.why2Title": "Usa la tua connessione:",
   "view.desktop.why2Body":
-    "Ogni attività viene salvata in un solo file di uscita sul tuo computer.",
-  "view.desktop.why3Title": "Quando il sito non riesce a finire:",
+    "L’applicazione scarica le informazioni sull’immagine e ogni suo frammento direttamente dal sito di origine usando la tua connessione internet. Può essere utile quando un sito blocca il server condiviso di Dezoomify.",
+  "view.desktop.why3Title": "Scegli il formato del file:",
   "view.desktop.why3Body":
-    "Il sito interrompe l’attività con un errore e rimanda all’applicazione desktop per l’immagine a piena dimensione.",
+    "Salva in JPEG, PNG, TIFF o altri formati per visualizzare, modificare o archiviare le immagini. Scegli la cartella in cui salvarle.",
   "view.desktop.howTitle": "Come usarla",
   "view.desktop.step2":
-    "Avvia Dezoomify e incolla l’indirizzo della tua immagine zoomabile o del manifesto.",
+    "Apri Dezoomify e incolla l’indirizzo della pagina o dell’immagine zoomabile.",
   "view.desktop.step3":
-    "Scegli la risoluzione desiderata e la cartella di destinazione per salvare l’immagine completa composta.",
+    "Scegli una cartella, un formato e una dimensione dell’immagine, poi avvia il download.",
   "view.desktop.cliTitle": "Serve automazione? Prova Dezoomify CLI",
   "view.desktop.cliDesc":
-    "Il CLI offre salvataggi programmabili senza interfaccia, ideali per procedure automatiche e server senza schermo.",
+    "Usa la versione a riga di comando per scaricare immagini tramite script o elaborare un elenco di indirizzi.",
   "view.desktop.cliLink": "Scarica il CLI da GitHub Releases",
   // Browser-extension guidance modal.
   "view.ext.title": "Estensione del browser Dezoomify",
   "view.ext.subtitle":
-    "Rilevamento automatico dei visori per archivi digitali protetti e pagine complesse",
+    "Salva immagini zoomabili dalla pagina che stai visualizzando, anche dai siti a cui hai effettuato l’accesso",
   "view.ext.availableOn": "Disponibile su",
   "view.ext.chromeStore": "Chrome Web Store",
   "view.ext.firefoxStore": "Firefox Browser Add-ons",
   "view.ext.whyTitle": "Perché usare l’estensione del browser?",
-  "view.ext.why1Title": "Pagine con accesso:",
+  "view.ext.why1Title": "Usa l’accesso già effettuato:",
   "view.ext.why1Body":
-    "Mentre guardi un’immagine zoomabile, ritrova da sola l’immagine dietro il visore, anche nelle pagine dove hai effettuato l’accesso, come portali di biblioteche, abbonamenti museali e archivi accademici.",
-  "view.ext.why2Title": "Facile da usare:",
+    "Scarica le immagini a cui puoi accedere dopo aver effettuato l’accesso a una biblioteca, un museo o un archivio. Se serve accedere a un altro sito, l’estensione ti chiede il permesso.",
+  "view.ext.why2Title": "Trova l’immagine senza cercarne l’indirizzo:",
   "view.ext.why2Body":
-    "Premi il pulsante Dezoomify nella barra del browser e scegli l’immagine da salvare, oppure invia l’attività all’applicazione desktop se l’immagine è molto grande.",
-  "view.ext.why3Title": "Privata:",
+    "Fai clic su Dezoomify nella barra del browser per trovare l’immagine nel visualizzatore della pagina. Il download parte in una nuova scheda. I limiti di dimensione del browser restano validi.",
+  "view.ext.why3Title": "Si avvia quando lo chiedi:",
   "view.ext.why3Body":
-    "Osserva solo la pagina che le hai indicato, e solo dopo che hai premuto il pulsante. Non sorveglia la tua navigazione in sottofondo.",
+    "L’estensione controlla la pagina solo quando fai clic sul suo pulsante. Non osserva la tua navigazione in background.",
   "view.ext.howTitle": "Come usarla in 3 passi",
   "view.ext.step1": "Installa l’estensione dal Chrome Web Store o da Firefox Browser Add-ons.",
   "view.ext.step2":
-    "Vai alla pagina del museo o della biblioteca che mostra la tua opera, accedendo se serve.",
+    "Apri la pagina con la tua immagine, accedi se necessario e ingrandisci una volta per lasciare caricare l’immagine.",
   "view.ext.step3":
-    "Fai clic sull’icona Dezoomify nella barra del browser per rilevare ed estrarre in automatico l’immagine a piena risoluzione!",
+    "Fai clic su Dezoomify nella barra del browser. Consenti l’accesso se richiesto e lascia aperta la scheda del download fino al termine del salvataggio.",
   // Access request (browser-session file access), shared access-request.tsx.
   "view.access.title": "Consenti l’accesso per continuare",
   "view.access.usesOrigin": "Questa immagine usa file di {origin}.",
@@ -102,7 +117,7 @@ export const it = {
   "view.step.preflighting": "Controllo delle dimensioni…",
   "view.step.downloading": "Scaricamento dei frammenti…",
   "view.step.saving": "Composizione dell’immagine finale…",
-  "view.step.contactingDetail": "Contatto dell’host dell’immagine…",
+  "view.step.contactingDetail": "Connessione al sito di origine…",
   // Live job section.
   "view.job.techDetails": "Dettagli tecnici e registri",
   "view.job.manyImages": "{count} immagini",
@@ -119,10 +134,10 @@ export const it = {
   "view.display.waysTitle": "Modi per salvare quest’opera",
   "view.display.extTitle": "Guida all’estensione del browser",
   "view.display.extDesc":
-    "Per pagine che richiedono accesso o cookie di sessione. Rileva in automatico i visori nelle pagine attive.",
+    "Trova l’immagine nella pagina che stai visualizzando, anche dove hai effettuato l’accesso.",
   "view.display.deskTitle": "Guida all’applicazione desktop",
   "view.display.deskDescClean":
-    "Per un salvataggio pulito a piena dimensione quando il browser può solo mostrare l’immagine.",
+    "Scarica direttamente dal sito di origine quando il browser può mostrare solo un’anteprima.",
   "view.display.startOver": "Ricomincia",
   "view.resolution.title": "Immagine a risoluzione ridotta",
   "view.resolution.sizes":
@@ -131,27 +146,32 @@ export const it = {
   "view.desktop.handoffTitle": "Scarica questa immagine nell’applicazione desktop",
   "view.desktop.handoffInstall":
     "Scegli l’installer per il tuo sistema operativo, poi apri Dezoomify.",
-  "view.desktop.handoffPaste": "Incolla questo URL nel campo URL dell’applicazione desktop:",
-  "view.desktop.handoffCopy": "Copia URL",
-  "view.desktop.handoffCopied": "URL copiato. Incollalo nell’applicazione desktop.",
+  "view.desktop.handoffPaste": "Incolla questo indirizzo nell’applicazione desktop:",
+  "view.desktop.handoffCopy": "Copia indirizzo",
+  "view.desktop.handoffCopied": "Indirizzo copiato. Incollalo nell’applicazione desktop.",
   "view.desktop.handoffCopyFailed":
-    "Copia non riuscita. Seleziona l’URL qui sopra e copialo manualmente.",
+    "Copia non riuscita. Seleziona l’indirizzo qui sopra e copialo manualmente.",
   "view.desktop.handoffStart":
-    "Avvia il download e scegli la risoluzione più alta. Se appaiono più immagini, scegli quella desiderata.",
+    "Scegli Risoluzione completa nel menu Dimensione, poi avvia il download.",
   "view.desktop.handoffAccess":
-    "L’applicazione desktop non condivide la sessione di accesso del browser. L’URL deve essere accessibile dall’applicazione.",
+    "L’applicazione desktop non può usare l’accesso effettuato nel browser. Per le immagini che richiedono l’accesso, prova l’estensione del browser.",
   "view.desktop.handoffUnavailable":
-    "Non è disponibile un URL sorgente riutilizzabile per questa operazione. Apri la pagina originale e cerca l’URL dell’immagine zoomabile o del manifesto da incollare nell’applicazione.",
+    "Non c’è un indirizzo dell’immagine da copiare per questo download. Copia l’indirizzo della pagina originale e provalo nell’applicazione desktop.",
   // Completion section.
   "view.done.ready": "La tua immagine è pronta.",
   "view.done.readyTitle": "Pronta da salvare",
   "view.done.saveNow": "Salva ora l’immagine",
   "view.done.another": "Dezoomifica un’altra immagine",
+  "view.done.guidance":
+    "Usa il pulsante di salvataggio per scaricare la tua immagine. I colori possono variare leggermente perché i download dal browser non conservano il profilo colore originale. Per i formati che conservano i profili colore, usa l’applicazione desktop.",
+  "view.done.summary": "{width} × {height} pixel ({mime})",
+  "view.display.guidance":
+    "Il browser può mostrare questa immagine, ma il sito di origine non gli permette di creare un file scaricabile. Prova l’applicazione desktop o l’estensione del browser per salvarla.",
   // Failure section.
   "view.fail.title": "Impossibile dezoomificare l’immagine",
   "view.fail.deskDescLimits":
-    "Per immagini oltre i limiti di memoria del browser, in base alla memoria disponibile. Elaborate in nativo sul tuo computer.",
-  "view.fail.helpTitle": "Aiuto ed estrazione dell’indirizzo",
+    "Salva immagini più grandi o usa la tua connessione quando un sito blocca il nostro server.",
+  "view.fail.helpTitle": "Aiuto per trovare un’immagine",
   "view.fail.helpDesc":
     "Come trovare l’indirizzo dell’immagine nei siti di musei e archivi, e cosa provare quando non si trova nulla.",
   "view.fail.reportBug": "Segnala un problema su GitHub",
@@ -159,9 +179,9 @@ export const it = {
     "Prepara una segnalazione su GitHub con la diagnostica di questo tentativo.",
   "view.fail.retry": "Riprova",
   "view.fail.canvasAllocation":
-    "Questa immagine è troppo grande per essere assemblata in questa scheda del browser. L’applicazione desktop può salvarla a dimensione piena.",
+    "Questa immagine è troppo grande per questa scheda del browser. Prova l’applicazione desktop per salvare un’immagine più grande.",
   "view.fail.canvasContext":
-    "Questa scheda del browser non ha potuto creare la superficie dell’immagine a questa dimensione. L’applicazione desktop può salvarla a dimensione piena.",
+    "Il browser non ha potuto preparare un’immagine di queste dimensioni. Prova l’applicazione desktop, oppure chiudi altre schede e riprova.",
   // Cancelled section.
   "view.cancel.title": "Salvataggio annullato",
   "view.cancel.message": "Il salvataggio dell’immagine è stato interrotto.",
@@ -196,15 +216,15 @@ export const it = {
   "view.history.openImage": "Apri {image}",
   "view.history.openFailed": "Impossibile aprire il file.",
   "view.input.description":
-    "Dezoomify scarica immagini zoomabili in frammenti da biblioteche, musei, gallerie e altri siti web. Incolla qui sotto l’indirizzo di un’immagine per scaricarla.",
-  "view.input.placeholder": "Incolla l’indirizzo di un visualizzatore o manifesto",
+    "Salva immagini zoomabili da musei, biblioteche, archivi e altri siti web. Incolla l’indirizzo della pagina che mostra la tua immagine per iniziare.",
+  "view.input.placeholder": "Incolla l’indirizzo di una pagina o immagine",
   "view.input.aria": "Indirizzo della pagina con l’immagine ingrandibile",
   "view.input.start": "Trova immagine",
   // Rate-limit explainers (see failure.ts plainMessageFor).
   "view.fail.rateProxy":
-    "Il sito che ospita questa immagine limita quante pagine il nostro server può chiedergli, e quel limite è stato appena raggiunto, quindi la pagina non si è potuta aprire. L’estensione del browser e l’applicazione desktop scaricano dalla tua connessione invece che dal nostro server, quindi non sono toccate da questo limite.",
+    "Il sito di origine sta limitando i download dal nostro server. Attendi qualche minuto, oppure prova l’applicazione desktop o l’estensione del browser per scaricare con la tua connessione internet.",
   "view.fail.rateDirect":
-    "Il sito che ospita questa immagine sta ricevendo troppe richieste dalla tua connessione in questo momento. Attendere qualche minuto di solito risolve, e l’estensione o l’applicazione desktop vedranno lo stesso segnale occupato fino ad allora.",
+    "Il sito di origine sta limitando i download dalla tua connessione. Attendi qualche minuto prima di riprovare. L’applicazione desktop e l’estensione usano la stessa connessione e potrebbero non aiutare.",
   // Fetch-failure family (see failure.ts plainMessageFor).
   "view.fail.httpNotFound": "Questa pagina non è stata trovata. Controlla l’indirizzo e riprova.",
   "view.fail.httpRefused":
@@ -217,12 +237,12 @@ export const it = {
   "view.fail.hintAddress": "Controlla l’indirizzo e riprova.",
   "view.fail.hintPrivate": "Il sito non può aprire indirizzi privati o locali.",
   "view.fail.hintContentType":
-    "Il sito ha risposto con un tipo di file che il sito non controlla qui.",
+    "Il sito di origine ha restituito un tipo di file che Dezoomify non può leggere qui.",
   "view.fail.hintRedirect": "Il sito ha reindirizzato in un modo che il sito non può seguire.",
   "view.fail.proxyBudget":
-    "Questa pagina è troppo grande da controllare qui. Prova l’app desktop per le immagini molto grandi.",
+    "Questo file è troppo grande per essere scaricato dal nostro server. Prova l’applicazione desktop per scaricarlo direttamente.",
   "view.fail.proxyFetch":
-    "Il proxy dei metadati non ha potuto recuperare questo indirizzo. Riprova a breve.",
+    "Il nostro server non ha potuto recuperare questo indirizzo. Riprova tra poco, oppure usa l’applicazione desktop per collegarti direttamente al sito di origine.",
   // Desktop app user copy (apps/desktop/src/main.tsx). Logs and technical
   // diagnostics stay literal English and never use these keys.
   "desktop.url.invalid": "Inserisci un indirizzo web valido che inizi con http:// o https://",

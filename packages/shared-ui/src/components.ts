@@ -1,22 +1,12 @@
 // Minimal host-neutral shared-ui helpers (no React, no browser globals).
+import { t } from "./i18n.ts";
+
 export function renderSaveGuidance(originClean: boolean): string {
-  if (originClean) {
-    return (
-      "You can save this picture in the format and name shown below. " +
-      "Colors may shift slightly: the browser save does not keep the original " +
-      "color profile. For exact colors, use the desktop app."
-    );
-  }
-  return (
-    "Your image should appear below. In order to persist it as a file on " +
-    'your computer, right-click on it and select "Save Image As...". ' +
-    "For faster saves that automatically create files in the format " +
-    "you choose, use the desktop app."
-  );
+  return t(originClean ? "view.done.guidance" : "view.display.guidance");
 }
 
 export function renderCompletion(width: number, height: number, mime: string): string {
-  return `Finished. Your picture is ${width} by ${height} pixels (${mime}).`;
+  return t("view.done.summary", { width, height, mime });
 }
 
 /** Short human elapsed time: "3 s", "1 min 5 s". Empty for sub-second noise. */

@@ -26,7 +26,7 @@ Pin Dezoomify through the browser's extension menu if its icon is hidden.
 
 The extension selects the largest image and resolution that fit in a browser
 tab. If it saves a smaller resolution, it shows both sizes and offers the desktop
-app or **Try maximum**. Trying maximum can still fail at the browser's limits.
+app for full resolution.
 To choose a specific image or level, use the [CLI](./command-line.md).
 
 Clicking the toolbar button again focuses the existing job tab and cancels an

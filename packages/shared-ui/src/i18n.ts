@@ -100,6 +100,22 @@ function languageQuality(parameters: string[]): number {
 export type I18nVars = Record<string, string | number>;
 
 const en = {
+  "page.brand": "Save zoomable images",
+  "page.nav.label": "Main navigation",
+  "page.nav.extension": "Browser extension",
+  "page.nav.desktop": "Desktop app",
+  "page.nav.help": "Help",
+  "page.nav.donate": "Donate",
+  "page.nav.donateTitle": "Help cover hosting costs",
+  "page.footer.source": "Source code (GPL)",
+  "page.footer.faq": "Frequently asked questions",
+  "page.footer.privacy": "Privacy",
+  "page.footer.terms": "Terms",
+  "page.preview.zoomOut": "Zoom out",
+  "page.preview.zoomIn": "Zoom in",
+  "page.preview.reset": "Reset zoom to 100 percent",
+  "page.preview.fit": "Fit",
+  "page.preview.fitLabel": "Fit image inside preview",
   "view.diagnostics.signedInNote":
     "If this site requires you to sign in, these details may contain sensitive information. Review them before sharing.",
   "view.diagnostics.save": "Save diagnostic report",
@@ -107,7 +123,7 @@ const en = {
   "view.diagnostics.loadFailed":
     "Could not read the full report. The available details are shown below.",
   "view.retry.title": "Download paused",
-  "view.retry.summary": "{done} of {total} tiles were retrieved.",
+  "view.retry.summary": "{done} of {total} image pieces downloaded.",
   "view.retry.explanation":
     "Automatic retries were exhausted. Retry once more or cancel; no file has been saved.",
   "view.retry.retry": "Retry once more",
@@ -132,48 +148,47 @@ const en = {
   "view.desktop.download.macos": "macOS installer · Apple Silicon (DMG)",
   "view.desktop.download.linux": "Linux installer · x64 (DEB)",
   "view.desktop.step1": "Download the installer above for your system, then install it.",
-  "view.desktop.subtitle":
-    "High-performance native application for gigapixel museum artworks and local scans",
+  "view.desktop.subtitle": "Save large images directly to your computer",
   "view.desktop.whyTitle": "Why use the Desktop App?",
-  "view.desktop.why1Title": "Handles Larger Artworks:",
+  "view.desktop.why1Title": "Download larger images:",
   "view.desktop.why1Body":
-    "A browser tab can only hold a certain amount of picture. The desktop app assembles the image in memory subject to available memory and writes the finished output to disk.",
-  "view.desktop.why2Title": "Saves the Finished Picture:",
-  "view.desktop.why2Body": "Each job saves to one output file on your computer.",
-  "view.desktop.why3Title": "When the Website Cannot Finish:",
+    "Save images that exceed your browser’s size limits. The app can build the file as it downloads, without keeping the whole image in memory. Very large images may still need a different file format or a smaller size.",
+  "view.desktop.why2Title": "Use your own connection:",
+  "view.desktop.why2Body":
+    "The app gets image information and every piece of the picture directly from the source site using your internet connection. This can help when a site blocks Dezoomify’s shared server.",
+  "view.desktop.why3Title": "Choose your file format:",
   "view.desktop.why3Body":
-    "The website stops the job with an error and points to the desktop app for the full-size image.",
+    "Save as JPEG, PNG, TIFF, or other formats for viewing, editing, or archiving. Choose the folder where your images are saved.",
   "view.desktop.howTitle": "How to use it",
-  "view.desktop.step2": "Launch Dezoomify and paste your zoomable image or manifest URL.",
-  "view.desktop.step3":
-    "Select your desired resolution and destination folder to save the complete composite image.",
+  "view.desktop.step2": "Open Dezoomify and paste the address of the page or zoomable image.",
+  "view.desktop.step3": "Choose a folder, file format, and image size, then start the download.",
   "view.desktop.cliTitle": "Need automation? Try the Dezoomify CLI",
   "view.desktop.cliDesc":
-    "The CLI provides headless, scriptable single-job saving ideal for automated pipelines and server environments without a GUI.",
-  "view.desktop.cliLink": "Save CLI from GitHub Releases",
+    "Use the command-line version to download images from scripts or process a list of addresses.",
+  "view.desktop.cliLink": "Download the CLI from GitHub Releases",
   // Browser-extension guidance modal.
   "view.ext.title": "Dezoomify Browser Extension",
   "view.ext.subtitle":
-    "Automatic viewer discovery for password-protected digital archives and complex pages",
+    "Save zoomable images from the page you’re viewing, including sites where you’re signed in",
   "view.ext.availableOn": "Available on",
   "view.ext.chromeStore": "Chrome Web Store",
   "view.ext.firefoxStore": "Firefox Browser Add-ons",
   "view.ext.whyTitle": "Why use the Browser Extension?",
-  "view.ext.why1Title": "Signed-In Pages:",
+  "view.ext.why1Title": "Use your existing login:",
   "view.ext.why1Body":
-    "While you look at a zoomable image, it can find the image behind the viewer automatically, including on pages where you are signed in, such as library portals, museum subscriptions, and academic archives.",
-  "view.ext.why2Title": "Easy to Use:",
+    "Download images you can access while signed in to a library, museum, or archive. If access to another site is needed, the extension asks for your permission.",
+  "view.ext.why2Title": "Skip the search for an image address:",
   "view.ext.why2Body":
-    "Press the Dezoomify button in the browser toolbar and pick the image to save, or send the job to the desktop app if the image is very large.",
-  "view.ext.why3Title": "Private:",
+    "Click Dezoomify in your browser toolbar to find the image in the page’s viewer. The download starts in a new tab. Browser size limits still apply.",
+  "view.ext.why3Title": "Runs when you ask:",
   "view.ext.why3Body":
-    "It only looks at the page you pointed it at, only after you pressed the button. It does not watch your browsing in the background.",
+    "The extension checks the page only when you click its button. It does not watch your browsing in the background.",
   "view.ext.howTitle": "How to use it in 3 steps",
   "view.ext.step1": "Install the extension from the Chrome Web Store or Firefox Browser Add-ons.",
   "view.ext.step2":
-    "Navigate to the museum or library page displaying your artwork, logging in if needed.",
+    "Open the page with your image, sign in if needed, and zoom in once to let the image load.",
   "view.ext.step3":
-    "Click the Dezoomify icon in your browser toolbar to automatically detect and extract the full-resolution image!",
+    "Click Dezoomify in the browser toolbar. Allow access if asked, and keep the download tab open until saving finishes.",
   // Access request (browser-session file access), shared access-request.tsx.
   "view.access.title": "Allow access to continue",
   "view.access.usesOrigin": "This image uses files from {origin}.",
@@ -187,14 +202,14 @@ const en = {
   // Job step labels.
   "view.step.discovering": "Finding the zoomable image…",
   "view.step.preflighting": "Checking the image size…",
-  "view.step.downloading": "Saving image tiles…",
+  "view.step.downloading": "Downloading image pieces…",
   "view.step.saving": "Assembling the final picture…",
-  "view.step.contactingDetail": "Contacting the image host…",
+  "view.step.contactingDetail": "Contacting the source site…",
   // Live job section.
   "view.job.techDetails": "Technical details & logs",
   "view.job.manyImages": "{count} images",
   "view.job.paused": "Paused",
-  "view.job.retryingTiles": "Retrying tiles ({count})…",
+  "view.job.retryingTiles": "Retrying image pieces ({count})…",
   "view.job.waiting": "Waiting for {host}…",
   "view.job.sourceLabel": "Source",
   "view.job.pause": "Pause",
@@ -206,10 +221,10 @@ const en = {
   "view.display.waysTitle": "Ways to save this artwork",
   "view.display.extTitle": "Browser Extension Guide",
   "view.display.extDesc":
-    "For pages requiring login or session cookies. Automatically detects viewers on active pages.",
+    "Find the image on the page you’re viewing, including pages where you’re signed in.",
   "view.display.deskTitle": "Desktop App Guide",
   "view.display.deskDescClean":
-    "For a clean full-size save when the browser can only show the image.",
+    "Download directly from the source site when your browser can only show a preview.",
   "view.display.startOver": "Start over",
   // Resolution downgrade notice: automatic selection took a smaller known
   // level than the maximum because of browser limits (website and extension).
@@ -219,26 +234,31 @@ const en = {
   "view.desktop.handoffTitle": "Download this image in the desktop app",
   "view.desktop.handoffInstall":
     "Choose the installer for your operating system, then open Dezoomify.",
-  "view.desktop.handoffPaste": "Paste this URL into the desktop app’s URL field:",
-  "view.desktop.handoffCopy": "Copy URL",
-  "view.desktop.handoffCopied": "URL copied. Paste it into the desktop app.",
-  "view.desktop.handoffCopyFailed": "Could not copy. Select the URL above and copy it manually.",
-  "view.desktop.handoffStart":
-    "Start the download and choose the largest resolution. If several images appear, choose the one you want.",
+  "view.desktop.handoffPaste": "Paste this address into the desktop app:",
+  "view.desktop.handoffCopy": "Copy address",
+  "view.desktop.handoffCopied": "Address copied. Paste it into the desktop app.",
+  "view.desktop.handoffCopyFailed":
+    "Could not copy. Select the address above and copy it manually.",
+  "view.desktop.handoffStart": "Choose Full resolution in the Size menu, then start the download.",
   "view.desktop.handoffAccess":
-    "The desktop app does not share your browser’s sign-in session. This URL must be accessible from the app.",
+    "The desktop app cannot use your browser login. For images that require signing in, try the browser extension.",
   "view.desktop.handoffUnavailable":
-    "No reusable source URL is available for this job. Open the original page and find the zoomable image or manifest URL to paste into the app.",
+    "There is no image address to copy for this download. Copy the original page’s address and try it in the desktop app.",
   // Completion section.
   "view.done.ready": "Your image is ready.",
   "view.done.readyTitle": "Ready to save",
   "view.done.saveNow": "Save image now",
   "view.done.another": "Dezoomify another image",
+  "view.done.guidance":
+    "Use the save button to download your image. Colors may shift slightly because browser downloads do not keep the original color profile. For formats that preserve color profiles, use the desktop app.",
+  "view.done.summary": "{width} × {height} pixels ({mime})",
+  "view.display.guidance":
+    "Your browser can display this image, but the source site does not allow it to create a downloadable file. Try the desktop app or browser extension to save it.",
   // Failure section.
   "view.fail.title": "Could not dezoomify image",
   "view.fail.deskDescLimits":
-    "For images that exceed browser memory limits, subject to available memory. Processes natively on your computer.",
-  "view.fail.helpTitle": "Help & URL Extraction",
+    "Save larger images or use your own connection when a site blocks our server.",
+  "view.fail.helpTitle": "Help finding an image",
   "view.fail.helpDesc":
     "How to find the image address on museum & archive sites, and what to try when nothing is found.",
   "view.fail.reportBug": "Report a bug on GitHub",
@@ -247,20 +267,20 @@ const en = {
   // Browser canvas failure family (allocation, 2D context):
   // the desktop app is the recovery, so every message names it.
   "view.fail.canvasAllocation":
-    "This picture is too large to assemble in this browser tab. The desktop app can save it at full size.",
+    "This image is too large for this browser tab. Try the desktop app to save a larger image.",
   "view.fail.canvasContext":
-    "This browser tab could not create the picture surface at this size. The desktop app can save it at full size.",
+    "Your browser could not prepare an image this size. Try the desktop app, or close other tabs and try again.",
   // Cancelled section.
   "view.cancel.title": "Save cancelled",
   "view.cancel.message": "The image save was stopped.",
   // Job section and share chrome.
-  "view.job.countsFull": "{current} of {total} tiles",
+  "view.job.countsFull": "{current} of {total} image pieces",
   "view.job.pixelCounts": "{current} of {total}",
   "view.job.pixels": "{count} px",
   "view.job.megapixels": "{count} Mpx",
   "view.job.gigapixels": "{count} Gpx",
   "view.job.preparation": "{percent}% of pixels prepared. Finishing the saved image.",
-  "view.job.countsActive": "{current} of {total} tiles · {active} in progress",
+  "view.job.countsActive": "{current} of {total} image pieces · {active} in progress",
   // Recent pictures, including unsuccessful attempts.
   "view.history.title": "Recent pictures",
   "view.history.empty": "No recent pictures yet. Images you start appear here.",
@@ -284,8 +304,8 @@ const en = {
   "view.history.openImage": "Open {image}",
   "view.history.openFailed": "Could not open file.",
   "view.input.description":
-    "Dezoomify downloads zoomable tiled images from libraries, museums, galleries, and other websites. Paste the URL of an image below to download it.",
-  "view.input.placeholder": "Paste an image viewer or manifest URL",
+    "Save zoomable images from museums, libraries, archives, and other websites. Paste the address of the page showing your image to get started.",
+  "view.input.placeholder": "Paste a page or image address",
   "view.input.aria": "Address of the webpage containing your zoomable image",
   "view.input.start": "Find image",
   // Rate-limit explainers, rendered from the typed `rate-limited` failure at
@@ -294,9 +314,9 @@ const en = {
   // means the user's own connection was throttled. The two cases name
   // different fixes.
   "view.fail.rateProxy":
-    "The website hosting this image limits how many pages our server may request from it, and that limit was just reached, so the page could not be opened. The browser extension and the desktop app download from your own internet connection instead of our server, so they are not affected by this limit.",
+    "The source site is limiting downloads from our server. Wait a few minutes, or try the desktop app or browser extension to download using your own internet connection.",
   "view.fail.rateDirect":
-    "The website hosting this image is receiving too many requests from your own connection right now. Waiting a few minutes usually clears it, and the browser extension or desktop app will see the same busy signal until it does.",
+    "The source site is limiting downloads from your own connection. Wait a few minutes before trying again. Switching to the desktop app or extension uses the same connection and may not help.",
   // Fetch-failure family, rendered from the typed facts at display time
   // (see `plainMessageFor` in failure.ts): every observed cause names its
   // own next fix, so identical causes read identically everywhere.
@@ -310,11 +330,12 @@ const en = {
   "view.fail.hintAddress": "Check the address and try again.",
   "view.fail.hintPrivate": "The website cannot open private or local addresses.",
   "view.fail.hintContentType":
-    "The site answered with a file type the website does not check here.",
+    "The source site returned a type of file Dezoomify cannot read here.",
   "view.fail.hintRedirect": "The site redirected in a way the website cannot follow.",
   "view.fail.proxyBudget":
-    "This page is too large to check here. Try the desktop app for very large images.",
-  "view.fail.proxyFetch": "The metadata proxy could not fetch this address. Try again shortly.",
+    "This file is too large for our server to retrieve. Try the desktop app to download it directly.",
+  "view.fail.proxyFetch":
+    "Our server could not retrieve this address. Try again shortly, or use the desktop app to connect directly to the source site.",
   // Desktop app user copy (apps/desktop/src/main.tsx). Logs and technical
   // diagnostics stay literal English and never use these keys.
   "desktop.url.invalid": "Please enter a valid web address starting with http:// or https://",

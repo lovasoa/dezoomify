@@ -355,7 +355,7 @@ test("webapp downloads a Google Arts & Culture image through the metadata proxy"
 // Tile host without a CORS grant (the krpano galleria case): readable
 // fetch() calls for tiles fail, while plain <img> loads succeed. The app
 // must paint the tiles as ordinary display and finish display-only:
-// visible picture with right-click guidance, no TILE_FAILED, no save.
+// visible picture with app guidance, no TILE_FAILED, no save.
 test("webapp displays CORS-blocked ordinary tiles instead of failing", async ({ page }) => {
   // The DZI tile base derives from the fetched metadata URL, so tile
   // fetches are same-origin /fetch URLs here; matching on the tile path
@@ -382,7 +382,7 @@ test("webapp displays CORS-blocked ordinary tiles instead of failing", async ({ 
 
   await expect(page.locator(".dz-notice-section")).toBeVisible({ timeout: 60000 });
   await expect(page.getByRole("heading", { name: /Showing preview/i })).toBeVisible();
-  await expect(page.getByText(/right-click/i)).toBeVisible();
+  await expect(page.getByText(/source site does not allow.*downloadable file/i)).toBeVisible();
   await expect(page.locator(".dz-error-section")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Save image" })).toHaveCount(0);
   const canvas = page.locator("#rendering-canvas");
@@ -513,12 +513,12 @@ test("lower resolution opens a desktop handoff with the exact URL and keyboard n
   const close = dialog.getByRole("button", { name: "Close dialog" });
   await expect(close).toBeFocused();
   await page.keyboard.press("Shift+Tab");
-  const copy = dialog.getByRole("button", { name: "Copy URL" });
+  const copy = dialog.getByRole("button", { name: "Copy address" });
   await expect(copy).toBeFocused();
   await page.keyboard.press("Tab");
   await expect(close).toBeFocused();
   await copy.click();
-  await expect(dialog.getByRole("status")).toContainText("URL copied");
+  await expect(dialog.getByRole("status")).toContainText("Address copied");
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
     "https://fixtures.test/resolution/big.dzi",
   );

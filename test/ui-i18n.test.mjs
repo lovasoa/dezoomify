@@ -75,10 +75,10 @@ test("i18n: substitution renders per locale and degrades safely", () => {
       "Waiting for artsandculture.google.com…",
     );
     assert.equal(t("view.job.manyImages", { count: 3 }), "3 images");
-    assert.equal(t("view.job.countsFull", { current: 2, total: 9 }), "2 of 9 tiles");
+    assert.equal(t("view.job.countsFull", { current: 2, total: 9 }), "2 of 9 image pieces");
     assert.equal(
       t("view.retry.summary", { done: 14, total: 16 }),
-      "14 of 16 tiles were retrieved.",
+      "14 of 16 image pieces downloaded.",
     );
     // Per-locale rendering through the same keys.
     assert.equal(t("view.modal.ok", undefined, "fr"), "Compris");
@@ -92,7 +92,7 @@ test("i18n: substitution renders per locale and degrades safely", () => {
     );
     assert.equal(t("view.step.discovering", undefined, "de"), "Zoombares Bild wird gesucht…");
     assert.equal(t("view.step.discovering", undefined, "it"), "Ricerca dell’immagine zoomabile…");
-    assert.equal(t("view.job.countsFull", { current: 2, total: 9 }, "de"), "2 von 9 Fragmenten");
+    assert.equal(t("view.job.countsFull", { current: 2, total: 9 }, "de"), "2 von 9 Bildstücken");
     assert.equal(t("view.job.countsFull", { current: 2, total: 9 }, "it"), "2 frammenti su 9");
     assert.equal(setLocale("fr"), true);
     assert.equal(setLocale("de"), true);
