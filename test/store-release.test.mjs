@@ -40,7 +40,11 @@ function ledgerResponse(s, path, body) {
   const id = Number(/deployments\/(\d+)/.exec(path)?.[1]);
   const record = s.records.find((entry) => entry.id === id);
   if (!body) return json(record.statuses);
-  if (body.state === "success" && s.fault === "ledger") return json({ error: "write denied" }, 403);
+  if (
+    (body.state === "success" && s.fault === "ledger") ||
+    (body.state === "error" && s.denyOutcome)
+  )
+    return json({ error: "write denied" }, 403);
   record.statuses.unshift(body);
   return json(body, 201);
 }
@@ -192,14 +196,18 @@ test("definite rejection consumes the day; a later night may retry", async () =>
   assert.equal(await s.run(), "submitted");
 });
 
-test("uncertain acceptance blocks retries until a manual submission establishes a baseline", async () => {
+test("uncertain acceptance blocks retries until a manual submission establishes a baseline", async (t) => {
   const s = await scenario("firefox");
   s.fault = "network";
+  s.denyOutcome = true;
+  const log = t.mock.method(console, "error", () => {});
   await assert.rejects(s.run(), /response lost/);
-  assert.equal(s.records[0].statuses[0].state, "error");
+  assert.match(log.mock.calls[0].arguments[0], /Recording store outcome failed:.*write denied/);
+  assert.equal(s.records[0].statuses[0].state, "in_progress");
   s.time = "2026-10-17T02:30:00Z";
   await assert.rejects(s.run(), /reconcile/);
   s.fault = "";
+  s.denyOutcome = false;
   assert.equal(await s.run(false), "submitted");
   assert.equal(await s.run(), "unchanged released commit");
 });

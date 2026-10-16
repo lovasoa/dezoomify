@@ -179,12 +179,16 @@ export async function submitRelease({
     await submit({ browser, version: plan.version, bytes, beforeMutation });
   } catch (error) {
     const ambiguous = started && !(error instanceof Rejected);
-    await status(
-      ambiguous ? "error" : "failure",
-      ambiguous
-        ? "Acceptance uncertain: reconcile with store before retrying"
-        : "Store submission failed; see workflow log",
-    );
+    try {
+      await status(
+        ambiguous ? "error" : "failure",
+        ambiguous
+          ? "Acceptance uncertain: reconcile with store before retrying"
+          : "Store submission failed; see workflow log",
+      );
+    } catch (recordError) {
+      console.error(`Recording store outcome failed: ${recordError.message}`);
+    }
     throw error;
   }
   // If this write fails, leave the attempt unresolved. The store has already
