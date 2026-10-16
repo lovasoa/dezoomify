@@ -8,7 +8,7 @@ type DownloadDelta = Parameters<Parameters<Downloads["onChanged"]["addListener"]
 export function saveExtensionBlob(
   downloads: Downloads,
   blob: Blob,
-  filename: string,
+  filename: string | undefined,
   signal: AbortSignal,
 ): Promise<number> {
   signal.throwIfAborted();
@@ -17,13 +17,21 @@ export function saveExtensionBlob(
 }
 
 /** Download an existing image directly, retaining the same completion/cancellation handling. */
-export function saveExtensionUrl(
+export async function saveExtensionUrl(
   downloads: Downloads,
   url: string,
   filename: string | undefined,
   signal: AbortSignal,
 ): Promise<number> {
   signal.throwIfAborted();
+  // Firefox rejects data: downloads; a local Blob URL works in both browsers.
+  if (url.startsWith("data:"))
+    return saveExtensionBlob(
+      downloads,
+      await (await fetch(url, { signal })).blob(),
+      filename,
+      signal,
+    );
   return new Promise<number>((resolve, reject) => {
     let id: number | null = null;
     let settled = false;

@@ -52,8 +52,8 @@ The job tab starts automatically and confirms when saving finishes.
 Use the browser's normal **Save image as** when it already gives you the complete
 artwork. Use Dezoomify when zooming stays sharp and the viewer loads many pieces.
 
-If tiled discovery finds no source, the extension can download the largest large
-image already loaded on the page directly from its URL. The site may offer a
+If tiled discovery finds no source, the extension can download a large image
+already loaded on the page directly from its URL. The site may offer a
 larger version. Page-created blob URLs are not supported by this fallback.
 
 ## If something goes wrong

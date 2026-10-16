@@ -171,7 +171,7 @@ async function readCompletedPng(outputDir, deadline) {
   let lastError = "no PNG was created";
   while (Date.now() <= deadline) {
     const outputs = readdirSync(outputDir, { withFileTypes: true })
-      .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith(".png"))
+      .filter((entry) => entry.isFile() && !entry.name.endsWith(".part"))
       .map((entry) => path.join(outputDir, entry.name));
     if (outputs.length === 1) {
       try {
