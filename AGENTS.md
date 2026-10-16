@@ -4,6 +4,9 @@ See [Architecture](docs/architecture.md), [Development](docs/development.md),
 [Testing](docs/testing.md), [guides](docs/README.md) and
 [shared UI rules](packages/shared-ui/AGENTS.md).
 
+Use experienced engineering judgment. Keep product-specific features in their
+product when that is simpler; share code when it improves the design.
+
 ## Invariants
 
 - Keep `legacy/` and the app at `/` pristine, byte for byte. Product changes

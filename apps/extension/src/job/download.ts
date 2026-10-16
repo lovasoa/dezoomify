@@ -8,11 +8,30 @@ type DownloadDelta = Parameters<Parameters<Downloads["onChanged"]["addListener"]
 export function saveExtensionBlob(
   downloads: Downloads,
   blob: Blob,
-  filename: string,
+  filename: string | undefined,
   signal: AbortSignal,
 ): Promise<number> {
   signal.throwIfAborted();
   const url = URL.createObjectURL(blob);
+  return saveExtensionUrl(downloads, url, filename, signal).finally(() => URL.revokeObjectURL(url));
+}
+
+/** Download an existing image directly, retaining the same completion/cancellation handling. */
+export async function saveExtensionUrl(
+  downloads: Downloads,
+  url: string,
+  filename: string | undefined,
+  signal: AbortSignal,
+): Promise<number> {
+  signal.throwIfAborted();
+  // Firefox rejects data: downloads; a local Blob URL works in both browsers.
+  if (url.startsWith("data:"))
+    return saveExtensionBlob(
+      downloads,
+      await (await fetch(url, { signal })).blob(),
+      filename,
+      signal,
+    );
   return new Promise<number>((resolve, reject) => {
     let id: number | null = null;
     let settled = false;
@@ -25,7 +44,6 @@ export function saveExtensionBlob(
       settled = true;
       downloads.onChanged.removeListener(onChanged);
       signal.removeEventListener("abort", onAbort);
-      URL.revokeObjectURL(url);
       if ("id" in result) resolve(result.id);
       else reject(result.error);
     };
@@ -84,12 +102,14 @@ export function saveExtensionBlob(
     };
     downloads.onChanged.addListener(onChanged);
     signal.addEventListener("abort", onAbort, { once: true });
-    void downloads.download({ url, filename, saveAs: false }).then(onStarted, (error) =>
-      finish({
-        error: signal.aborted
-          ? (signal.reason ?? new DOMException("Job cancelled", "AbortError"))
-          : failed(error instanceof Error ? error.message : String(error)),
-      }),
-    );
+    void downloads
+      .download({ url, ...(filename ? { filename } : {}), saveAs: false })
+      .then(onStarted, (error) =>
+        finish({
+          error: signal.aborted
+            ? (signal.reason ?? new DOMException("Job cancelled", "AbortError"))
+            : failed(error instanceof Error ? error.message : String(error)),
+        }),
+      );
   });
 }

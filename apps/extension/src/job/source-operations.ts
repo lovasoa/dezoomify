@@ -140,9 +140,12 @@ export function collectCandidates(): {
 
   try {
     const doc = globalThis.document;
-    // Only HTML DOM is source evidence; browser XML/JSON viewers need original bytes.
+    // Image documents have a browser-generated HTML wrapper. XML/JSON viewers
+    // still need their original bytes for ordinary format discovery.
     const html =
-      doc.contentType === "text/html" || doc.contentType === "application/xhtml+xml"
+      doc.contentType === "text/html" ||
+      doc.contentType === "application/xhtml+xml" ||
+      imageDocument()
         ? String(doc.documentElement?.outerHTML ?? "")
         : undefined;
     append(documentUrl, "source", html);
@@ -150,12 +153,20 @@ export function collectCandidates(): {
     append(documentUrl, "source");
   }
 
+  // A standalone image's favicon and other browser requests are unrelated to
+  // the artwork. Its wrapper and loaded image already supply all evidence.
+  if (imageDocument()) return { ok: true, documentUrl, inputs, overflow };
+
   try {
     for (const entry of globalThis.performance?.getEntriesByType?.("resource") ?? []) {
       append(typeof entry === "string" ? entry : entry?.name, "observed-resource");
     }
   } catch {}
   return { ok: true, documentUrl, inputs, overflow };
+
+  function imageDocument() {
+    return globalThis.document?.contentType?.startsWith("image/") ?? false;
+  }
 }
 
 /**

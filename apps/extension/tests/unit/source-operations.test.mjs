@@ -105,6 +105,34 @@ test("candidate snapshot reads one document; frame traversal belongs to source a
   }
 });
 
+test("standalone image tabs keep their wrapper and image without probing browser favicons", () => {
+  const previous = {
+    document: globalThis.document,
+    location: globalThis.location,
+    performance: globalThis.performance,
+  };
+  const url = "https://gallery.example/full.jpg";
+  globalThis.location = { href: url };
+  globalThis.document = {
+    contentType: "image/jpeg",
+    documentElement: { outerHTML: `<html><img src="${url}"></html>` },
+    images: [{ complete: true, naturalWidth: 3000, naturalHeight: 4000, currentSrc: url }],
+  };
+  globalThis.performance = {
+    getEntriesByType: () => assert.fail("image tabs need no resource inventory"),
+  };
+  try {
+    const { inputs } = collectCandidates();
+    assert.equal(inputs[0].contents, globalThis.document.documentElement.outerHTML);
+    assert.deepEqual(
+      inputs.map((input) => input.kind),
+      ["source"],
+    );
+  } finally {
+    Object.assign(globalThis, previous);
+  }
+});
+
 test("metadata documents retain their URL without supplying the browser's rendered viewer", () => {
   const oldLocation = globalThis.location;
   const oldDocument = globalThis.document;

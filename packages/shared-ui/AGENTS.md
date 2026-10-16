@@ -2,8 +2,8 @@
 
 Follow the root [documentation rule](../../AGENTS.md#documentation).
 
-- Keep components host-neutral: products inject storage, actions, and platform
-  capabilities. Detection and download policy belong to Rust.
+- Keep reusable components host-neutral: products supply storage, actions, and
+  platform capabilities. Use the root ownership guidance for product features.
 - Preserve the warm parchment aesthetic, blue-tile [logo](../../favicon.svg),
   spacious URL input, tactile controls, and restrained rectangular geometry.
   Avoid pills, nested cards, and neon styling. Reuse [theme tokens](src/styles/theme.css)

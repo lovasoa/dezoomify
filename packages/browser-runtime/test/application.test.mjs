@@ -19,7 +19,11 @@ const progress = {
   maximum: { width: 256, height: 256 },
 };
 const tick = () => act(() => new Promise((resolve) => setImmediate(resolve)));
-function harness(resetToIdle = true, fetchResource = async () => assert.fail("unexpected fetch")) {
+function harness(
+  resetToIdle = true,
+  fetchResource = async () => assert.fail("unexpected fetch"),
+  recoverDiscovery,
+) {
   const calls = [],
     contexts = [],
     store = new Map(),
@@ -48,6 +52,9 @@ function harness(resetToIdle = true, fetchResource = async () => assert.fail("un
         return {
           inputs: async (url) => [{ url }],
           fetchResource,
+          recoverDiscovery: recoverDiscovery
+            ? (error) => recoverDiscovery(error, context)
+            : undefined,
           canvas: () => document.createElement("canvas"),
           save: () => "browser-save-ready",
           transport: () => "direct",
@@ -91,6 +98,66 @@ test("a replacement invocation ignores late progress, output and history from it
     ["https://second.test/image", "https://first.test/image"],
   );
   await act(() => h.app.dispose());
+});
+
+test("discovery recovery belongs to the invocation and replacement waits for its cleanup", async () => {
+  let finishRecovery;
+  const h = harness(
+    true,
+    undefined,
+    () =>
+      new Promise((resolve) => {
+        finishRecovery = resolve;
+      }),
+  );
+  let first, second;
+  act(() => {
+    first = h.app.run("https://first.test/image");
+  });
+  await tick();
+  act(() => {
+    h.calls[0].host.report({ ...progress, phase: "discovery" });
+    h.calls[0].reject({ kind: "discovery-failed" });
+  });
+  await tick();
+  assert.equal(typeof finishRecovery, "function");
+  act(() => {
+    second = h.app.run("https://second.test/image");
+  });
+  await tick();
+  assert.equal(h.contexts[0].signal.aborted, true);
+  assert.equal(h.calls.length, 1);
+  act(() => finishRecovery(output));
+  await tick();
+  assert.equal(h.calls.length, 2);
+  assert.equal(h.app.currentUrl(), "https://second.test/image");
+  assert.equal(h.app.presentation().phase, "job");
+  act(() => h.calls[1].resolve(output));
+  await act(() => Promise.all([first, second]));
+  await act(() => h.app.dispose());
+});
+
+test("recovery can complete discovery but never replaces an acquisition failure", async () => {
+  for (const phase of ["discovery", "acquisition"]) {
+    let recoveries = 0;
+    const h = harness(false, undefined, async () => {
+      recoveries++;
+      return { canvas: output.canvas, disposition: "browser-save-initiated" };
+    });
+    let run;
+    act(() => {
+      run = h.app.run("https://image.test/");
+    });
+    await tick();
+    act(() => {
+      h.calls[0].host.report({ ...progress, phase });
+      h.calls[0].reject({ kind: "discovery-failed" });
+    });
+    await act(() => run);
+    assert.equal(recoveries, phase === "discovery" ? 1 : 0);
+    assert.equal(h.app.presentation().phase, phase === "discovery" ? "completed" : "failed");
+    await act(() => h.app.dispose());
+  }
 });
 
 test("desktop handoff keeps the discovered source through completion and resets for a new job", async () => {

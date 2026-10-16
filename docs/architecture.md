@@ -28,7 +28,8 @@ The local and deployed website proxies share one implementation. See
 
 ## Algorithm ownership
 
-Inputs can describe a source, an observed document, or an observed resource.
+For shared tiled-image discovery, inputs can describe a source, an observed
+document, or an observed resource.
 The core interprets this evidence, orders discovery, and bounds traversal; an
 extension scan supplies evidence rather than recognizing formats itself.
 Discovery explores accessible alternatives before requesting interactive access.
@@ -68,7 +69,8 @@ image or publish a cancelled output.
 
 Desktop owns native tasks across Tauri IPC; CLI awaits NativeHost directly.
 Native publication protects existing destinations and keeps committed output
-after retirement. UI drafts belong to presentation; download policy belongs to Rust.
+after retirement. Shared tile acquisition and retries belong to Rust; product
+features can stay in their product when that makes the design simpler.
 
 ## Diagnostics
 

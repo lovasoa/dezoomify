@@ -1,5 +1,6 @@
 import {
   AccessRequestView,
+  type Completion,
   createHistory,
   type DiagnosticRecorder,
   type HistoryEntry,
@@ -20,7 +21,6 @@ import type {
   ErrorTransport,
   Error as JobError,
   JobInput,
-  Output,
   Progress,
   RetryChoice,
   TileAcquisition,
@@ -62,6 +62,7 @@ export interface BrowserApplicationContext {
 export interface BrowserCapabilities
   extends Pick<BrowserHostDependencies, "fetchResource" | "loadDisplayImage" | "observe"> {
   inputs(url: string): Promise<JobInput[]>;
+  recoverDiscovery?(error: JobError): Promise<Completion | undefined>;
   canvas(): HTMLCanvasElement;
   showCanvas?(canvas: HTMLCanvasElement): void;
   save(
@@ -89,7 +90,7 @@ export interface BrowserApplicationOptions {
   onStart?(url: string): void;
   onReset?(): void;
   onStatus?(presentation: Presentation, url: string): void;
-  onComplete?(output: Output): void;
+  onComplete?(output: Completion): void;
   openSource?(): void;
 }
 
@@ -118,7 +119,8 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
       host: undefined as BrowserHost | undefined,
       capabilities: undefined as BrowserCapabilities | undefined,
       progress: undefined as Progress | undefined,
-      output: undefined as Output | undefined,
+      output: undefined as Completion | undefined,
+      recovery: undefined as Promise<Completion | undefined> | undefined,
       failure: undefined as JobError | undefined,
       retryApproval: undefined as
         | { request: TileAcquisition; answer(choice: RetryChoice): void }
@@ -162,7 +164,9 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
     current = undefined;
     a.controller.abort();
     a.activity.stopHeartbeat();
-    retiring = Promise.all([retiring, a.host?.settle()]).then(() => {});
+    retiring = Promise.all([retiring, a.host?.settle(), a.recovery?.catch(() => {})]).then(
+      () => {},
+    );
     a.capabilities?.dispose?.();
     a.diagnostics.finish("retired");
     return retiring;
@@ -221,7 +225,7 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
     }
   }
 
-  function completeInvocation(a: ReturnType<typeof invocation>, output: Output): void {
+  function completeInvocation(a: ReturnType<typeof invocation>, output: Completion): void {
     a.controller.signal.throwIfAborted();
     if (current !== a) return;
     a.output = output;
@@ -232,6 +236,16 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
 
   async function failInvocation(a: ReturnType<typeof invocation>, error: unknown): Promise<void> {
     if (current !== a) return;
+    try {
+      const output = await recoverInvocation(a, error);
+      if (output) {
+        completeInvocation(a, output);
+        return;
+      }
+    } catch (cause) {
+      error = cause;
+    }
+    if (current !== a) return;
     const outcome = a.controller.signal.aborted ? "cancelled" : "failed";
     history.update(a.historyEntry, { status: outcome });
     if (outcome === "failed") {
@@ -240,6 +254,13 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
       );
     }
     a.diagnostics.finish(outcome, error);
+  }
+
+  function recoverInvocation(a: ReturnType<typeof invocation>, error: unknown) {
+    if (a.controller.signal.aborted || a.progress?.phase !== "discovery" || !isJobError(error))
+      return undefined;
+    a.recovery = a.capabilities?.recoverDiscovery?.(error);
+    return a.recovery;
   }
 
   async function settleInvocation(a: ReturnType<typeof invocation>): Promise<void> {

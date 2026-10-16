@@ -701,7 +701,7 @@ function CompletedView({
 function completionSummary(presentation: Presentation, saved: boolean): string {
   const output = presentation.output;
   const canvas = output?.canvas;
-  if (saved)
+  if (saved || !output?.format)
     return canvas
       ? t("desktop.done.size", { width: canvas.width, height: canvas.height })
       : t("desktop.done.saved");

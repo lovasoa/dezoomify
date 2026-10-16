@@ -10,7 +10,7 @@ import {
 import type { ResourceRead } from "@dezoomify/wasm-bindings";
 import { browser as api } from "wxt/browser";
 import { createExtensionFetcher } from "../runtime/fetch.ts";
-import { saveExtensionBlob } from "./download.ts";
+import { saveExtensionBlob, saveExtensionUrl } from "./download.ts";
 import { createSourceAccess } from "./source-access.ts";
 import { createResourceFetcher } from "./transport.ts";
 
@@ -179,6 +179,20 @@ const app = createBrowserApplication({
         if (!fetchResource) return Promise.reject(new Error("The source has not been scanned."));
         return fetchResource(request, signal, interaction);
       },
+      async recoverDiscovery(error) {
+        if (!["discovery-failed", "malformed-metadata", "no-image-found"].includes(error.kind))
+          return undefined;
+        const image = await source?.loadedImage(context.signal);
+        if (!image) return undefined;
+        context.diagnostics.record("warn", "discovery-fallback", error);
+        context.diagnostics.record("info", "loaded-image", image);
+        downloadId = await saveExtensionUrl(api.downloads, image.url, undefined, context.signal);
+        context.view.outputKey = String(downloadId);
+        return {
+          canvas: { width: image.width, height: image.height },
+          disposition: "browser-save-initiated",
+        };
+      },
       observe: (interaction, signal) => observe?.(interaction, signal) ?? Promise.resolve([]),
       loadDisplayImage: (url, signal) => loadTileImage(url, { signal }),
       canvas: () => document.createElement("canvas"),
@@ -235,6 +249,7 @@ function installTestAccess() {
 }
 
 function testScenarioPath(scenario: unknown): string {
+  if (typeof scenario === "string" && scenario.startsWith("loaded-image")) return "/loaded-image";
   if (scenario === "recursive-iframe") return "/recursive-iframe";
   if (typeof scenario === "string" && scenario.startsWith("memory-openseadragon-"))
     return "/memory-openseadragon.html";

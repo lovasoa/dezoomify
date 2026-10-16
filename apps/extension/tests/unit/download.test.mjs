@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { saveExtensionBlob } from "../../src/job/download.ts";
+import { saveExtensionBlob, saveExtensionUrl } from "../../src/job/download.ts";
 
 function downloads(start = async () => 7) {
   let changed;
@@ -28,6 +28,22 @@ test("extension job completes only after the browser confirms the saved file", a
   });
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(settled, false);
+  api.emit({ id: 7, state: { current: "complete" } });
+  assert.equal(await saved, 7);
+});
+
+test("a URL download uses the browser's filename and existing completion tracking", async () => {
+  const api = downloads(async (options) => {
+    assert.deepEqual(options, { url: "https://gallery.example/full.jpg", saveAs: false });
+    return 7;
+  });
+  const saved = saveExtensionUrl(
+    api,
+    "https://gallery.example/full.jpg",
+    undefined,
+    new AbortController().signal,
+  );
+  await new Promise((resolve) => setImmediate(resolve));
   api.emit({ id: 7, state: { current: "complete" } });
   assert.equal(await saved, 7);
 });
