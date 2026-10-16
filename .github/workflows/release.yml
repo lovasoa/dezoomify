@@ -27,16 +27,14 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.event == 'push' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-latest
     outputs:
-      version: ${{ steps.version.outputs.value }}
-      commit: ${{ steps.commit.outputs.value }}
-      release_tag: ${{ steps.release_tag.outputs.value }}
+      version: ${{ steps.plan.outputs.version }}
+      commit: ${{ steps.plan.outputs.commit }}
+      release_tag: ${{ steps.plan.outputs.release_tag }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ env.SOURCE_REF }}
           fetch-depth: 0
-      - id: commit
-        run: echo "value=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # pinned
         with:
           toolchain: 1.98.1
@@ -47,23 +45,21 @@ jobs:
         run: |
           sha="$(git rev-parse HEAD)"
           test -n "$(gh run list --workflow ci.yml --branch main --event push --commit "$sha" --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
-      - id: version
-        run: echo "value=$(cargo xtask release version)" >> "$GITHUB_OUTPUT"
-      - id: release_tag
-        run: |
-          version="${{ steps.version.outputs.value }}"
-          tag="rolling-v$version"
-          if git rev-parse "v$version^{commit}" >/dev/null 2>&1; then
-            tag="v$version"
-          fi
-          echo "value=$tag" >> "$GITHUB_OUTPUT"
       - name: Freeze plan
+        id: plan
+        env:
+          NUMBERED_REF: ${{ inputs.ref }}
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             cargo xtask release plan --numbered
           else
             cargo xtask release plan
           fi
+          plans=(target/release-dist/*/plan.json)
+          test "${#plans[@]}" = 1
+          plan="${plans[0]}"
+          test -z "$NUMBERED_REF" || test "$NUMBERED_REF" = "$(jq -r .tag "$plan")"
+          jq -r '"version=\(.version)\ncommit=\(.commit)\nrelease_tag=\(.tag)"' "$plan" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-plan
