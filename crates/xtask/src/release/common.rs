@@ -222,7 +222,7 @@ pub(crate) fn plan_from_repo() -> Plan {
         version,
         channel: "rolling".to_string(),
         commit: "0".repeat(40),
-        capabilities: caps.capabilities.clone(),
+        capabilities: caps.capabilities,
         targets: targets
             .list
             .iter()

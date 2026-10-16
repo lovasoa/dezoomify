@@ -5,6 +5,7 @@ import {
   cancelSourceFetch,
   collectCandidates,
   fetchSource,
+  inspectSourceDocument,
 } from "../../src/job/source-operations.ts";
 
 const SOURCE_URL = "https://gallery.example/page?view=1";
@@ -13,9 +14,13 @@ function fakeBrowser(execute) {
   const listeners = { updated: [], removed: [] };
   const calls = [];
   let url = SOURCE_URL;
+  let frames = () => [{ frameId: 0, documentUrl: SOURCE_URL, token: "root", frames: [] }];
   return {
     listeners,
     calls,
+    setFrames(value) {
+      frames = typeof value === "function" ? value : () => value;
+    },
     setUrl(value) {
       url = value;
     },
@@ -41,13 +46,107 @@ function fakeBrowser(execute) {
       },
       scripting: {
         async executeScript(injection) {
+          const documents = frames().filter(
+            (frame) =>
+              injection.target.allFrames ||
+              injection.target.frameIds?.includes(frame.frameId) ||
+              injection.target.documentIds?.includes(frame.documentId),
+          );
+          if (injection.func === inspectSourceDocument) {
+            return documents.map((frame) => ({
+              frameId: frame.frameId,
+              ...(frame.documentId ? { documentId: frame.documentId } : {}),
+              result: {
+                documentUrl: frame.documentUrl,
+                token: frame.token,
+                frames: frame.frames ?? [],
+              },
+            }));
+          }
+          if (documents.length === 0) throw new Error("The targeted document no longer exists");
           calls.push(injection);
-          return [{ frameId: 0, result: await execute(injection) }];
+          const { frameId, documentId } = documents[0];
+          return [
+            { frameId, ...(documentId ? { documentId } : {}), result: await execute(injection) },
+          ];
         },
       },
     },
   };
 }
+
+test("nested frames use existing grants first, then one deferred permission and their own session", async () => {
+  const foreign = "https://viewer.example/widget";
+  const nested = "https://gallery.example/nested";
+  const calls = [];
+  const fake = fakeBrowser(async (injection) => {
+    const frameId = injection.target.frameIds[0];
+    const documentUrl = frameId === 8 ? foreign : nested;
+    if (injection.func === fetchSource) {
+      calls.push(["fetch", frameId]);
+      return {
+        ok: true,
+        documentUrl,
+        status: 200,
+        url: injection.args[0].url,
+        bytes: 1,
+        data: "AQ==",
+      };
+    }
+    if (injection.files) return { ok: true, documentUrl, inputs: [] };
+    calls.push(["scan", frameId]);
+    return {
+      ...snapshot(documentUrl),
+      inputs: [{ url: documentUrl, kind: "source", contents: "<html></html>" }],
+    };
+  });
+  const granted = new Set();
+  fake.setFrames(() => [
+    { frameId: 0, documentUrl: SOURCE_URL, token: "root", frames: [foreign] },
+    ...(granted.has("https://viewer.example")
+      ? [{ frameId: 8, documentUrl: foreign, token: "viewer" }]
+      : []),
+    { frameId: 9, documentUrl: nested, token: "nested" },
+  ]);
+  const source = createSourceAccess(fake.api, { tabId: 9, documentUrl: SOURCE_URL });
+  const access = {
+    hasPermission: async (origin) => granted.has(origin),
+    ensurePermission: async (origin) => {
+      calls.push(["permission", origin]);
+      granted.add(origin);
+    },
+    scanned: () => {},
+    failed: (_frame, error) => {
+      throw error;
+    },
+  };
+  const observe = source.observations(access);
+  const signal = new AbortController().signal;
+  try {
+    assert.equal((await observe("forbidden", signal))[0].kind, "observed-document");
+    assert.deepEqual(await observe("forbidden", signal), []);
+    assert.deepEqual(
+      calls,
+      [["scan", 9]],
+      "a permitted descendant is reachable through an unpermitted parent",
+    );
+    assert.equal((await observe("allowed", signal))[0].url, foreign);
+    await source.fetch({ uri: "https://viewer.example/file.dzi", headers: [] }, signal);
+    assert.deepEqual(calls, [
+      ["scan", 9],
+      ["permission", "https://viewer.example"],
+      ["scan", 8],
+      ["fetch", 8],
+    ]);
+    assert.deepEqual(await observe("allowed", signal), []);
+    // A new invocation rescans live frames, retaining already-granted access.
+    const next = source.observations(access);
+    assert.equal((await next("forbidden", signal))[0].url, foreign);
+    assert.equal(calls.filter(([kind]) => kind === "permission").length, 1);
+  } finally {
+    source.dispose();
+  }
+});
 
 function snapshot(documentUrl = SOURCE_URL) {
   return {
@@ -58,12 +157,197 @@ function snapshot(documentUrl = SOURCE_URL) {
   };
 }
 
+test("a grant acquired between observation batches reveals the existing viewer", async () => {
+  const foreign = "https://viewer.example/widget";
+  let granted = false;
+  const fake = fakeBrowser(async () => snapshot(foreign));
+  fake.setFrames(() => [
+    { frameId: 0, documentUrl: SOURCE_URL, token: "root", frames: [foreign] },
+    ...(granted ? [{ frameId: 8, documentUrl: foreign, token: "viewer" }] : []),
+  ]);
+  const source = createSourceAccess(fake.api, { tabId: 9, documentUrl: SOURCE_URL });
+  const observe = source.observations({
+    hasPermission: async () => granted,
+    ensurePermission: () => assert.fail("the metadata fetch already obtained permission"),
+    scanned: () => {},
+    failed: (_frame, error) => {
+      throw error;
+    },
+  });
+  try {
+    const signal = new AbortController().signal;
+    assert.deepEqual(await observe("forbidden", signal), []);
+    granted = true;
+    assert.ok((await observe("forbidden", signal)).length > 0);
+    assert.deepEqual(await observe("allowed", signal), []);
+  } finally {
+    source.dispose();
+  }
+});
+
+test("a successful frame probe overrides an inconsistent permission-pattern match", async () => {
+  const foreign = "https://viewer.example:8443/widget";
+  const fake = fakeBrowser(async () => snapshot(foreign));
+  fake.setFrames([
+    { frameId: 0, documentUrl: SOURCE_URL, token: "root", frames: [foreign] },
+    { frameId: 8, documentUrl: foreign, token: "viewer" },
+  ]);
+  const source = createSourceAccess(fake.api, { tabId: 9, documentUrl: SOURCE_URL });
+  const observe = source.observations({
+    hasPermission: async () => false,
+    ensurePermission: () => assert.fail("the browser already allowed this frame"),
+    scanned: () => {},
+    failed: (_frame, error) => {
+      throw error;
+    },
+  });
+  try {
+    const signal = new AbortController().signal;
+    assert.ok((await observe("forbidden", signal)).length > 0);
+    assert.deepEqual(await observe("allowed", signal), []);
+  } finally {
+    source.dispose();
+  }
+});
+
+test("a same-URL reload during MAIN-world scanning invalidates the document token", async () => {
+  let token = "original";
+  const fake = fakeBrowser(async () => {
+    token = "replacement";
+    return snapshot();
+  });
+  fake.setFrames(() => [{ frameId: 0, documentUrl: SOURCE_URL, token }]);
+  const source = createSourceAccess(fake.api, { tabId: 9, documentUrl: SOURCE_URL });
+  try {
+    await assert.rejects(source.scan(), {
+      kind: "policy-denied",
+      blocked_reason: "source-document-lost",
+    });
+    assert.equal(fake.calls.length, 1, "replacement document is never scanned as the original");
+  } finally {
+    source.dispose();
+  }
+});
+
+test("native document targets prevent a frame's session from rebinding after a same-URL reload", async () => {
+  const foreign = "https://viewer.example/widget";
+  const fake = fakeBrowser(async () => snapshot(foreign));
+  const root = { frameId: 0, documentUrl: SOURCE_URL, token: "root", documentId: "root-id" };
+  const child = { frameId: 8, documentUrl: foreign, token: "viewer", documentId: "viewer-id" };
+  fake.setFrames([root, child]);
+  const source = createSourceAccess(fake.api, { tabId: 9, documentUrl: SOURCE_URL });
+  const observe = source.observations({
+    hasPermission: () => assert.fail("a successful probe already establishes access"),
+    ensurePermission: () => assert.fail("no new permission needed"),
+    scanned: () => {},
+    failed: (_frame, error) => {
+      throw error;
+    },
+  });
+  const signal = new AbortController().signal;
+  try {
+    await observe("forbidden", signal);
+    assert.ok(fake.calls.every((call) => call.target.documentIds?.[0] === "viewer-id"));
+    fake.setFrames([root, { ...child, token: "replacement", documentId: "replacement-id" }]);
+    await assert.rejects(source.fetch({ uri: foreign, headers: [] }, signal), {
+      kind: "network-failure",
+      detail: "The targeted document no longer exists",
+    });
+    assert.equal(fake.calls.length, 2, "no fetch executes in the replacement document");
+  } finally {
+    source.dispose();
+  }
+});
+
+test("a lost frame-inventory reply remains bounded", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const fake = fakeBrowser(() => assert.fail("no full scan should run"));
+  const execute = fake.api.scripting.executeScript;
+  fake.api.scripting.executeScript = (injection) =>
+    injection.target.allFrames ? new Promise(() => {}) : execute(injection);
+  const source = createSourceAccess(
+    fake.api,
+    { tabId: 9, documentUrl: SOURCE_URL },
+    { timeoutMs: 30 },
+  );
+  const observe = source.observations({
+    hasPermission: async () => false,
+    ensurePermission: () => assert.fail("no permission request"),
+    scanned: () => {},
+    failed: () => {},
+  });
+  try {
+    const checked = assert.rejects(observe("forbidden", new AbortController().signal), {
+      kind: "timeout",
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    t.mock.timers.tick(30);
+    await checked;
+  } finally {
+    source.dispose();
+  }
+});
+
+test("MAIN-world observations are independently validated and preserve document evidence", async () => {
+  const observation = {
+    url: `${SOURCE_URL}#dezoomify-openseadragon-0`,
+    kind: "observed-metadata",
+    contents:
+      '<Image TileSize="256" Overlap="0" Format="png"><Size Width="512" Height="512"/></Image>',
+  };
+  const fake = fakeBrowser(async (injection) => {
+    if (injection.files) {
+      assert.deepEqual(injection.files, ["/openseadragon-scanner.js"]);
+      assert.equal(injection.world, "MAIN");
+      assert.equal(injection.func, undefined);
+      assert.equal(injection.args, undefined);
+      return {
+        ok: true,
+        documentUrl: SOURCE_URL,
+        inputs: [
+          { ...observation, extra: "discard this" },
+          { ...observation, contents: {} },
+          { ...observation, url: "javascript:bad" },
+        ],
+        diagnostics: { rejected: 0, truncated: false },
+      };
+    }
+    assert.equal(injection.world ?? "ISOLATED", "ISOLATED");
+    return snapshot();
+  });
+  const source = createSourceAccess(fake.api, { tabId: 9, documentUrl: SOURCE_URL });
+  try {
+    const scan = await source.scan();
+    assert.deepEqual(scan.inputs, [...snapshot().inputs, observation]);
+    assert.deepEqual(scan.memory, { rejected: 0, truncated: false });
+  } finally {
+    source.dispose();
+  }
+});
+
+test("memory injection failure preserves its cause and falls back to document discovery", async () => {
+  const fake = fakeBrowser(async ({ func }) => {
+    if (!func) throw new Error("page MAIN world unavailable");
+    return snapshot();
+  });
+  const source = createSourceAccess(fake.api, { tabId: 9, documentUrl: SOURCE_URL });
+  try {
+    const scan = await source.scan();
+    assert.deepEqual(scan.inputs, snapshot().inputs);
+    assert.equal(scan.memory.unavailable, true);
+    assert.equal(scan.memory.detail, "page MAIN world unavailable");
+  } finally {
+    source.dispose();
+  }
+});
+
 test("job-page source access calls injected scan and fetch with inferred argument shapes", async () => {
   const fake = fakeBrowser(async ({ func, args }) => {
+    if (!func) return { ...snapshot(), inputs: [] };
     if (func === collectCandidates) return snapshot();
     assert.equal(func, fetchSource);
     assert.equal(args[0].url, "https://gallery.example/info.json");
-    assert.equal(args[0].method, "GET");
+    assert.equal(args[0].documentToken, "root");
     assert.deepEqual(args[0].headers, [{ name: "Accept", value: "application/json" }]);
     assert.equal(typeof args[0].operationId, "string");
     return {
@@ -89,10 +373,11 @@ test("job-page source access calls injected scan and fetch with inferred argumen
     assert.deepEqual([...result.bytes], [1, 2, 3]);
     assert.equal(result.contentType, "text/html");
     assert.equal(result.http, 200);
-    assert.equal(fake.calls.length, 2);
+    assert.equal(fake.calls.length, 3);
     assert.deepEqual(
       fake.calls.map((call) => call.target),
       [
+        { tabId: 9, frameIds: [0] },
         { tabId: 9, frameIds: [0] },
         { tabId: 9, frameIds: [0] },
       ],
@@ -110,6 +395,40 @@ test("source scan rejects a malformed boundary result", async () => {
   const source = createSourceAccess(fake.api, { tabId: 9, documentUrl: SOURCE_URL });
   await assert.rejects(source.scan(), { kind: "bad-url" });
   source.dispose();
+});
+
+test("source access validates partial response range headers and exact payload length", async () => {
+  const valid = {
+    ok: true,
+    documentUrl: SOURCE_URL,
+    status: 206,
+    url: "https://gallery.example/image.zif",
+    bytes: 4,
+    data: "ZGF0YQ==",
+    contentRange: "bytes 10-13/100",
+    contentLength: "4",
+  };
+  for (const [changes, error] of [
+    [{}, undefined],
+    [{ contentRange: undefined }, "bad-url"],
+    [{ bytes: 3, data: "YWJj" }, "bad-url"],
+  ]) {
+    const fake = fakeBrowser(async (injection) => {
+      assert.equal(injection.args[0].rangeBytes, 4);
+      return { ...valid, ...changes };
+    });
+    const source = createSourceAccess(fake.api, { tabId: 9, documentUrl: SOURCE_URL });
+    try {
+      const pending = source.fetch(
+        { uri: valid.url, headers: [{ name: "Range", value: "bytes=10-13" }] },
+        new AbortController().signal,
+      );
+      if (error) await assert.rejects(pending, { kind: error });
+      else assert.equal(new TextDecoder().decode((await pending).bytes), "data");
+    } finally {
+      source.dispose();
+    }
+  }
 });
 
 test("navigation invalidates access and discards an in-flight scan result", async () => {
@@ -255,7 +574,7 @@ test("source cancellation waits for acknowledgement that the page fetch has stop
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(settled, false);
   const request = fake.calls[0].args[0];
-  assert.deepEqual(fake.calls[1].args, [request.operationId, request.deadlineAt]);
+  assert.deepEqual(fake.calls[1].args, [request.operationId, request.deadlineAt, "root"]);
   acknowledge();
   await checked;
   source.dispose();

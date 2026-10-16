@@ -37,8 +37,9 @@ capabilities.
 
 Desktop installers are available as `.msi` for Windows x86_64, `.dmg` for
 Apple silicon Macs, and `.deb` for Linux x86_64. They are unsigned, so your
-operating system may ask you to confirm that you trust the installer. Updates
-are installed manually from the releases page; there is no automatic update.
+operating system may ask you to confirm that you trust the installer. Use
+**Help → Check for updates…** to install a signed update after confirmation;
+see the [desktop guide](apps/desktop/desktop-app.md#install).
 
 The [legacy website](https://dezoomify.ophir.dev/) remains available.
 

@@ -27,6 +27,7 @@
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "category": "GraphicsAndDesign",
     "copyright": "GPL-3.0-or-later",
     "licenseFile": "../../../LICENSE",
@@ -66,8 +67,8 @@
   "identifier": "dev.ophir.dezoomify",
   "plugins": {
     "updater": {
-      "endpoints": [],
-      "pubkey": ""
+      "endpoints": ["https://github.com/lovasoa/dezoomify/releases/latest/download/latest.json"],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDA4NDVGMjIxOTIxRTk3RTYKUldUbWx4NlNJZkpGQ0xQVjlpRTluMVp0YUhZU2pKb3BTZEFXMWlJdGpqdVl5OW5uNjM2YzJ4L20K"
     }
   },
   "productName": "Dezoomify"

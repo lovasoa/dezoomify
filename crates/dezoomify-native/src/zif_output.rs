@@ -20,27 +20,7 @@ enum Profile {
 /// encoded input without inheriting these output-specific rules.
 fn profile(bytes: &[u8]) -> Option<Profile> {
     if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
-        let mut at = 8usize;
-        let mut color_chunks = false;
-        let mut icc = false;
-        while let Some(header) = bytes.get(at..at.checked_add(8)?) {
-            if &header[4..] == b"tRNS" {
-                return None;
-            }
-            color_chunks |= matches!(&header[4..], b"gAMA" | b"cHRM" | b"sRGB");
-            icc |= &header[4..] == b"iCCP";
-            if &header[4..] == b"IEND" {
-                break;
-            }
-            let length = u32::from_be_bytes(header[..4].try_into().ok()?) as usize;
-            at = at.checked_add(length)?.checked_add(12)?;
-        }
-        // Normalize descriptions unsupported by the encoder, so generated
-        // levels and neighboring converted tiles use the same color model.
-        if color_chunks && !icc {
-            return None;
-        }
-        return (bytes.get(24) == Some(&8) && bytes.get(25) == Some(&2)).then_some(Profile::PngRgb);
+        return png_profile(bytes);
     }
     if !bytes.starts_with(&[0xff, 0xd8]) {
         return None;
@@ -94,6 +74,30 @@ fn profile(bytes: &[u8]) -> Option<Profile> {
     } else {
         None
     }
+}
+
+fn png_profile(bytes: &[u8]) -> Option<Profile> {
+    let mut at = 8usize;
+    let mut color_chunks = false;
+    let mut icc = false;
+    while let Some(header) = bytes.get(at..at.checked_add(8)?) {
+        if &header[4..] == b"tRNS" {
+            return None;
+        }
+        color_chunks |= matches!(&header[4..], b"gAMA" | b"cHRM" | b"sRGB");
+        icc |= &header[4..] == b"iCCP";
+        if &header[4..] == b"IEND" {
+            break;
+        }
+        let length = u32::from_be_bytes(header[..4].try_into().ok()?) as usize;
+        at = at.checked_add(length)?.checked_add(12)?;
+    }
+    // Normalize descriptions unsupported by the encoder, so generated
+    // levels and neighboring converted tiles use the same color model.
+    if color_chunks && !icc {
+        return None;
+    }
+    (bytes.get(24) == Some(&8) && bytes.get(25) == Some(&2)).then_some(Profile::PngRgb)
 }
 
 pub(crate) fn can_reuse(bytes: &[u8]) -> bool {
@@ -671,7 +675,11 @@ impl ZifWriter {
                 crate::imaging::encode_jpeg_to(
                     &mut bytes,
                     pixels,
-                    (100 - self.compression).max(1),
+                    dezoomify::model::OutputFormat::Jpeg
+                        .codec()
+                        .control
+                        .quality(self.compression)
+                        .max(1),
                     icc,
                 )?;
             }

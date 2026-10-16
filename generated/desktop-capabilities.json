@@ -4,7 +4,7 @@
     "identifier": "dev.ophir.dezoomify"
   },
   "commands": [
-    "answer_partial",
+    "answer_retry",
     "cancel_job",
     "dezoomify",
     "forget_saved_output",
@@ -27,26 +27,30 @@
     "png",
     "jpeg",
     "tiff",
-    "zif",
-    "webp"
+    "webp",
+    "avif",
+    "zif"
   ],
   "outputFormats": [
     "png",
     "jpeg",
     "tiff",
-    "zif",
     "webp",
+    "avif",
+    "zif",
     "iiif-dir"
   ],
   "eventChannels": [
-    "dezoomify://partial",
     "dezoomify://progress",
-    "dezoomify://registered"
+    "dezoomify://registered",
+    "dezoomify://retry"
   ],
   "updater": {
-    "allowlist": [],
-    "channel": "stable",
-    "enabled": false,
+    "allowlist": [
+      "https://github.com/lovasoa/dezoomify/releases/latest/download/latest.json"
+    ],
+    "channel": "latest",
+    "enabled": true,
     "httpsOnly": true,
     "requiresUserConfirm": true
   },

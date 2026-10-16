@@ -44,13 +44,7 @@ globalThis.__DEZOOMIFY_TEST_RUN__ = (async () => {
       signalSourceReady();
   });
 
-  const targetUrl = scenario.startsWith("fixtures/")
-    ? `${origin}/${scenario}/viewer.html`
-    : scenario === "observed-zoomify"
-      ? `${origin}/observed-zoomify/viewer.html`
-      : scenario === ""
-        ? `${origin}/target.html`
-        : `${origin}/target.html?scenario=${encodeURIComponent(scenario)}`;
+  const targetUrl = testTargetUrl(origin, scenario);
   const target = await api.tabs.create({ url: targetUrl, active: true });
   if (typeof target?.id !== "number") throw new Error("extension E2E source tab did not open");
 
@@ -60,6 +54,10 @@ globalThis.__DEZOOMIFY_TEST_RUN__ = (async () => {
   const results = await api.scripting.executeScript({
     target: { tabId: target.id, frameIds: [0] },
     func: () => {
+      // Direct metadata documents are ready at load; HTML viewers signal
+      // completion of their asynchronous metadata request below.
+      if (document.contentType !== "text/html" && document.contentType !== "application/xhtml+xml")
+        return true;
       if (document.documentElement.dataset.viewerReady === "true") return true;
       return new Promise((resolve) => {
         const finish = (ready) => {
@@ -130,24 +128,33 @@ globalThis.__DEZOOMIFY_TEST_RUN__ = (async () => {
 
     // Verify that navigation invalidates the source binding while the job
     // page stays open.
+    return await verifyNavigation();
+  })();
+
+  async function verifyNavigation() {
     const navigatedUrl = `${origin}/target.html?after-navigation=1`;
     await api.tabs.update(target.id, { url: navigatedUrl });
     await waitForTab(target.id, navigatedUrl);
     for (let attempt = 0; attempt < 100; attempt += 1) {
-      try {
-        const result = await api.runtime.sendMessage({ type: "dezoomify-test-source-navigation" });
-        if (result?.blocked_reason === "source-document-lost") return true;
-        if (result?.code === "source-access-stayed-live") {
-          throw new Error("source access remained live after source navigation");
-        }
-      } catch (error) {
-        if (error instanceof Error && error.message.includes("remained live")) throw error;
-        if (attempt === 99) throw error;
-      }
+      if (await navigationRejected(attempt)) return true;
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
     throw new Error("job page did not reject access after source navigation");
-  })();
+  }
+
+  async function navigationRejected(attempt) {
+    try {
+      const result = await api.runtime.sendMessage({ type: "dezoomify-test-source-navigation" });
+      if (result?.blocked_reason === "source-document-lost") return true;
+      if (result?.code === "source-access-stayed-live") {
+        throw new Error("source access remained live after source navigation");
+      }
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("remained live")) throw error;
+      if (attempt === 99) throw error;
+    }
+    return false;
+  }
   void globalThis.__DEZOOMIFY_TEST_AFTER_JOB__.then(
     () => {
       document.body.dataset.afterJob = "ready";
@@ -159,6 +166,18 @@ globalThis.__DEZOOMIFY_TEST_RUN__ = (async () => {
   );
   return globalThis.__DEZOOMIFY_TEST_SOURCE_ACCESS_RESULT__;
 })();
+
+function testTargetUrl(origin, scenario) {
+  if (scenario.startsWith("fixtures/")) return `${origin}/${scenario}/viewer.html`;
+  if (scenario === "recursive-iframe") return `${origin}/recursive-iframe.html`;
+  if (scenario.startsWith("memory-openseadragon-"))
+    return `${origin}/memory-openseadragon.html?type=${encodeURIComponent(scenario.slice("memory-openseadragon-".length))}`;
+  if (scenario === "retry") return `${origin}/fixtures/failures/retry-approval/retry.dzi`;
+  if (scenario === "observed-zoomify") return `${origin}/observed-zoomify/viewer.html`;
+  return scenario === ""
+    ? `${origin}/target.html`
+    : `${origin}/target.html?scenario=${encodeURIComponent(scenario)}`;
+}
 
 void globalThis.__DEZOOMIFY_TEST_RUN__.then(
   () => {

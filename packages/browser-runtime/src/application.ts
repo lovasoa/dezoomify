@@ -5,13 +5,13 @@ import {
   type HistoryEntry,
   type HistoryStore,
   isValidInputUrl,
-  PartialDecisionActions,
   type Presentation,
   presentFailure,
   presentIdle,
   presentOutput,
   presentProgress,
   presentStatus,
+  RetryApproval,
   renderView,
   type ViewContext,
 } from "@dezoomify/shared-ui";
@@ -19,11 +19,10 @@ import type {
   ErrorTransport,
   Error as JobError,
   JobInput,
-  MissingTiles,
-  Options,
   Output,
   Progress,
-  RecoveryChoice,
+  RetryChoice,
+  TileAcquisition,
 } from "@dezoomify/wasm-bindings";
 import { createElement } from "react";
 import { isJobError, unknownDetail } from "../../shared-ui/src/failure.ts";
@@ -60,7 +59,7 @@ export interface BrowserApplicationContext {
   permission(pending: PermissionWait[]): void;
 }
 export interface BrowserCapabilities
-  extends Pick<BrowserHostDependencies, "fetchResource" | "loadDisplayImage"> {
+  extends Pick<BrowserHostDependencies, "fetchResource" | "loadDisplayImage" | "observe"> {
   inputs(url: string): Promise<JobInput[]>;
   canvas(): HTMLCanvasElement;
   showCanvas?(canvas: HTMLCanvasElement): void;
@@ -83,7 +82,6 @@ export interface BrowserApplicationOptions {
   version?: string;
   wasm(): Promise<WasmModule>;
   capabilities(context: BrowserApplicationContext): BrowserCapabilities;
-  partial: Options["partial"];
   history?: { store: HistoryStore; key: string };
   resetToIdle?: boolean;
   onStart?(url: string): void;
@@ -120,14 +118,15 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
       progress: undefined as Progress | undefined,
       output: undefined as Output | undefined,
       failure: undefined as JobError | undefined,
-      decision: undefined as
-        | { missing: MissingTiles; answer(choice: RecoveryChoice): void }
+      retryApproval: undefined as
+        | { request: TileAcquisition; answer(choice: RetryChoice): void }
         | undefined,
       permission: undefined as PermissionWait | undefined,
       done: false,
       historyEntry: null as HistoryEntry | null,
       view: {
         sourceUrl: url,
+        offerDesktopApp: true,
         jobActivity: activity.state,
       } as ViewContext,
     };
@@ -147,9 +146,9 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
           paused: a.host?.paused,
         })
       : presentStatus("discovering");
-    if (a.decision) {
-      view.decision = a.decision.missing;
-      view.headlineKey = "view.partial.title";
+    if (a.retryApproval) {
+      view.retryApproval = a.retryApproval.request;
+      view.headlineKey = "view.retry.title";
     }
     return view;
   }
@@ -169,7 +168,7 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
 
   function cancel(): void {
     if (options.resetToIdle) {
-      retire();
+      void retire();
       idle = presentIdle();
       initialUrl = undefined;
       options.onReset?.();
@@ -177,7 +176,7 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
       history.update(current.historyEntry, { status: "cancelled" });
       current.controller.abort();
       current.permission = undefined;
-      current.decision = undefined;
+      current.retryApproval = undefined;
       current.activity.stopHeartbeat();
       current.diagnostics.finish("cancelled");
     }
@@ -195,97 +194,13 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
     try {
       await retired;
       a.controller.signal.throwIfAborted();
-      const capabilities = options.capabilities({
-        signal: a.controller.signal,
-        diagnostics: a.diagnostics,
-        activity: a.activity,
-        view: a.view,
-        update: () => {
-          if (current === a) update();
-        },
-        permission: (pending) => {
-          if (current === a && !a.controller.signal.aborted) {
-            a.permission = pending[0];
-            update();
-          }
-        },
-      });
-      a.capabilities = capabilities;
-      const [wasm, inputs] = await Promise.all([options.wasm(), capabilities.inputs(url)]);
+      const { wasm, inputs, host } = await prepareInvocation(a, url, maximum);
       a.controller.signal.throwIfAborted();
-      url = a.view.sourceUrl || inputs[0]?.url || url;
-      a.url = url;
-      const decoder = createTileDecoder(undefined, a.diagnostics);
-      const assembly = createBrowserAssembly({
-        diagnostics: a.diagnostics,
-        signal: a.controller.signal,
-        decoder,
-        sourceUrl: url,
-        processTile: (recipe, bytes) =>
-          wasm.applyProcessing(recipe, new Uint8Array(bytes)).slice().buffer,
-        canvas: capabilities.canvas,
-        showCanvas: capabilities.showCanvas,
-        limits: browserLimitsFor(navigator as unknown as ClientHints),
-        save: (blob, width, height, signal) =>
-          capabilities.save(blob, width, height, signal, a.progress?.title ?? undefined),
-        onDisplayOnly: () => {
-          if (current === a) {
-            update();
-          }
-        },
-      });
-      a.host = new BrowserHost({
-        signal: a.controller.signal,
-        diagnostics: a.diagnostics,
-        assembly,
-        decoder,
-        fetchResource: capabilities.fetchResource,
-        loadDisplayImage: capabilities.loadDisplayImage,
-        onProgress: (progress) => {
-          if (current === a && !a.controller.signal.aborted) {
-            a.progress = progress;
-            history.progress(a.historyEntry, progress);
-            a.activity.touchProgress();
-            a.activity.scheduleUpdate();
-          }
-        },
-        transport: () => capabilities.transport(),
-        choosePartial: async (missing, signal) => {
-          signal.throwIfAborted();
-          const hinted = await withVerdictMissing(missing);
-          signal.throwIfAborted();
-          return new Promise((resolve, reject) => {
-            const abort = () => reject(signal.reason);
-            signal.addEventListener("abort", abort, { once: true });
-            a.decision = {
-              missing: hinted,
-              answer(choice) {
-                if (current !== a || signal.aborted) return;
-                signal.removeEventListener("abort", abort);
-                a.decision = undefined;
-                a.diagnostics.record("info", "partial-answer", { choice });
-                resolve(choice);
-                update();
-              },
-            };
-            update();
-          });
-        },
-      });
-      const limits = maximum
-        ? MAXIMUM_SELECTION_LIMITS
-        : selectionLimitsFor(navigator as unknown as ClientHints);
       const output = await wasm.dezoomify(
         inputs,
         {
           format: undefined,
-          selection: {
-            kind: "fitting",
-            max_width: limits.maxWidth,
-            max_height: limits.maxHeight,
-            max_area: limits.maxArea,
-          },
-          partial: options.partial,
+          interactive_retries: true,
           output: "png",
           max_concurrent: BROWSER_MAX_CONCURRENCY,
           max_tiles: BROWSER_MAX_PLAN_TILES,
@@ -294,36 +209,137 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
           max_deferred_follows: 8,
           retry_base_delay_ms: 1000,
         },
-        a.host,
+        host,
       );
-      a.controller.signal.throwIfAborted();
-      if (current !== a) return;
-      a.output = output;
-      a.diagnostics.finish(
-        a.output.missing.length === 0 ? "completed" : "partial-completed",
-        a.output,
-      );
-      history.complete(a.historyEntry, a.output);
-      options.onComplete?.(a.output);
+      completeInvocation(a, output);
     } catch (error) {
-      if (current !== a) return;
-      const outcome = a.controller.signal.aborted ? "cancelled" : "failed";
-      history.update(a.historyEntry, { status: outcome });
-      if (outcome === "failed") {
-        a.failure = await withVerdict(
-          isJobError(error) ? error : { kind: "internal", detail: unknownDetail(error) },
-        );
-      }
-      a.diagnostics.finish(outcome, error);
+      await failInvocation(a, error);
     } finally {
-      a.activity.stopHeartbeat();
-      if (!a.output) a.controller.abort();
-      await a.host?.settle();
-      if (current === a) {
-        a.done = true;
-        update();
-      }
+      await settleInvocation(a);
     }
+  }
+
+  function completeInvocation(a: ReturnType<typeof invocation>, output: Output): void {
+    a.controller.signal.throwIfAborted();
+    if (current !== a) return;
+    a.output = output;
+    a.diagnostics.finish("completed", a.output);
+    history.complete(a.historyEntry, a.output);
+    options.onComplete?.(a.output);
+  }
+
+  async function failInvocation(a: ReturnType<typeof invocation>, error: unknown): Promise<void> {
+    if (current !== a) return;
+    const outcome = a.controller.signal.aborted ? "cancelled" : "failed";
+    history.update(a.historyEntry, { status: outcome });
+    if (outcome === "failed") {
+      a.failure = await withVerdict(
+        isJobError(error) ? error : { kind: "internal", detail: unknownDetail(error) },
+      );
+    }
+    a.diagnostics.finish(outcome, error);
+  }
+
+  async function settleInvocation(a: ReturnType<typeof invocation>): Promise<void> {
+    a.activity.stopHeartbeat();
+    if (!a.output) a.controller.abort();
+    await a.host?.settle();
+    if (current === a) {
+      a.done = true;
+      update();
+    }
+  }
+
+  async function prepareInvocation(
+    a: ReturnType<typeof invocation>,
+    url: string,
+    maximum: boolean,
+  ) {
+    const capabilities = options.capabilities({
+      signal: a.controller.signal,
+      diagnostics: a.diagnostics,
+      activity: a.activity,
+      view: a.view,
+      update: () => {
+        if (current === a) update();
+      },
+      permission: (pending) => {
+        if (current === a && !a.controller.signal.aborted) {
+          a.permission = pending[0];
+          update();
+        }
+      },
+    });
+    a.capabilities = capabilities;
+    const [wasm, inputs] = await Promise.all([options.wasm(), capabilities.inputs(url)]);
+    a.controller.signal.throwIfAborted();
+    url = a.view.sourceUrl || inputs[0]?.url || url;
+    a.url = url;
+    const decoder = createTileDecoder(undefined, a.diagnostics);
+    const assembly = createBrowserAssembly({
+      diagnostics: a.diagnostics,
+      signal: a.controller.signal,
+      decoder,
+      sourceUrl: url,
+      processTile: (recipe, bytes) =>
+        wasm.applyProcessing(recipe, new Uint8Array(bytes)).slice().buffer,
+      canvas: capabilities.canvas,
+      showCanvas: capabilities.showCanvas,
+      limits: browserLimitsFor(navigator as unknown as ClientHints),
+      save: (blob, width, height, signal) =>
+        capabilities.save(blob, width, height, signal, a.progress?.title ?? undefined),
+      onDisplayOnly: () => {
+        if (current === a) {
+          update();
+        }
+      },
+    });
+    const approval = retryApprovalFor(a);
+    a.controller.signal.addEventListener("abort", () => approval.cancel(), { once: true });
+    const limits = maximum
+      ? MAXIMUM_SELECTION_LIMITS
+      : selectionLimitsFor(navigator as unknown as ClientHints);
+    const host = new BrowserHost({
+      selectionLimits: limits,
+      signal: a.controller.signal,
+      diagnostics: a.diagnostics,
+      assembly,
+      decoder,
+      fetchResource: capabilities.fetchResource,
+      observe: capabilities.observe,
+      loadDisplayImage: capabilities.loadDisplayImage,
+      onProgress: (progress) => {
+        if (current === a && !a.controller.signal.aborted) {
+          a.progress = progress;
+          history.progress(a.historyEntry, progress);
+          a.activity.touchProgress();
+          a.activity.scheduleUpdate();
+        }
+      },
+      transport: () => capabilities.transport(),
+      approveRetry: (request) => approval.acquire(request),
+    });
+    a.host = host;
+    return { wasm, inputs, host };
+  }
+
+  function retryApprovalFor(a: ReturnType<typeof invocation>): RetryApproval {
+    const approval = new RetryApproval((request) => {
+      a.host?.waitForRetry(request !== undefined);
+      a.retryApproval = request
+        ? {
+            request,
+            answer(choice) {
+              if (current !== a || a.controller.signal.aborted) return;
+              a.diagnostics.record("info", "retry-answer", { choice });
+              if (choice === "retry") approval.retry();
+              else cancel();
+            },
+          }
+        : undefined;
+      update();
+    });
+    return approval;
   }
 
   /** Stamp the boundary's retry verdict (`isRetryable`, the one policy in
@@ -338,14 +354,6 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
     return error;
   }
 
-  /** `withVerdict` across every retained failure of a partial decision. */
-  async function withVerdictMissing(missing: MissingTiles): Promise<MissingTiles> {
-    await Promise.all(
-      missing.missing.flatMap((tile) => tile.failures.map((failure) => withVerdict(failure))),
-    );
-    return missing;
-  }
-
   function submit(url: string): void {
     url = url.trim();
     if (!isValidInputUrl(url)) {
@@ -353,7 +361,7 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
       const error: JobError = { kind: "invalid-url" };
       idle = presentFailure(error);
       if (!current || current.done) {
-        retire();
+        void retire();
         const a = invocation(url);
         a.done = true;
         a.failure = error;
@@ -375,6 +383,39 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
       presented_error: shown.error?.kind ?? "",
     });
     const report = a?.diagnostics.report();
+    updateCurrentProgress(a, shown, report);
+    renderView(
+      options.root,
+      shown,
+      callbacksFor(a),
+      {
+        ...(a ? { ...a.view, diagnosticReport: report } : { initialUrl }),
+        sourceUrl: a?.progress?.source_url ?? a?.url,
+        desktopSourceUrl: a?.progress?.source_url ?? a?.url,
+        product: options.product,
+        history: history.entries(),
+        historyNow: Date.now(),
+      },
+      {
+        ...(a?.permission
+          ? {
+              replace: createElement(AccessRequestView, {
+                origin: a.permission.origin,
+                requesting: a.permission.requesting,
+                onRequest: a.permission.request,
+              }),
+            }
+          : {}),
+      },
+    );
+    options.onStatus?.(shown, a?.url ?? "");
+  }
+
+  function updateCurrentProgress(
+    a: ReturnType<typeof invocation> | undefined,
+    shown: Presentation,
+    report: ReturnType<DiagnosticRecorder["report"]> | undefined,
+  ): void {
     if (a)
       a.view.currentProgress =
         shown.phase === "job"
@@ -385,15 +426,17 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
               ),
             }
           : undefined;
-    const callbacks = {
+  }
+
+  function callbacksFor(a: ReturnType<typeof invocation> | undefined) {
+    const outputCapabilities = a?.output ? a.capabilities : undefined;
+    return {
       onSubmitUrl: submit,
       onCancel: cancel,
+      onRetryChoice: a?.retryApproval?.answer,
       ...(options.resetToIdle ? { onReset: cancel } : {}),
       onRetrySameUrl: () => {
         if (a && current === a) void run(a.url);
-      },
-      onTryMaximum: () => {
-        if (a && current === a) void run(a.url, true);
       },
       onPause: () => {
         if (a && current === a) {
@@ -410,11 +453,11 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
         }
       },
       onSave: a?.capabilities?.saveOutput,
-      onOpenOutput: a?.output && a.capabilities?.openOutput ? a.capabilities.openOutput : undefined,
-      onRevealOutput:
-        a?.output && a.capabilities?.revealOutput ? a.capabilities.revealOutput : undefined,
+      onOpenOutput: outputCapabilities?.openOutput,
+      onRevealOutput: outputCapabilities?.revealOutput,
       onOpenSource: options.openSource,
       onCopyDiagnostics: copyDiagnosticText,
+      onCopyText: copyDiagnosticText,
       onSaveDiagnostics: saveDiagnosticReport,
       onOpenExternalLink: (url: string) => {
         location.href = url;
@@ -428,36 +471,6 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
         update();
       },
     };
-    renderView(
-      options.root,
-      shown,
-      callbacks,
-      {
-        ...(a ? { ...a.view, diagnosticReport: report } : { initialUrl }),
-        history: history.entries(),
-        historyNow: Date.now(),
-      },
-      {
-        ...(a?.permission
-          ? {
-              replace: createElement(AccessRequestView, {
-                origin: a.permission.origin,
-                requesting: a.permission.requesting,
-                onRequest: a.permission.request,
-              }),
-            }
-          : {}),
-        ...(a?.decision && !a.permission
-          ? {
-              after: createElement(PartialDecisionActions, {
-                decision: a.decision.missing,
-                onAnswer: a.decision.answer,
-              }),
-            }
-          : {}),
-      },
-    );
-    options.onStatus?.(shown, a?.url ?? "");
   }
   update();
   return {

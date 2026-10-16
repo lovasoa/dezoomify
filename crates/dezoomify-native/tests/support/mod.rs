@@ -95,6 +95,14 @@ fn options_for_target(
 
 pub use dezoomify_fixture_server::{start as start_fixture_server, temp_dir};
 
+pub fn tile_request(uri: impl Into<String>) -> dezoomify::model::ResourceRequest {
+    dezoomify::model::ResourceRequest {
+        uri: uri.into(),
+        headers: vec![],
+        purpose: dezoomify::model::RequestPurpose::Tile,
+    }
+}
+
 pub fn http_response(status: &str, content_type: &str, body: &[u8]) -> Vec<u8> {
     let mut out = Vec::new();
     out.extend_from_slice(format!("HTTP/1.1 {status}\r\n").as_bytes());

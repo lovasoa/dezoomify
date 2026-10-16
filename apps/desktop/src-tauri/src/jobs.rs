@@ -1,5 +1,5 @@
 //! Native resources retained for a desktop invocation and its saved result.
-use dezoomify::model::{DiagnosticReport, Error, RecoveryChoice};
+use dezoomify::model::{DiagnosticReport, Error, RetryChoice};
 use dezoomify_native::{diagnostics::Diagnostics, Controls};
 use std::{
     collections::HashMap,
@@ -12,7 +12,7 @@ use std::{
 
 pub const CHANNEL_REGISTERED: &str = "dezoomify://registered";
 pub const CHANNEL_PROGRESS: &str = "dezoomify://progress";
-pub const CHANNEL_PARTIAL: &str = "dezoomify://partial";
+pub const CHANNEL_RETRY: &str = "dezoomify://retry";
 
 pub struct Registration {
     pub controls: Controls,
@@ -20,7 +20,7 @@ pub struct Registration {
     pub completed: AtomicBool,
     pub saved_path: Mutex<Option<PathBuf>>,
     next_question: AtomicU64,
-    partial: Mutex<Option<(u64, tokio::sync::oneshot::Sender<RecoveryChoice>)>>,
+    retry: Mutex<Option<(u64, tokio::sync::oneshot::Sender<RetryChoice>)>>,
 }
 
 impl Registration {
@@ -31,26 +31,20 @@ impl Registration {
             completed: AtomicBool::new(false),
             saved_path: Mutex::new(None),
             next_question: AtomicU64::new(0),
-            partial: Mutex::new(None),
+            retry: Mutex::new(None),
         }
     }
 
-    pub fn request_partial(&self) -> (u64, tokio::sync::oneshot::Receiver<RecoveryChoice>) {
+    pub fn request_retry(&self) -> (u64, tokio::sync::oneshot::Receiver<RetryChoice>) {
         let question = self.next_question.fetch_add(1, Ordering::SeqCst);
         let (send, receive) = tokio::sync::oneshot::channel();
-        *self
-            .partial
-            .lock()
-            .unwrap_or_else(|error| error.into_inner()) = Some((question, send));
+        *self.retry.lock().unwrap_or_else(|error| error.into_inner()) = Some((question, send));
         (question, receive)
     }
 
-    pub fn answer_partial(&self, question: u64, answer: RecoveryChoice) -> Result<(), Error> {
-        let mut pending = self
-            .partial
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
-        if !pending.as_ref().is_some_and(|(id, _)| *id == question) {
+    pub fn answer_retry(&self, question: u64, answer: RetryChoice) -> Result<(), Error> {
+        let mut pending = self.retry.lock().unwrap_or_else(|error| error.into_inner());
+        if pending.as_ref().is_none_or(|(id, _)| *id != question) {
             return Err(Error::InteractionExpired);
         }
         if let Some((_, send)) = pending.take() {
@@ -64,7 +58,7 @@ impl Registration {
             .saved_path
             .lock()
             .unwrap_or_else(|error| error.into_inner()) = path;
-        self.partial
+        self.retry
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .take();
@@ -81,6 +75,8 @@ impl Default for Registration {
 #[derive(Default)]
 pub struct JobTable {
     jobs: HashMap<String, Arc<Registration>>,
+    retiring: Vec<Arc<Registration>>,
+    updating: bool,
 }
 
 impl JobTable {
@@ -88,6 +84,13 @@ impl JobTable {
         Self::default()
     }
     pub fn insert(&mut self, id: &str) -> Result<Arc<Registration>, Error> {
+        self.retiring
+            .retain(|job| !job.completed.load(Ordering::SeqCst));
+        if self.updating {
+            return Err(Error::InvalidState(
+                "an application update is in progress".into(),
+            ));
+        }
         if !crate::commands::is_valid_job_id(id) {
             return Err(Error::InvalidInput(
                 "job id must look like job:<suffix>".to_string().into(),
@@ -103,6 +106,27 @@ impl JobTable {
     pub fn get(&self, id: &str) -> Result<Arc<Registration>, Error> {
         self.jobs.get(id).cloned().ok_or_else(|| unknown_job(id))
     }
+    /// Reserve installation only after all native jobs have settled.
+    pub fn begin_update(&mut self) -> Result<(), Error> {
+        self.retiring
+            .retain(|job| !job.completed.load(Ordering::SeqCst));
+        if self.updating
+            || !self.retiring.is_empty()
+            || self
+                .jobs
+                .values()
+                .any(|job| !job.completed.load(Ordering::SeqCst))
+        {
+            return Err(Error::InvalidState(
+                "finish or cancel the current save before updating".into(),
+            ));
+        }
+        self.updating = true;
+        Ok(())
+    }
+    pub fn end_update(&mut self) {
+        self.updating = false;
+    }
     pub fn live(&self, id: &str) -> Result<Arc<Registration>, Error> {
         let entry = self.get(id)?;
         if entry.completed.load(Ordering::SeqCst) {
@@ -113,6 +137,9 @@ impl JobTable {
     pub fn release_job(&mut self, id: &str) {
         if let Some(entry) = self.jobs.remove(id) {
             entry.controls.cancel();
+            if !entry.completed.load(Ordering::SeqCst) {
+                self.retiring.push(entry);
+            }
         }
     }
     pub fn diagnostic_report(&self, id: &str) -> Option<DiagnosticReport> {
@@ -143,6 +170,21 @@ pub fn unknown_job(id: &str) -> Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn updates_wait_for_cancelled_jobs_to_settle_and_exclude_new_jobs() {
+        let mut table = JobTable::new();
+        let job = table.insert("job:save").unwrap();
+        assert!(table.begin_update().is_err());
+        table.release_job("job:save");
+        assert!(job.controls.is_cancelled());
+        assert!(table.begin_update().is_err());
+        job.finish(None);
+        table.begin_update().unwrap();
+        assert!(table.insert("job:new").is_err());
+        assert!(table.begin_update().is_err());
+        table.end_update();
+        assert!(table.insert("job:new").is_ok());
+    }
     #[test]
     fn retirement_cancels_work_and_revokes_output_access() {
         let mut table = JobTable::new();
@@ -203,15 +245,15 @@ mod tests {
     #[test]
     fn expired_interaction_cannot_answer_a_new_question() {
         let registration = Registration::new();
-        let (first, first_answer) = registration.request_partial();
+        let (first, first_answer) = registration.request_retry();
         drop(first_answer);
-        let (second, mut answer) = registration.request_partial();
+        let (second, mut answer) = registration.request_retry();
         assert!(registration
-            .answer_partial(first, RecoveryChoice::Discard)
+            .answer_retry(first, RetryChoice::Cancel)
             .is_err());
         registration
-            .answer_partial(second, RecoveryChoice::Keep)
+            .answer_retry(second, RetryChoice::Retry)
             .unwrap();
-        assert_eq!(answer.try_recv().unwrap(), RecoveryChoice::Keep);
+        assert_eq!(answer.try_recv().unwrap(), RetryChoice::Retry);
     }
 }

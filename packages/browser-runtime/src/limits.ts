@@ -47,7 +47,7 @@ export const BROWSER_MOBILE_LIMITS: BrowserLimits = {
   maxBytes: BROWSER_MOBILE_MAX_CANVAS_AREA * 4,
 };
 
-/** Automatic selection caps (`SelectionPolicy`). */
+/** Browser Host resolution limits. */
 export interface SelectionLimits {
   maxWidth: number;
   maxHeight: number;

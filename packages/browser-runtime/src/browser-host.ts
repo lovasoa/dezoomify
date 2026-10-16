@@ -9,28 +9,31 @@ import type {
   Image,
   Interaction,
   Error as JobError,
-  MissingTiles,
+  JobInput,
   Output,
   OutputPlan,
   ProbeOutcome,
   Progress,
-  RecoveryChoice,
   ResourceRead,
   ResourceRequest,
   Tile,
+  TileAcquisition,
 } from "@dezoomify/wasm-bindings";
 import type { DiagnosticRecorder } from "../../shared-ui/src/diagnostics.ts";
 import { causeOf, isJobError, unknownDetail } from "../../shared-ui/src/failure.ts";
 import type { CanvasAssembly } from "./assembly.ts";
 import { originOfUrl } from "./fetch-primitives.ts";
+import type { SelectionLimits } from "./limits.ts";
 import type { TileDecoder } from "./tile-decode.ts";
 import type { TileImageLike } from "./tile-draw.ts";
 
 export interface BrowserHostDependencies {
   signal: AbortSignal;
+  selectionLimits: SelectionLimits;
   diagnostics?: DiagnosticRecorder;
   assembly: CanvasAssembly;
   decoder: TileDecoder;
+  observe?(interaction: Interaction, signal: AbortSignal): Promise<JobInput[]>;
   fetchResource(
     request: ResourceRequest,
     signal: AbortSignal,
@@ -38,7 +41,7 @@ export interface BrowserHostDependencies {
   ): Promise<ResourceRead>;
   loadDisplayImage?(url: string, signal: AbortSignal): Promise<TileImageLike>;
   onProgress(progress: Progress): void;
-  choosePartial(missing: MissingTiles, signal: AbortSignal): Promise<RecoveryChoice>;
+  approveRetry(request: TileAcquisition, signal: AbortSignal): Promise<void>;
   transport?(): ErrorTransport | null;
 }
 
@@ -54,8 +57,17 @@ export class BrowserHost implements Host {
   private resumePending: (() => void) | undefined;
   private pauseWait: Promise<void> | undefined;
   paused = false;
+  retryWaiting = false;
 
   constructor(deps: BrowserHostDependencies) {
+    if (
+      Object.values(deps.selectionLimits).some((limit) => !Number.isFinite(limit) || limit <= 0)
+    ) {
+      throw {
+        kind: "invalid-options",
+        detail: "canvas limits must be positive",
+      } satisfies JobError;
+    }
     this.deps = deps;
     this.signal = AbortSignal.any([deps.signal, this.resources.signal]);
   }
@@ -92,6 +104,17 @@ export class BrowserHost implements Host {
 
   fetch(request: ResourceRequest, interaction: Interaction): Promise<ResourceRead> {
     return this.own(() => this.readResource(request, interaction));
+  }
+
+  observe(interaction: Interaction): Promise<JobInput[]> {
+    return this.own(async () => {
+      this.signal.throwIfAborted();
+      const inputs = await this.deps.observe?.(interaction, this.signal);
+      this.signal.throwIfAborted();
+      return inputs ?? [];
+    }).catch((error) => {
+      throw this.failure(error);
+    });
   }
 
   parseHtml(query: HtmlQuery): Promise<HtmlDocument> {
@@ -212,8 +235,12 @@ export class BrowserHost implements Host {
     }
   }
 
-  acquireTile(tile: Tile): Promise<void> {
-    return this.own(() => this.paintTile(tile));
+  acquireTile(request: TileAcquisition): Promise<void> {
+    return this.own(async () => {
+      if (request.requires_approval) await this.wait(this.deps.approveRetry(request, this.signal));
+      if (this.paused || this.retryWaiting) await this.checkpoint("acquisition");
+      await this.paintTile(request.tile);
+    });
   }
 
   private async paintTile(tile: Tile): Promise<void> {
@@ -255,23 +282,19 @@ export class BrowserHost implements Host {
   private async loadTile(tile: Tile): Promise<ArrayBuffer | TileImageLike> {
     const origin = originOfUrl(tile.request.uri);
     const ordinary =
-      tile.placement.processing === "none" && this.deps.loadDisplayImage !== undefined;
+      tile.placement.processing === "none" &&
+      this.deps.loadDisplayImage !== undefined &&
+      !(tile.request.headers ?? []).some(({ name }) => name.toLowerCase() === "range");
     let classified: ((displayOnly: boolean) => void) | undefined;
     try {
       this.signal.throwIfAborted();
-      if (ordinary) {
-        if (this.displayOrigins.has(origin)) return await this.display(tile.request);
-        const pending = this.classifying.get(origin);
-        if (pending) {
-          if (await this.wait(pending)) return await this.display(tile.request);
-        } else
-          this.classifying.set(
-            origin,
-            new Promise((resolve) => {
-              classified = resolve;
-            }),
-          );
-      }
+      if (
+        ordinary &&
+        (await this.classifyOrigin(origin, (resolve) => {
+          classified = resolve;
+        }))
+      )
+        return await this.display(tile.request);
       let bytes: ArrayBuffer;
       try {
         bytes = await this.readable(tile.request);
@@ -298,6 +321,17 @@ export class BrowserHost implements Host {
     }
   }
 
+  private async classifyOrigin(
+    origin: string,
+    register: (resolve: (displayOnly: boolean) => void) => void,
+  ): Promise<boolean> {
+    if (this.displayOrigins.has(origin)) return true;
+    const pending = this.classifying.get(origin);
+    if (pending) return await this.wait(pending);
+    this.classifying.set(origin, new Promise(register));
+    return false;
+  }
+
   finish(request: FinishRequest): Promise<Output> {
     return this.own(() => this.saveOutput(request));
   }
@@ -309,7 +343,6 @@ export class BrowserHost implements Host {
       return {
         canvas: this.deps.assembly.dimensions() ?? undefined,
         format: request.format,
-        missing: request.missing,
         disposition,
       };
     } catch (error) {
@@ -318,38 +351,66 @@ export class BrowserHost implements Host {
   }
 
   async chooseImage(catalog: Catalog): Promise<number> {
-    const index = catalog.entries.findIndex((entry) => entry.kind === "image");
-    return Math.max(0, index);
+    await this.checkpoint("cancellation");
+    let chosen = 0,
+      bestArea = -1;
+    catalog.entries.forEach((entry, index) => {
+      if (entry.kind !== "image") return;
+      const area = entry.levels.reduce(
+        (largest, level) =>
+          Math.max(largest, level.size ? level.size.width * level.size.height : 0),
+        0,
+      );
+      if (area >= bestArea) {
+        chosen = index;
+        bestArea = area;
+      }
+    });
+    return chosen;
   }
   async chooseLevel(image: Image): Promise<number> {
-    return Math.max(0, image.levels.length - 1);
+    await this.checkpoint("cancellation");
+    const { maxWidth, maxHeight, maxArea } = this.deps.selectionLimits;
+    const levels = image.levels.flatMap(({ size }, index) =>
+      size && size.width > 0 && size.height > 0
+        ? [{ index, size, area: size.width * size.height }]
+        : [],
+    );
+    levels.sort((a, b) => a.area - b.area);
+    const fitting = levels.filter(
+      ({ size, area }) => size.width <= maxWidth && size.height <= maxHeight && area <= maxArea,
+    );
+    return fitting.at(-1)?.index ?? levels[0]?.index ?? image.levels.length - 1;
   }
-  async choosePartial(missing: MissingTiles): Promise<RecoveryChoice> {
-    try {
-      return await this.own(() => this.deps.choosePartial(missing, this.signal));
-    } catch (error) {
-      throw this.failure(error);
+  private updatePauseGate(): void {
+    if (this.paused || this.retryWaiting) {
+      this.pauseWait ??= new Promise((resolve) => {
+        this.resumePending = resolve;
+      });
+    } else {
+      this.resumePending?.();
+      this.resumePending = undefined;
+      this.pauseWait = undefined;
     }
   }
   pause(): void {
-    if (!this.paused) {
-      this.paused = true;
-      this.pauseWait = new Promise((resolve) => {
-        this.resumePending = resolve;
-      });
-    }
+    this.paused = true;
+    this.updatePauseGate();
   }
   resume(): void {
     this.paused = false;
-    this.resumePending?.();
-    this.resumePending = undefined;
-    this.pauseWait = undefined;
+    this.updatePauseGate();
+  }
+  waitForRetry(waiting: boolean): void {
+    this.retryWaiting = waiting;
+    this.updatePauseGate();
   }
 
   async checkpoint(gate: Gate): Promise<void> {
     try {
       this.signal.throwIfAborted();
-      while (gate === "acquisition" && this.pauseWait) await this.wait(this.pauseWait);
+      while (gate === "acquisition" && (this.paused || this.retryWaiting) && this.pauseWait)
+        await this.wait(this.pauseWait);
       this.signal.throwIfAborted();
     } catch (error) {
       throw this.failure(error);
@@ -402,6 +463,7 @@ export class BrowserHost implements Host {
   settle(): Promise<void> {
     this.settling ??= (async () => {
       this.resources.abort();
+      this.waitForRetry(false);
       this.resume();
       this.deps.assembly.release();
       this.deps.decoder.dispose();

@@ -78,6 +78,7 @@ pub fn discover_inputs(
             }
         },
         parse_html,
+        |_| async { Ok(Vec::new()) },
     ));
     (result, requests.into_inner())
 }

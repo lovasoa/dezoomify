@@ -987,7 +987,10 @@ impl IiifWriter {
             crate::imaging::encode_jpeg_to(
                 file.writer(cancelled),
                 pixels,
-                100 - self.compression,
+                dezoomify::model::OutputFormat::Jpeg
+                    .codec()
+                    .control
+                    .quality(self.compression),
                 self.icc_profile.as_deref(),
             )
         } else {
@@ -1013,6 +1016,42 @@ impl IiifWriter {
             )?;
         }
         Ok(path)
+    }
+
+    fn read_settled_profile(&mut self, cancelled: &AtomicBool) -> Result<(), Error> {
+        // Acquisition has settled and reused probes now have their final order.
+        // Read just one profile at a time; no completion-order metadata cache.
+        for tile in self.base.tiles.values() {
+            if cancelled.load(Ordering::SeqCst) {
+                return Err(Error::Cancelled);
+            }
+            let body;
+            let bytes = if let TileBytes::Memory(bytes) = &tile.bytes {
+                bytes.as_slice()
+            } else if let TileBytes::File(path) = &tile.bytes {
+                let len = std::fs::metadata(path)
+                    .map_err(|e| crate::output::write_failed("tile stat failed", &e))?
+                    .len();
+                memory_check(self.retained + len, self.budget)?;
+                body = std::fs::read(path)
+                    .map_err(|e| crate::output::write_failed("tile read failed", &e))?;
+                &body
+            } else {
+                return Err(Error::Internal("unexpected IIIF tile storage".into()));
+            };
+            let extra = if matches!(tile.bytes, TileBytes::Memory(_)) {
+                0
+            } else {
+                bytes.len() as u64
+            };
+            let budget = self.budget.saturating_sub(self.retained + extra);
+            if let (Some(icc), _) = tile_metadata(bytes, tile.format, budget)? {
+                self.retained += icc.len() as u64;
+                self.icc_profile = Some(icc);
+                break;
+            }
+        }
+        Ok(())
     }
 
     pub(crate) fn finish(
@@ -1063,38 +1102,7 @@ impl IiifWriter {
         memory_check(self.retained + growth, self.budget)?;
         self.budget -= growth;
         self.index_bytes += growth;
-        // Acquisition has settled and reused probes now have their final order.
-        // Read just one profile at a time; no completion-order metadata cache.
-        for tile in self.base.tiles.values() {
-            if cancelled.load(Ordering::SeqCst) {
-                return Err(Error::Cancelled);
-            }
-            let body;
-            let bytes = if let TileBytes::Memory(bytes) = &tile.bytes {
-                bytes.as_slice()
-            } else if let TileBytes::File(path) = &tile.bytes {
-                let len = std::fs::metadata(path)
-                    .map_err(|e| crate::output::write_failed("tile stat failed", &e))?
-                    .len();
-                memory_check(self.retained + len, self.budget)?;
-                body = std::fs::read(path)
-                    .map_err(|e| crate::output::write_failed("tile read failed", &e))?;
-                &body
-            } else {
-                return Err(Error::Internal("unexpected IIIF tile storage".into()));
-            };
-            let extra = if matches!(tile.bytes, TileBytes::Memory(_)) {
-                0
-            } else {
-                bytes.len() as u64
-            };
-            let budget = self.budget.saturating_sub(self.retained + extra);
-            if let (Some(icc), _) = tile_metadata(bytes, tile.format, budget)? {
-                self.retained += icc.len() as u64;
-                self.icc_profile = Some(icc);
-                break;
-            }
-        }
+        self.read_settled_profile(cancelled)?;
         for index in 0..normalized.count()? {
             let rect = normalized.rect(index);
             let existing = self.base.tiles.get(&index).filter(|tile| {

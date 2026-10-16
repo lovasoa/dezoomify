@@ -32,6 +32,7 @@ struct ControlState {
     cancelled: AtomicBool,
     paused: AtomicBool,
     changed: tokio::sync::Notify,
+    retry_waiting: AtomicBool,
     reader: std::sync::Mutex<Option<std::sync::Weak<PixelPipe>>>,
 }
 /// Honest execution accounting, reported with every result.
@@ -111,8 +112,14 @@ fn safe_output_stem(title: Option<&str>) -> String {
 
 fn automatic_image_format(size: Vec2d, transparent: bool) -> OutputFormat {
     if !transparent
-        && size.x <= crate::imaging::JPEG_MAX_SIDE
-        && size.y <= crate::imaging::JPEG_MAX_SIDE
+        && crate::imaging::check_dimensions(
+            OutputFormat::Jpeg,
+            &Size {
+                width: size.x,
+                height: size.y,
+            },
+        )
+        .is_ok()
     {
         OutputFormat::Jpeg
     } else {
@@ -136,28 +143,16 @@ fn automatic_format_checks_both_sides_at_the_jpeg_boundary() {
     );
 }
 
-fn auto_output_path(
-    output_dir: &Path,
-    title: Option<&str>,
-    format: OutputFormat,
-    partial: bool,
-) -> PathBuf {
+fn auto_output_path(output_dir: &Path, title: Option<&str>, format: OutputFormat) -> PathBuf {
     let stem = safe_output_stem(title);
     let extension = format.extension();
     let first = output_dir.join(format!("{stem}.{extension}"));
-    let exists = |path: &Path| {
-        if partial {
-            crate::output::partial_path_for(path).exists()
-        } else {
-            path.exists()
-        }
-    };
-    if !exists(&first) {
+    if !first.exists() {
         return first;
     }
     for suffix in 2..=9_999 {
         let candidate = output_dir.join(format!("{stem}-{suffix}.{extension}"));
-        if !exists(&candidate) {
+        if !candidate.exists() {
             return candidate;
         }
     }
@@ -220,7 +215,10 @@ impl Controls {
             if self.is_cancelled() {
                 return Err(cancelled());
             }
-            if !acquisition || !self.0.paused.load(Ordering::SeqCst) {
+            if !acquisition
+                || !(self.0.paused.load(Ordering::SeqCst)
+                    || self.0.retry_waiting.load(Ordering::SeqCst))
+            {
                 return Ok(());
             }
             changed.await;
@@ -228,8 +226,8 @@ impl Controls {
     }
 }
 
-type PartialAnswer<'a> = Pin<Box<dyn Future<Output = Result<RecoveryChoice, Error>> + 'a>>;
-type PartialCallback<'a> = Box<dyn FnMut(MissingTiles) -> PartialAnswer<'a> + 'a>;
+type RetryAnswer<'a> = Pin<Box<dyn Future<Output = Result<RetryChoice, Error>> + 'a>>;
+type RetryCallback<'a> = Box<dyn FnMut(TileAcquisition) -> RetryAnswer<'a> + 'a>;
 
 struct PendingPixels {
     id: u32,
@@ -256,7 +254,9 @@ pub struct NativeHost<'a> {
     throttle: tokio::sync::Mutex<Option<Instant>>,
     progress: RefCell<Box<dyn FnMut(Progress) + 'a>>,
     last_progress: RefCell<Progress>,
-    partial: RefCell<Option<PartialCallback<'a>>>,
+    retry: RefCell<Option<RetryCallback<'a>>>,
+    approved_attempt: Cell<u32>,
+    retry_pending: Cell<bool>,
     published: RefCell<Option<Publication>>,
     source_format: RefCell<Option<String>>,
     output_plan: RefCell<Option<OutputPlan>>,
@@ -283,7 +283,7 @@ impl<'a> NativeHost<'a> {
             "format": options.format, "image_index": options.image_index, "zoom_level": options.zoom_level,
             "largest": options.largest, "max_width": options.max_width, "max_height": options.max_height,
             "parallelism": options.max_concurrent, "retries": options.max_retries,
-            "retry_delay_ms": options.retry_base_delay.as_millis(), "keep_partial": options.keep_partial,
+            "retry_delay_ms": options.retry_base_delay.as_millis(),
             "compression": options.compression, "header_names": options.headers.keys().collect::<Vec<_>>(),
             "credentials_present": !options.headers.is_empty(), "cache_enabled": true,
             "max_tiles": options.max_tiles, "max_bytes": options.max_bytes
@@ -329,7 +329,9 @@ impl<'a> NativeHost<'a> {
             throttle: tokio::sync::Mutex::new(None),
             progress: RefCell::new(Box::new(|_| {})),
             last_progress: RefCell::new(Progress::default()),
-            partial: RefCell::new(None),
+            retry: RefCell::new(None),
+            approved_attempt: Cell::new(0),
+            retry_pending: Cell::new(false),
             published: RefCell::new(None),
             source_format: RefCell::new(None),
             output_plan: RefCell::new(None),
@@ -342,8 +344,43 @@ impl<'a> NativeHost<'a> {
         *self.progress.borrow_mut() = Box::new(callback);
     }
 
-    pub fn on_partial(&self, callback: impl FnMut(MissingTiles) -> PartialAnswer<'a> + 'a) {
-        *self.partial.borrow_mut() = Some(Box::new(callback));
+    pub fn on_retry(&self, callback: impl FnMut(TileAcquisition) -> RetryAnswer<'a> + 'a) {
+        *self.retry.borrow_mut() = Some(Box::new(callback));
+    }
+
+    async fn approve_retry(&self, request: &TileAcquisition) -> Result<(), Error> {
+        if !request.requires_approval {
+            return Ok(());
+        }
+        loop {
+            if request.attempt <= self.approved_attempt.get() {
+                return Ok(());
+            }
+            if self.retry_pending.get() {
+                self.controls.checkpoint(true).await?;
+                continue;
+            }
+            let answer = self
+                .retry
+                .borrow_mut()
+                .as_mut()
+                .ok_or_else(|| Error::InvalidState("retry approval is unavailable".into()))?(
+                request.clone(),
+            );
+            self.retry_pending.set(true);
+            self.controls.0.retry_waiting.store(true, Ordering::SeqCst);
+            let choice = self.controlled(answer).await;
+            self.retry_pending.set(false);
+            self.controls.0.retry_waiting.store(false, Ordering::SeqCst);
+            self.controls.0.changed.notify_waiters();
+            match choice? {
+                RetryChoice::Retry => self.approved_attempt.set(request.attempt),
+                RetryChoice::Cancel => {
+                    self.controls.cancel();
+                    return Err(Error::Cancelled);
+                }
+            }
+        }
     }
 
     pub fn publication(&self) -> Option<Publication> {
@@ -358,20 +395,13 @@ impl<'a> NativeHost<'a> {
         Options {
             format: self.options.format.clone(),
             output: self.format,
-            selection: SelectionPolicy::Automatic {
-                image_index: self.options.image_index.unwrap_or(0),
-                largest: self.options.largest,
-                max_width: self.options.max_width,
-                max_height: self.options.max_height,
-                zoom_level: self.options.zoom_level,
-            },
             max_concurrent: self.options.max_concurrent as u32,
             max_tiles: self.options.max_tiles as u32,
             max_retries: self.options.max_retries,
+            interactive_retries: self.retry.borrow().is_some(),
             max_bytes: self.options.max_bytes,
             max_deferred_follows: 10,
             retry_base_delay_ms: self.options.retry_base_delay.as_millis().min(300_000) as u64,
-            ..Options::default()
         }
     }
 
@@ -416,7 +446,7 @@ impl<'a> NativeHost<'a> {
                 preview: None,
                 transport: ErrorTransport::Native,
                 failure: Failure {
-                    request: Some(dezoomify::model::bounded_uri(outcome.final_uri.clone())),
+                    request: Some(dezoomify::model::bounded_uri(outcome.final_uri)),
                     detail: None,
                 },
             };
@@ -429,7 +459,7 @@ impl<'a> NativeHost<'a> {
         &self,
         bytes: Vec<u8>,
         processing: dezoomify::core::model::ProcessingRecipe,
-        store: Option<(PathBuf, String, String)>,
+        store: Option<(PathBuf, String, ResourceRequest)>,
     ) -> Result<ReceivedPixels, Error> {
         let permit = self.decode_tails.reserve(bytes.len());
         let decode_tails = Arc::clone(&self.decode_tails);
@@ -449,8 +479,8 @@ impl<'a> NativeHost<'a> {
                     .apply(bytes)
                     .map_err(|error| Error::ProcessingFailed(error.to_string().into()))?;
                 processing_memory.shrink(bytes.len() as u64);
-                if let Some((dir, namespace, uri)) = &store {
-                    let _ = crate::cache::store(dir, namespace, uri, &bytes);
+                if let Some((dir, namespace, request)) = &store {
+                    let _ = crate::cache::store(dir, namespace, request, &bytes);
                 }
                 let (dimensions, _) = crate::tile_output::inspect(&bytes, budget.available())?;
                 // Charge before the pixel decoder can allocate. The temporary
@@ -483,7 +513,7 @@ impl<'a> NativeHost<'a> {
             .cache_dir
             .clone()
             .unwrap_or_else(crate::imaging::default_tile_cache_dir);
-        if let Some(bytes) = crate::cache::load(&dir, &namespace, &tile.request.uri) {
+        if let Some(bytes) = crate::cache::load(&dir, &namespace, &tile.request) {
             self.diagnostics.count("cache_reads", 1.0);
             match self.decode(bytes, Default::default(), None).await {
                 Ok(decoded) => return Ok(decoded),
@@ -493,7 +523,7 @@ impl<'a> NativeHost<'a> {
             self.controls.checkpoint(false).await?;
             let _ = std::fs::remove_file(
                 dir.join(&namespace)
-                    .join(crate::cache::cache_key(&tile.request.uri)),
+                    .join(crate::cache::cache_key(&tile.request)),
             );
         }
         if !self.options.min_interval.is_zero() {
@@ -515,7 +545,7 @@ impl<'a> NativeHost<'a> {
         self.decode(
             response.body,
             tile.placement.processing,
-            Some((dir, namespace, tile.request.uri.clone())),
+            Some((dir, namespace, tile.request.clone())),
         )
         .await
     }
@@ -551,7 +581,7 @@ impl<'a> NativeHost<'a> {
             .cache_dir
             .clone()
             .unwrap_or_else(crate::imaging::default_tile_cache_dir);
-        if let Some(bytes) = crate::cache::load(&dir, &namespace, &tile.request.uri) {
+        if let Some(bytes) = crate::cache::load(&dir, &namespace, &tile.request) {
             match self.inspect_encoded(bytes).await {
                 Ok((bytes, size, format)) => {
                     self.diagnostics.count("cache_reads", 1.0);
@@ -569,7 +599,7 @@ impl<'a> NativeHost<'a> {
             }
             let _ = std::fs::remove_file(
                 dir.join(&namespace)
-                    .join(crate::cache::cache_key(&tile.request.uri)),
+                    .join(crate::cache::cache_key(&tile.request)),
             );
         }
         if !self.options.min_interval.is_zero() {
@@ -589,7 +619,7 @@ impl<'a> NativeHost<'a> {
         let processing = tile.placement.processing;
         let permit = self.decode_tails.reserve(response.body.len());
         self.check_encoded_inflight()?;
-        let uri = tile.request.uri.clone();
+        let request = tile.request.clone();
         let budget = self
             .options
             .output_retain_cap
@@ -603,7 +633,7 @@ impl<'a> NativeHost<'a> {
                         .map_err(|e| Error::ProcessingFailed(e.to_string().into()))?;
                     crate::tile_output::normalize_orientation(&mut bytes);
                     let (size, format) = crate::tile_output::inspect(&bytes, budget)?;
-                    let _ = crate::cache::store(&dir, &namespace, &uri, &bytes);
+                    let _ = crate::cache::store(&dir, &namespace, &request, &bytes);
                     Ok((bytes, size, format))
                 })
                 .await
@@ -656,7 +686,7 @@ impl<'a> NativeHost<'a> {
                 .unwrap_or_else(crate::imaging::default_tile_cache_dir);
             let _ = std::fs::remove_file(
                 dir.join(crate::cache::job_namespace(&self.options.input_url))
-                    .join(crate::cache::cache_key(&tile.request.uri)),
+                    .join(crate::cache::cache_key(&tile.request)),
             );
         }
     }
@@ -770,8 +800,8 @@ impl<'a> NativeHost<'a> {
     ) -> Result<(), Error> {
         let destination = match &self.options.output {
             OutputTarget::File(path) => path.clone(),
-            OutputTarget::AutoDir { dir, format } => auto_output_path(dir, title, *format, false),
-            OutputTarget::AutoImageDir { dir } => auto_output_path(dir, title, format, false),
+            OutputTarget::AutoDir { dir, format } => auto_output_path(dir, title, *format),
+            OutputTarget::AutoImageDir { dir } => auto_output_path(dir, title, format),
         };
         let task = EncoderTask::start(
             &destination,
@@ -798,12 +828,107 @@ impl<'a> NativeHost<'a> {
         Ok(())
     }
 
-    fn next_auto_destination(
+    async fn finish_raster(
         &self,
-        title: Option<&str>,
-        partial: bool,
-        format: OutputFormat,
-    ) -> PathBuf {
+        request: &FinishRequest,
+    ) -> Result<(OutputFormat, crate::output::PreparedOutput), Error> {
+        let mut format = self.format;
+        if self.raster.borrow().is_none() {
+            let dimensions = request.canvas.clone().unwrap_or_else(|| {
+                let mut dimensions = Size {
+                    width: 0,
+                    height: 0,
+                };
+                for pending in self.pending_pixels.borrow().iter() {
+                    let image = &pending.pixels.decoded.image;
+                    let w = image.width().min(
+                        pending
+                            .placement
+                            .expected_size
+                            .as_ref()
+                            .map_or(image.width(), |s| s.width),
+                    );
+                    let h = image.height().min(
+                        pending
+                            .placement
+                            .expected_size
+                            .as_ref()
+                            .map_or(image.height(), |s| s.height),
+                    );
+                    dimensions.width = dimensions
+                        .width
+                        .max(pending.placement.position.x.saturating_add(w));
+                    dimensions.height = dimensions
+                        .height
+                        .max(pending.placement.position.y.saturating_add(h));
+                }
+                dimensions
+            });
+            if matches!(self.options.output, OutputTarget::AutoImageDir { .. }) {
+                // Auto waits for alpha and coverage; explicit formats can
+                // encode while acquisition is still running.
+                let pending = self.pending_pixels.borrow();
+                let covered = pending.len() == 1
+                    && pending[0].placement.position == (Point { x: 0, y: 0 })
+                    && pending[0].pixels.decoded.image.width() >= dimensions.width
+                    && pending[0].pixels.decoded.image.height() >= dimensions.height;
+                let grid_covered = self
+                    .output_plan
+                    .borrow()
+                    .as_ref()
+                    .is_some_and(|plan| plan.grid.is_some())
+                    && pending.iter().all(|tile| {
+                        tile.placement.expected_size.as_ref().is_some_and(|extent| {
+                            tile.pixels.decoded.image.width() >= extent.width
+                                && tile.pixels.decoded.image.height() >= extent.height
+                        })
+                    });
+                let transparent = !(covered || grid_covered)
+                    || pending.iter().any(|tile| {
+                        tile.pixels
+                            .decoded
+                            .image
+                            .pixels()
+                            .any(|pixel| pixel[3] != 255)
+                    });
+                format = automatic_image_format(size(&dimensions), transparent);
+            }
+            self.start_raster(dimensions, request.title.as_deref(), format)
+                .await?;
+        }
+        let pipe = Arc::clone(&self.raster.borrow().as_ref().expect("raster task").pipe);
+        let producer = Arc::clone(&pipe);
+        let reused = request.reused_tiles.clone();
+        let permit = self.decode_tails.reserve(0);
+        self.controlled(async {
+            tokio::task::spawn_blocking(move || {
+                let _permit = permit;
+                producer.finish(&reused)
+            })
+            .await
+            .map_err(|_| Error::Internal("pixel producer task failed".into()))?
+        })
+        .await?;
+        let task = self.raster.borrow_mut().take().expect("raster task");
+        let mut wait = std::pin::pin!(task.wait());
+        let mut updates = tokio::time::interval(Duration::from_millis(100));
+        let staging = loop {
+            tokio::select! {
+                result = &mut wait => break result?,
+                _ = updates.tick() => self.report_preparation(&pipe),
+            }
+        };
+        self.report_preparation(&pipe);
+        let prepared = crate::output::PreparedOutput {
+            staging: crate::output::StagedOutput::File(staging),
+            size: pipe.size.clone(),
+            pixel_decodes: 0,
+            late_writes: pipe.late(),
+        };
+        Ok((format, prepared))
+    }
+
+    fn next_auto_destination(&self, title: Option<&str>, format: OutputFormat) -> PathBuf {
         let dir = match &self.options.output {
             OutputTarget::AutoDir { dir, .. } | OutputTarget::AutoImageDir { dir } => dir,
             OutputTarget::File(_) => unreachable!("automatic destination"),
@@ -816,11 +941,6 @@ impl<'a> NativeHost<'a> {
                 format!("{stem}-{suffix}")
             };
             let path = dir.join(format!("{name}.{}", format.extension()));
-            let path = if partial {
-                crate::output::partial_path_for(&path)
-            } else {
-                path
-            };
             if !path.exists() {
                 return path;
             }
@@ -838,6 +958,10 @@ impl<'a> NativeHost<'a> {
 }
 
 impl Host for NativeHost<'_> {
+    async fn observe(&self, _: Interaction) -> Result<JobInputs, Error> {
+        Ok(Vec::new())
+    }
+
     async fn parse_html(
         &self,
         query: dezoomify::model::HtmlQuery,
@@ -858,10 +982,10 @@ impl Host for NativeHost<'_> {
             let destination = match &self.options.output {
                 OutputTarget::File(path) => path.clone(),
                 OutputTarget::AutoDir { dir, format } => {
-                    auto_output_path(dir, plan.title.as_deref(), *format, false)
+                    auto_output_path(dir, plan.title.as_deref(), *format)
                 }
                 OutputTarget::AutoImageDir { dir } => {
-                    auto_output_path(dir, plan.title.as_deref(), self.format, false)
+                    auto_output_path(dir, plan.title.as_deref(), self.format)
                 }
             };
             let probes = std::mem::take(&mut *self.encoded_probes.borrow_mut());
@@ -1018,7 +1142,10 @@ impl Host for NativeHost<'_> {
         }
     }
 
-    async fn acquire_tile(&self, tile: Tile) -> Result<(), Error> {
+    async fn acquire_tile(&self, request: TileAcquisition) -> Result<(), Error> {
+        self.approve_retry(&request).await?;
+        self.controls.checkpoint(true).await?;
+        let tile = request.tile;
         let result = async {
             if matches!(self.format, OutputFormat::IiifDir | OutputFormat::Zif) {
                 let encoded = self.encoded_tile(&tile).await?;
@@ -1052,24 +1179,18 @@ impl Host for NativeHost<'_> {
 
     async fn finish(&self, request: FinishRequest) -> Result<Output, Error> {
         self.controls.checkpoint(false).await?;
-        let partial = !request.missing.is_empty();
         let destination_for = |format| match &self.options.output {
             OutputTarget::File(path) => path.clone(),
             OutputTarget::AutoDir { dir, format } => {
-                auto_output_path(dir, request.title.as_deref(), *format, partial)
+                auto_output_path(dir, request.title.as_deref(), *format)
             }
             OutputTarget::AutoImageDir { dir } => {
-                auto_output_path(dir, request.title.as_deref(), format, partial)
+                auto_output_path(dir, request.title.as_deref(), format)
             }
         };
         let tiled = self.tiled.borrow_mut().take();
         let tiled_result = if let Some(writer) = tiled {
             let destination = destination_for(self.format);
-            let destination = if partial {
-                crate::output::partial_path_for(&destination)
-            } else {
-                destination.clone()
-            };
             let controls = self.controls.clone();
             let reused = request.reused_tiles.clone();
             Some(
@@ -1090,109 +1211,15 @@ impl Host for NativeHost<'_> {
         let mut prepared = if let Some(prepared) = tiled_result {
             prepared
         } else {
-            if self.raster.borrow().is_none() {
-                let dimensions = request.canvas.clone().unwrap_or_else(|| {
-                    let mut dimensions = Size {
-                        width: 0,
-                        height: 0,
-                    };
-                    for pending in self.pending_pixels.borrow().iter() {
-                        let image = &pending.pixels.decoded.image;
-                        let w = image.width().min(
-                            pending
-                                .placement
-                                .expected_size
-                                .as_ref()
-                                .map_or(image.width(), |s| s.width),
-                        );
-                        let h = image.height().min(
-                            pending
-                                .placement
-                                .expected_size
-                                .as_ref()
-                                .map_or(image.height(), |s| s.height),
-                        );
-                        dimensions.width = dimensions
-                            .width
-                            .max(pending.placement.position.x.saturating_add(w));
-                        dimensions.height = dimensions
-                            .height
-                            .max(pending.placement.position.y.saturating_add(h));
-                    }
-                    dimensions
-                });
-                if matches!(self.options.output, OutputTarget::AutoImageDir { .. }) {
-                    // Auto waits for alpha and coverage; explicit formats can
-                    // encode while acquisition is still running.
-                    let pending = self.pending_pixels.borrow();
-                    let covered = pending.len() == 1
-                        && pending[0].placement.position == (Point { x: 0, y: 0 })
-                        && pending[0].pixels.decoded.image.width() >= dimensions.width
-                        && pending[0].pixels.decoded.image.height() >= dimensions.height;
-                    let grid_covered = self
-                        .output_plan
-                        .borrow()
-                        .as_ref()
-                        .is_some_and(|plan| plan.grid.is_some())
-                        && pending.iter().all(|tile| {
-                            tile.placement.expected_size.as_ref().is_some_and(|extent| {
-                                tile.pixels.decoded.image.width() >= extent.width
-                                    && tile.pixels.decoded.image.height() >= extent.height
-                            })
-                        });
-                    let transparent = partial
-                        || !(covered || grid_covered)
-                        || pending.iter().any(|tile| {
-                            tile.pixels
-                                .decoded
-                                .image
-                                .pixels()
-                                .any(|pixel| pixel[3] != 255)
-                        });
-                    format = automatic_image_format(size(&dimensions), transparent);
-                }
-                self.start_raster(dimensions, request.title.as_deref(), format)
-                    .await?;
-            }
-            let pipe = Arc::clone(&self.raster.borrow().as_ref().expect("raster task").pipe);
-            let producer = Arc::clone(&pipe);
-            let reused = request.reused_tiles.clone();
-            let permit = self.decode_tails.reserve(0);
-            self.controlled(async {
-                tokio::task::spawn_blocking(move || {
-                    let _permit = permit;
-                    producer.finish(&reused)
-                })
-                .await
-                .map_err(|_| Error::Internal("pixel producer task failed".into()))?
-            })
-            .await?;
-            let task = self.raster.borrow_mut().take().expect("raster task");
-            let mut wait = std::pin::pin!(task.wait());
-            let mut updates = tokio::time::interval(Duration::from_millis(100));
-            let staging = loop {
-                tokio::select! {
-                    result = &mut wait => break result?,
-                    _ = updates.tick() => self.report_preparation(&pipe),
-                }
-            };
-            self.report_preparation(&pipe);
-            crate::output::PreparedOutput {
-                staging: crate::output::StagedOutput::File(staging),
-                size: pipe.size.clone(),
-                pixel_decodes: 0,
-                late_writes: pipe.late(),
-            }
+            let (raster_format, prepared) = self.finish_raster(&request).await?;
+            format = raster_format;
+            prepared
         };
         let image_size = size(&prepared.size);
         let destination = destination_for(format);
         self.instrumentation.borrow_mut().pixel_decodes += prepared.pixel_decodes;
         let late_repaints = prepared.late_writes;
-        let mut published = if partial {
-            crate::output::partial_path_for(&destination)
-        } else {
-            destination
-        };
+        let mut published = destination;
         let mut collisions = 0;
         let encoded_bytes = loop {
             let validation =
@@ -1221,8 +1248,7 @@ impl Host for NativeHost<'_> {
                     ) && collisions < 9_999 =>
                 {
                     collisions += 1;
-                    published =
-                        self.next_auto_destination(request.title.as_deref(), partial, format);
+                    published = self.next_auto_destination(request.title.as_deref(), format);
                 }
                 Err(error) => return Err(error),
             }
@@ -1242,11 +1268,10 @@ impl Host for NativeHost<'_> {
                 height: image_size.y,
             }),
             format,
-            missing: request.missing,
             disposition: OutputDisposition::NativePublication,
         };
-        self.diagnostics.finish(if partial { "partial-completed" } else { "completed" },
-            serde_json::json!({"width": image_size.x, "height": image_size.y, "format": format.as_str(), "missing": output.missing.len()}));
+        self.diagnostics.finish("completed",
+            serde_json::json!({"width": image_size.x, "height": image_size.y, "format": format.as_str()}));
         *self.published.borrow_mut() = Some(Publication {
             path: published,
             tile_count: acquired.len(),
@@ -1257,47 +1282,53 @@ impl Host for NativeHost<'_> {
         Ok(output)
     }
 
-    async fn choose_image(&self, _catalog: Catalog) -> Result<u32, Error> {
-        Err(Error::ChoiceFailed(
-            "native image selection requires a configured policy"
-                .to_string()
-                .into(),
-        ))
+    async fn choose_image(&self, catalog: Catalog) -> Result<u32, Error> {
+        let last = catalog
+            .entries
+            .len()
+            .checked_sub(1)
+            .ok_or(Error::PlanEmpty)?;
+        Ok(self.options.image_index.unwrap_or(0).min(last) as u32)
     }
 
-    async fn choose_level(&self, _image: Image) -> Result<u32, Error> {
-        Err(Error::ChoiceFailed(
-            "native level selection requires a configured policy"
-                .to_string()
-                .into(),
-        ))
-    }
-
-    async fn choose_partial(&self, missing: MissingTiles) -> Result<RecoveryChoice, Error> {
-        let answer = self
-            .partial
-            .borrow_mut()
-            .as_mut()
-            .map(|callback| callback(missing));
-        if let Some(answer) = answer {
-            self.controlled(async {
-                match tokio::time::timeout(Duration::from_secs(60), answer).await {
-                    Ok(result) => result,
-                    Err(_) => Ok(if self.options.keep_partial {
-                        RecoveryChoice::Keep
-                    } else {
-                        RecoveryChoice::Discard
-                    }),
-                }
-            })
-            .await
+    async fn choose_level(&self, image: Image) -> Result<u32, Error> {
+        let JobOptions {
+            largest,
+            max_width,
+            max_height,
+            zoom_level,
+            ..
+        } = &self.options;
+        let levels = &image.levels;
+        let sizes = levels.iter().enumerate();
+        let area = |level: &Level| {
+            level
+                .size
+                .as_ref()
+                .map_or(0, |s| u64::from(s.width) * u64::from(s.height))
+        };
+        let index = if let Some(level) = zoom_level {
+            levels.len().checked_sub(1).map(|last| (*level).min(last))
+        } else if *largest || (max_width.is_none() && max_height.is_none()) {
+            sizes.clone().max_by_key(|(_, l)| area(l)).map(|(i, _)| i)
         } else {
-            Ok(if self.options.keep_partial {
-                RecoveryChoice::Keep
-            } else {
-                RecoveryChoice::Discard
-            })
-        }
+            sizes
+                .clone()
+                .filter(|(_, l)| {
+                    l.size.as_ref().is_some_and(|s| {
+                        max_width.is_none_or(|cap| s.width > 0 && s.width <= cap)
+                            && max_height.is_none_or(|cap| s.height > 0 && s.height <= cap)
+                    })
+                })
+                .max_by_key(|(_, l)| area(l))
+                .map(|(i, _)| i)
+                .or_else(|| {
+                    sizes
+                        .min_by_key(|(_, l)| l.size.as_ref().map_or(u32::MAX, |s| s.width))
+                        .map(|(i, _)| i)
+                })
+        };
+        index.map(|i| i as u32).ok_or(Error::PlanEmpty)
     }
 
     async fn checkpoint(&self, gate: Gate) -> Result<(), Error> {
@@ -1444,6 +1475,71 @@ impl Drop for Flight<'_, '_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn configured_choices_preserve_native_defaults_caps_and_precedence() {
+        let image = Image {
+            title: None,
+            format: "test".into(),
+            size: None,
+            levels: [None, Some(1), Some(256), Some(512)]
+                .into_iter()
+                .map(|width| Level {
+                    label: String::new(),
+                    tile_size: None,
+                    size: width.map(|width| Size {
+                        width,
+                        height: width,
+                    }),
+                })
+                .collect(),
+        };
+        for (image_index, largest, max_width, max_height, zoom_level, expected) in [
+            (None, false, None, None, None, [3, 3]),
+            (Some(1), false, Some(300), Some(300), None, [2, 0]),
+            (Some(usize::MAX), true, Some(1), Some(1), None, [3, 3]),
+            (None, true, None, None, Some(1), [1, 1]),
+            (None, false, None, None, Some(usize::MAX), [3, 3]),
+            (None, false, Some(300), None, None, [2, 0]),
+            (None, false, None, Some(300), None, [2, 0]),
+            (None, false, Some(0), Some(0), None, [1, 0]),
+        ] {
+            let host = NativeHost::new(JobOptions {
+                input_url: "https://images.test/image.dzi".into(),
+                output: OutputTarget::AutoImageDir {
+                    dir: std::env::temp_dir(),
+                },
+                image_index,
+                largest,
+                max_width,
+                max_height,
+                zoom_level,
+                ..Default::default()
+            })
+            .unwrap();
+            host.transport.block_on(async {
+                let catalog = Catalog {
+                    entries: vec![
+                        CatalogEntry::ImageRequest(ImageRequest {
+                            title: None,
+                            uri: "info.json".into(),
+                        }),
+                        CatalogEntry::Image(image.clone()),
+                    ],
+                };
+                assert_eq!(
+                    host.choose_image(catalog).await.unwrap(),
+                    image_index.unwrap_or(0).min(1) as u32
+                );
+                assert_eq!(host.choose_level(image.clone()).await.unwrap(), expected[0]);
+                let mut unknown = image.clone();
+                for level in &mut unknown.levels {
+                    level.size = None;
+                }
+                assert_eq!(host.choose_level(unknown).await.unwrap(), expected[1]);
+            });
+        }
+    }
 
     #[test]
     fn decoded_metadata_stays_budgeted_before_placement() {

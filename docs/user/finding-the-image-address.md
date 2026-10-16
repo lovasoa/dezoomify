@@ -11,10 +11,9 @@ find it.
 ## Way 1: let the extension find it
 
 The [browser extension](./browser-extension.md) finds the address for you,
-but only after you press its toolbar button on that page. It takes a
-bounded snapshot of that page (zoom into the image once if the job tab
-asks), then stops on its own. It does not watch your browsing in the
-background.
+but only after you press its toolbar button on that page. Let the viewer load
+and zoom in once before clicking; each attempt reads one snapshot. It does not
+watch your browsing in the background.
 Try it first; it exists exactly for this problem.
 
 ## Way 2: find it yourself in the browser

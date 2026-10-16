@@ -68,15 +68,7 @@ fn every_shared_format_saves_the_same_pixels() {
         let url = format!("{}{input}", start());
         let run = cli(
             &dir,
-            &[
-                "--json",
-                "--no-partial",
-                "--retries",
-                "0",
-                "--overwrite",
-                &url,
-                "out.png",
-            ],
+            &["--json", "--retries", "0", "--overwrite", &url, "out.png"],
         );
         assert!(
             run.status.success(),
@@ -136,7 +128,6 @@ fn flags_and_logging_reach_the_runtime() {
             "0",
             "--min-interval",
             "1ms",
-            "--keep-partial",
         ],
     ];
     for (index, flags) in flags.iter().enumerate() {
@@ -201,34 +192,25 @@ fn argument_errors_fail_without_stdout_or_output() {
 }
 
 #[test]
-fn failures_and_partial_policy_control_publication() {
+fn tile_failures_preserve_context_without_publication() {
     let dir = temp_dir("cli-failures");
-    for (input, flags, partial) in [
-        ("broken.dzi", vec!["--no-partial"], false),
-        ("corrupt.dzi", vec!["--no-partial"], false),
-        ("corrupt.dzi", vec![], true),
-        ("pyramid.dzi", vec!["--format", "iiif"], false),
-    ] {
-        let partial_path = dir.join("out.partial.png");
-        let _ = std::fs::remove_file(&partial_path);
+    for input in ["broken.dzi", "corrupt.dzi"] {
         let url = source(input);
-        let mut args = flags;
-        args.extend([&url, "out.png"]);
-        let run = cli(&dir, &args);
-        assert_eq!(run.status.success(), partial);
-        assert!(!dir.join("out.png").exists());
-        assert_eq!(partial_path.exists(), partial);
-        if partial {
-            dimensions(&partial_path, 512);
-        } else {
-            assert!(
-                String::from_utf8_lossy(&run.stderr).contains(if input == "pyramid.dzi" {
-                    "discovery-failed"
-                } else {
-                    "partial-discarded"
-                })
-            );
-        }
+        let run = cli(&dir, &["--json", &url, "out.png"]);
+        assert!(!run.status.success());
+        assert_eq!(
+            std::fs::read_dir(&dir).unwrap().count(),
+            0,
+            "failed jobs leave no files"
+        );
+        let terminal = events(&run).pop().unwrap();
+        assert_eq!(terminal["kind"], "failed");
+        assert_eq!(terminal["error"]["kind"], "tile-failed");
+        assert_eq!(terminal["error"]["attempts"], 1);
+        assert_eq!(terminal["error"]["cause"]["kind"], "resource");
+        let stderr = String::from_utf8_lossy(&run.stderr);
+        assert!(stderr.contains("failed after 1 attempt"));
+        assert!(stderr.contains("_files/"));
     }
 }
 
@@ -258,7 +240,6 @@ fn bulk_continues_after_failure_in_human_and_json_modes() {
             )
             .unwrap();
             let mut args = vec![
-                "--no-partial",
                 "--bulk",
                 "list.txt",
                 "--outfile",

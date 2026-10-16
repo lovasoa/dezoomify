@@ -5,6 +5,7 @@
 // IncomingMessage/ServerResponse adapter shape around it.
 
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import { Readable } from "node:stream";
 import test from "node:test";
 import { handleNodeProxyRequest } from "../src/server/proxy-node.ts";
@@ -18,12 +19,18 @@ function nodeRequest({ method = "POST", headers = {}, body = "" } = {}) {
 }
 
 function captureResponse() {
-  const res = { status: 0, headers: {}, body: Buffer.alloc(0) };
+  const res = Object.assign(new EventEmitter(), {
+    status: 0,
+    headers: {},
+    body: Buffer.alloc(0),
+    writableEnded: false,
+  });
   res.writeHead = (status, headers) => {
     res.status = status;
     res.headers = { ...headers };
   };
   res.end = (body) => {
+    res.writableEnded = true;
     if (body !== undefined) {
       res.body = Buffer.isBuffer(body) ? body : Buffer.from(body);
     }
@@ -71,6 +78,64 @@ test("the adapter relays through the shared policy and maps the response", async
   assert.equal(calls.mock.calls[0].arguments[1].method, "GET");
   // The adapter must never let fetch follow redirects itself.
   assert.equal(calls.mock.calls[0].arguments[1].redirect, "manual");
+});
+
+test("the Node adapter forwards finite Range and preserves the partial response", async (t) => {
+  const calls = mockUpstream(
+    () => ({
+      status: 206,
+      headers: {
+        "content-type": "application/octet-stream",
+        "content-range": "bytes 4-7/20000000",
+      },
+      body: "4567",
+    }),
+    t,
+  );
+  const res = captureResponse();
+  await handleNodeProxyRequest(
+    nodeRequest({
+      headers: { ...SAME_ORIGIN_HEADERS, range: "bytes=4-7", cookie: "secret" },
+      body: '{"targetUrl":"https://public.test/container","protocolVersion":1}',
+    }),
+    res,
+  );
+  assert.equal(res.status, 206);
+  assert.equal(res.headers["content-range"], "bytes 4-7/20000000");
+  assert.equal(res.headers["content-length"], 4);
+  assert.equal(res.body.toString(), "4567");
+  assert.equal(calls.mock.calls[0].arguments[1].headers.range, "bytes=4-7");
+  assert.equal(calls.mock.calls[0].arguments[1].headers.cookie, undefined);
+});
+
+test("closing the Node response cancels an upstream fetch after the request body ended", async () => {
+  const res = captureResponse();
+  let ready;
+  const started = new Promise((resolve) => {
+    ready = resolve;
+  });
+  let upstreamSignal;
+  const pending = handleNodeProxyRequest(
+    nodeRequest({
+      headers: SAME_ORIGIN_HEADERS,
+      body: '{"targetUrl":"https://public.test/image","protocolVersion":1}',
+    }),
+    res,
+    {
+      fetchUpstream: async (_url, init) => {
+        upstreamSignal = init.signal;
+        ready();
+        return new Promise((_resolve, reject) => {
+          init.signal.addEventListener("abort", () => reject(init.signal.reason), { once: true });
+        });
+      },
+    },
+  );
+  await started;
+  res.emit("close");
+  await pending;
+  assert.equal(upstreamSignal.aborted, true);
+  assert.equal(res.status, 499);
 });
 
 test("OPTIONS preflight: same origin allowed, cross origin refused", async () => {

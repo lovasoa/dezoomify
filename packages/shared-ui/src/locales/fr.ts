@@ -16,8 +16,13 @@ export const fr = {
   "view.diagnostics.copyFailed": "Copie impossible. Sélectionnez et copiez les détails ci-dessous.",
   "view.diagnostics.loadFailed":
     "Le rapport complet est inaccessible. Les détails disponibles sont affichés ci-dessous.",
+  "view.retry.title": "Téléchargement en pause",
+  "view.retry.summary": "{done} fragments sur {total} ont été récupérés.",
+  "view.retry.explanation":
+    "Les tentatives automatiques ont échoué. Réessayez ou annulez ; aucun fichier n’a été enregistré.",
+  "view.retry.retry": "Réessayer une fois",
+  "view.retry.cancel": "Annuler",
   "desktop.done.title": "Image enregistrée",
-  "desktop.done.partial": "Image enregistrée avec des parties manquantes",
   "desktop.done.size": "{width} × {height} pixels",
   "desktop.done.saved": "Enregistrée dans le dossier choisi.",
   "desktop.done.open": "Ouvrir l’image",
@@ -27,21 +32,6 @@ export const fr = {
   "desktop.done.folderError":
     "Impossible d’ouvrir le dossier. Vérifiez qu’un gestionnaire de fichiers est installé.",
   "desktop.done.missingError": "L’image ou le dossier n’existe plus.",
-  "view.partial.title": "L’image est incomplète",
-  "view.partial.summary": "{done} fragments sur {total} ont été récupérés.",
-  "view.partial.gaps":
-    "L’image enregistrée aura des zones manquantes. Aucun fichier n’a encore été enregistré.",
-  "view.partial.refused":
-    "Le site a refusé les fragments restants. L’image enregistrée aura des zones manquantes.",
-  "view.partial.save": "Enregistrer l’image incomplète",
-  "view.partial.cancel": "Annuler",
-  "view.partial.retry": "Réessayer les fragments en échec",
-  "view.partial.accessDenied": "Le site a refusé l’accès à cette image",
-  "view.partial.empty": "L’image n’a pas pu être récupérée",
-  "view.partial.noneSaved":
-    "Aucune partie de l’image n’a pu être récupérée. Aucun fichier n’a été enregistré.",
-  "view.partial.checkSource": "Ouvrez la page source et vérifiez que sa visionneuse fonctionne.",
-  "view.partial.openSource": "Ouvrir la page source",
   // Modal chrome (shared view.ts openModal).
   "view.modal.ok": "Compris",
   "view.modal.closeDialog": "Fermer la boîte de dialogue",
@@ -140,13 +130,25 @@ export const fr = {
   "view.display.deskDescClean":
     "Pour un enregistrement propre en pleine taille quand le navigateur peut seulement montrer l’image.",
   "view.display.startOver": "Recommencer",
-  "view.resolution.notice":
-    "Le téléchargement ne se fait pas à la résolution maximale à cause des limites du navigateur. Essayez l’application de bureau pour supprimer les limites du navigateur.",
+  "view.resolution.title": "Image de résolution réduite",
   "view.resolution.sizes":
-    "Enregistrement en {selected} pixels au lieu du maximum {maximum} pixels.",
-  "view.resolution.download": "Télécharger l’application de bureau",
-  "view.resolution.tryMaximum": "Essayer le maximum",
-  "view.resolution.stop": "Arrêter",
+    "Taille de l’image : {selected} pixels. Maximum disponible : {maximum} pixels.",
+  "view.resolution.download": "Obtenir la résolution maximale avec l’application de bureau",
+  "view.desktop.handoffTitle": "Télécharger cette image dans l’application de bureau",
+  "view.desktop.handoffDownload": "Télécharger l’application de bureau",
+  "view.desktop.handoffInstall":
+    "Choisissez l’installeur pour votre système, puis ouvrez Dezoomify.",
+  "view.desktop.handoffPaste": "Collez cette URL dans le champ URL de l’application de bureau :",
+  "view.desktop.handoffCopy": "Copier l’URL",
+  "view.desktop.handoffCopied": "URL copiée. Collez-la dans l’application de bureau.",
+  "view.desktop.handoffCopyFailed":
+    "Copie impossible. Sélectionnez l’URL ci-dessus et copiez-la manuellement.",
+  "view.desktop.handoffStart":
+    "Lancez le téléchargement et choisissez la plus grande résolution. Si plusieurs images apparaissent, choisissez celle souhaitée.",
+  "view.desktop.handoffAccess":
+    "L’application de bureau ne partage pas la session de connexion du navigateur. Cette URL doit être accessible depuis l’application.",
+  "view.desktop.handoffUnavailable":
+    "Aucune URL source réutilisable n’est disponible pour cette tâche. Ouvrez la page d’origine et cherchez l’URL de l’image zoomable ou du manifeste à coller dans l’application.",
   // Completion section.
   "view.done.ready": "Votre image est prête.",
   "view.done.readyTitle": "Prêt à enregistrer",
@@ -160,6 +162,7 @@ export const fr = {
   "view.fail.helpDesc":
     "Comment trouver l’adresse de l’image sur les sites de musées et d’archives, et quoi essayer quand rien n’est trouvé.",
   "view.fail.reportBug": "Signaler un bogue sur GitHub",
+  "view.fail.reportBugDesc": "Préparez un ticket GitHub avec les diagnostics de cette tentative.",
   "view.fail.retry": "Réessayer",
   "view.fail.canvasAllocation":
     "Cette image est trop grande pour être assemblée dans cet onglet. L’application de bureau peut l’enregistrer en taille réelle.",
@@ -182,15 +185,14 @@ export const fr = {
   "view.history.empty": "Aucune image récente pour le moment. Les images lancées apparaissent ici.",
   "view.history.localOnly": "Conservé uniquement sur cet appareil.",
   "view.history.clear": "Effacer l’historique",
-  "view.history.image": "Image",
+  "view.history.source": "Source",
   "view.history.time": "Début",
   "view.history.size": "Taille (px)",
-  "view.history.status": "État",
+  "view.history.result": "Résultat",
   "view.history.remove": "Supprimer",
   "view.history.removeImage": "Supprimer {image} des images récentes",
   "view.history.status.started": "Démarré",
   "view.history.status.completed": "Terminé",
-  "view.history.status.partial": "Avec des lacunes",
   "view.history.status.preview": "Aperçu seul",
   "view.history.status.failed": "Échec",
   "view.history.status.cancelled": "Annulé",
@@ -248,17 +250,13 @@ export const fr = {
   "desktop.msg.dimsPixels": "{a} par {b} pixels",
   "desktop.msg.needAbout": " Elle a besoin d’environ {need} de mémoire",
   "desktop.output.canvasLimit":
-    "Cette image est trop grande pour être assemblée sur cet ordinateur ({dims},{need} à 4 octets par pixel, limite {limit}). Enregistrez une version plus petite avec Largeur max (CLI : --max-width). Note : le JPEG accepte au plus {jpegMax} pixels par côté ; gardez le PNG pour les images plus grandes. Depuis {host}.",
-  "desktop.output.jpegLimit":
-    "Cette image ({dims}) est trop grande pour le JPEG, qui accepte au plus {jpegMax} pixels par côté. Enregistrez-la en PNG à la place. Depuis {host}.",
-  "desktop.output.webpLimit":
-    "Cette image ({dims}) est trop grande pour le WebP, qui accepte au plus {webpMax} pixels par côté. Enregistrez-la en PNG à la place. Depuis {host}.",
-  "desktop.tile.partialDiscarded":
-    "L’image partielle a été abandonnée, aucun fichier n’a été conservé. Réessayez depuis {host} avec une connexion stable.",
-  "desktop.tile.partialChoice":
-    "Certaines parties de cette image depuis {host} n’ont pas pu être enregistrées. Réessayez les parties manquées, ou conservez l’image partielle avec des zones vides.",
+    "Cette image nécessite plus de mémoire que la quantité disponible ({dims},{need} ; limite {limit}). Enregistrez une version plus petite avec Largeur max (CLI : --max-width), ou choisissez un dossier de tuiles. Depuis {host}.",
+  "desktop.tile.failed":
+    "Impossible de récupérer un fragment depuis {host}. Vérifiez l’image source et réessayez.",
   "view.discovery.none":
     "Aucune image zoomable trouvée à cette adresse. Essayez une page avec un visualiseur, ou essayez l’extension.",
+  "view.discovery.noneExtension":
+    "Aucune image zoomable trouvée sur cette page. Signalez un bogue avec les diagnostics, ou suivez le guide pour trouver l’adresse de l’image.",
   "desktop.plan.none":
     "Cette image n’a aucune taille utilisable à enregistrer depuis {host}. Essayez une autre image ou une Largeur max plus petite.",
   "desktop.transport.stalled":
@@ -274,20 +272,7 @@ export const fr = {
     "Un problème inattendu a interrompu cet enregistrement depuis {host}. Réessayez, et copiez les diagnostics si cela se reproduit.",
   "desktop.save.fallback": "Impossible d’enregistrer cette image depuis {host}. Réessayez.",
   "desktop.invoke.startFallback": "Impossible de démarrer la tâche.",
-  "desktop.invoke.partial": "Le choix d’image partielle a été refusé.",
-  "desktop.rec.missing": "Fragments manquants : {shown}{rest}.",
-  "desktop.rec.more": " et {n} de plus",
-  "desktop.rec.keep": "Conserver l’image partielle",
-  "desktop.rec.discard": "Abandonner la partie",
-  "desktop.rec.retryTiles": "Réessayer les fragments manqués",
-  "desktop.rec.missingSome": "Certains fragments n’ont pas pu être enregistrés.",
-  "desktop.rec.missingCount": "Impossible d’enregistrer {count} fragments.",
-  "desktop.rec.missingOne": "Impossible d’enregistrer {count} fragment.",
-  "desktop.rec.missingList": "{n} fragments manquants : {shown}{rest}.",
-  "desktop.rec.missingOneList": "{n} fragment manquant : {shown}{rest}.",
-  "desktop.done.partialTitle": "Image partielle enregistrée",
-  "desktop.done.partialDesc":
-    "Ce fichier est marqué comme partiel : {summary} Les zones manquantes restent vides. Cela le distingue d’un enregistrement complet.",
+  "desktop.invoke.retry": "Le choix de nouvelle tentative a été refusé.",
   "desktop.cancel.note":
     "Enregistrement annulé. Le nettoyage est terminé et tout fichier inachevé a été supprimé.",
   "desktop.copy.diagnostics": "Copier les diagnostics",
@@ -296,37 +281,43 @@ export const fr = {
   "desktop.settings.reset": "Réinitialiser les paramètres",
   "desktop.quick.info": "Plus d’informations",
   "desktop.quick.auto": "Automatique",
-  "desktop.quick.sizeEstimate": "<{size} Mo",
+  "desktop.quick.compression": "Compression",
+  "desktop.quick.compressionInfo":
+    "Les valeurs élevées visent des fichiers plus petits. Chaque format détermine l’effet sur la qualité et le temps d’encodage.",
+  "desktop.quick.compressionUnavailable": "La compression n’est pas réglable pour ce format.",
+  "desktop.quick.compressionWarning":
+    "Forte perte de détails : cette compression peut rendre le texte et les détails fins illisibles.",
+  "desktop.quick.sizeEstimate": "Jusqu’à environ {size}",
   "desktop.quick.folderInfo": "Choisissez où enregistrer les images téléchargées.",
   "desktop.quick.formatInfo":
-    "Choisissez un format. Le mode automatique enregistre en JPEG les images opaques jusqu’à 65 535 pixels par côté ; sinon en PNG.",
+    "Choisissez un format. Le mode automatique sélectionne un format adapté à l’image.",
   "desktop.quick.sizeInfo":
-    "Les préréglages sélectionnent le plus grand niveau source respectant ces dimensions. Si aucun ne convient, le plus petit est utilisé et peut dépasser ces dimensions et les limites de l’encodeur. Les images ne sont pas redimensionnées. Les estimations supposent les dimensions indiquées ; la taille réelle et la compatibilité du format dépendent de la source. Mo estimés = largeur × hauteur × octets/pixel / 1 000 000. PNG : 1,6 octet/pixel ; WebP sans perte : 1,3 ; TIFF/ZIF : 3. JPEG est calibré avec l’encodeur natif sur deux peintures et une carte : qualité ≤25 : 0,1 ; ≤50 : 0,15 ; ≤75 : 0,2 ; ≤90 : 0,3 ; ≤95 : 0,4 ; ≤98 : 0,45 ; ≤100 : 0,5 octet/pixel. Le mode automatique estime un JPEG opaque ; la transparence utilise le PNG. ZIF/IIIF ajoutent un tiers pour la pyramide. Toutes les estimations ajoutent une marge de 10 %, puis sont arrondies au multiple de 5 Mo supérieur. Ce sont des approximations, pas des limites garanties ; le détail, la compression source, les proportions, les métadonnées et l’encodeur influencent la taille réelle. Les tailles entière/personnalisée nécessitent les dimensions source.",
+    "Chaque estimation suppose une image occupant la largeur et la hauteur maximales du préréglage. Une source plus petite ou un autre rapport largeur/hauteur peut produire un fichier bien plus petit. Les estimations interpolent des mesures par format et compression, incluent les niveaux de pyramide nécessaires, ajoutent une marge de 10 % et sont arrondies vers le haut à deux chiffres significatifs avec une unité adaptée à la taille. Ce sont des budgets indicatifs, pas des limites garanties de fichier ou de mémoire ; détails, transparence et métadonnées influencent le résultat. Le mode automatique suppose un JPEG opaque ; la transparence utilise le PNG. Les préréglages choisissent un niveau source sans redimensionner. Si aucun ne convient, le plus petit est utilisé et peut dépasser le maximum choisi. Les tailles entière/personnalisée dépendent de la source.",
   "desktop.quick.maxWidth": "Largeur max.",
   "desktop.quick.maxHeight": "Hauteur max.",
   "desktop.quick.original": "Originale",
   "desktop.quick.userDefined": "Personnalisée",
-  "desktop.quick.estimatedSize": "Taille estimée ({format})",
+  "desktop.quick.estimatedSize": "Estimation à la taille max. ({format})",
   "desktop.quick.networkInfo":
     "Rapide utilise jusqu’à 16 requêtes simultanées sans délai. Équilibré lance jusqu’à 5 requêtes par seconde ; Doux jusqu’à 2. Un rythme réduit peut aider les serveurs chargés.",
   "desktop.quick.source": "Selon la source",
   "desktop.quick.exact": "Personnalisé",
   "desktop.quick.upTo": "Jusqu’à {size}K",
-  "desktop.quick.hint.auto": "adaptatif",
-  "desktop.quick.hint.png": "sans perte",
-  "desktop.quick.hint.jpeg": "compressé",
-  "desktop.quick.hint.tiff": "archivage",
-  "desktop.quick.hint.webp": "sans perte",
-  "desktop.quick.hint.zif": "zoomable",
-  "desktop.quick.hint.iiifDir": "tuilé",
+  "desktop.quick.hint.adaptive": "adaptatif",
+  "desktop.quick.hint.lossless": "sans perte",
+  "desktop.quick.hint.compressed": "compressé",
+  "desktop.quick.hint.advancedCompression": "compression avancée",
+  "desktop.quick.hint.archival": "archivage",
+  "desktop.quick.hint.zoomable": "zoomable",
+  "desktop.quick.hint.tiled": "tuilé",
   "desktop.quick.format.auto":
-    "JPEG pour les images opaques jusqu’à 65 535 pixels par côté ; PNG pour la transparence ou les images plus grandes. La qualité JPEG s’applique aussi au mode automatique.",
+    "JPEG pour les images opaques jusqu’à {maxSide} pixels par côté ; PNG pour la transparence ou les images plus grandes. La compression s’applique aussi au mode automatique.",
   "desktop.quick.format.png":
     "Pixels sans perte et transparence ; fichiers plus volumineux, adaptés à la retouche.",
   "desktop.quick.format.jpeg":
-    "Fichiers plus petits avec perte. Sans transparence ; limite de 65 535 pixels par côté. Qualité réglable dans les paramètres.",
+    "Fichiers plus petits avec perte. Sans transparence ; limite de {maxSide} pixels par côté. Réglez la compression dans le menu Taille.",
   "desktop.quick.format.tiff": "Sortie sans perte pour l’archivage et la retouche.",
-  "desktop.quick.format.webp": "Sortie compressée sans perte, limitée à 16 383 pixels par côté.",
+  "desktop.quick.format.webp": "Sortie compressée sans perte, limitée à {maxSide} pixels par côté.",
   "desktop.quick.format.zif":
     "Pyramide TIFF tuilée sans perte pour zoomer à plusieurs résolutions.",
   "desktop.quick.format.iiifDir":
@@ -351,11 +342,11 @@ export const fr = {
   "desktop.quick.more": "Plus de réglages",
   "desktop.advanced.title": "Réglages avancés",
   "desktop.advanced.done": "Terminé",
-  "desktop.advanced.jpegQuality": "Qualité JPEG",
-  "desktop.advanced.jpegQualityDesc": "Une valeur plus élevée conserve davantage de détails.",
-  "desktop.advanced.compressionEffort": "Effort de compression",
-  "desktop.advanced.compressionEffortDesc":
-    "La qualité reste sans perte ; une valeur plus élevée prend plus de temps.",
+  "desktop.output.codecLimit":
+    "Cette image ({dims}) est trop grande pour {format}, qui accepte au maximum {maxSide} pixels par côté. Enregistrez-la en PNG. Source : {host}.",
+  "desktop.quick.format.avif":
+    "Compression avancée avec transparence. Sortie avec perte, limitée à {maxSide} pixels par côté. Réglez la compression dans le menu Taille. Nécessite l’image complète en mémoire et ne conserve pas les profils colorimétriques intégrés. Même la compression minimale est avec perte.",
+  "desktop.quick.format.generic": "Enregistrer l’image au format {format}.",
   "desktop.advanced.dimensions": "Dimensions personnalisées",
   "desktop.advanced.dimensionsDesc":
     "Laissez une valeur vide pour conserver les proportions originales.",
@@ -363,7 +354,7 @@ export const fr = {
   "desktop.advanced.height": "Hauteur",
   "desktop.advanced.retries": "Essais",
   "desktop.advanced.retriesDesc":
-    "Réessayer les fragments échoués avant de conserver un résultat partiel.",
+    "Tentatives automatiques avant de proposer de réessayer une fois.",
   "desktop.advanced.resumeCache": "Cache de reprise",
   "desktop.advanced.resumeCacheDesc":
     "Réutiliser les fragments après un enregistrement interrompu.",

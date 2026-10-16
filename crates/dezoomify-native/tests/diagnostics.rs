@@ -34,6 +34,11 @@ fn diagnostic_budget_protects_problem_samples_and_terminal() {
     use serde_json::json;
     let d = Diagnostics::new("test", "test");
     d.context(json!({"selection_policy": "automatic", "path": "/home/me/output.png"}));
+    d.observe(&dezoomify::model::Progress {
+        source_url: Some("https://images.test/info.json?sig=exact%2Bvalue".into()),
+        source_format: Some("iiif".into()),
+        ..Default::default()
+    });
     d.record(
         Level::Warn,
         "request",
@@ -43,12 +48,17 @@ fn diagnostic_budget_protects_problem_samples_and_terminal() {
         d.record(Level::Warn, "request", json!({"http":403,"tile":i}));
         d.record(Level::Debug, "sample", json!({"text":"界".repeat(2000)}));
     }
-    d.finish("failed", json!({"code":"job.no-usable-tiles"}));
+    d.finish("failed", json!({"code":"tile-failed"}));
     d.finish("retired", json!({}));
     let report = d.report();
     let context = serde_json::to_value(&report.context).unwrap();
     assert_eq!(context["selection_policy"], "automatic");
     assert_eq!(context["path"], "/home/me/output.png");
+    assert_eq!(
+        context["canonical"],
+        "https://images.test/info.json?sig=exact%2Bvalue"
+    );
+    assert_eq!(context["format"], "iiif");
     assert!(serde_json::to_vec(&report).unwrap().len() <= MAX_BYTES);
     assert!(report.records.len() <= 1000 && report.omitted_records > 0);
     assert_eq!(report.failures[0].count, 2001);

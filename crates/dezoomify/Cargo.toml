@@ -31,6 +31,7 @@ tsify = { workspace = true, optional = true }
 wasm-bindgen = { workspace = true, optional = true }
 futures-util = "0.3"
 serde_bytes = "0.11"
+zif-tiff = { version = "0.3.0", default-features = false }
 
 [dev-dependencies]
 futures = "0.3"
@@ -39,9 +40,5 @@ scraper = { version = "0.27", default-features = false }
 [features]
 typescript = ["dep:tsify", "dep:wasm-bindgen"]
 
-[lints.rust]
-missing_docs = "allow"
-
-[lints.clippy]
-pedantic = "allow"
-unwrap_used = "allow"
+[lints]
+workspace = true

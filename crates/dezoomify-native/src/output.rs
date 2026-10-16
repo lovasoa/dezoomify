@@ -405,32 +405,20 @@ pub fn infer_from_path(path: &Path) -> Result<OutputFormat, Error> {
         .and_then(|e| e.to_str())
         .unwrap_or("")
         .to_ascii_lowercase();
-    match ext.as_str() {
-            "png" => Ok(OutputFormat::Png),
-            "jpg" | "jpeg" => Ok(OutputFormat::Jpeg),
-            "tif" | "tiff" => Ok(OutputFormat::Tiff),
-            "zif" => Ok(OutputFormat::Zif),
-            "webp" => Ok(OutputFormat::Webp),
-            "iiif" => Ok(OutputFormat::IiifDir),
-            "" => Ok(OutputFormat::IiifDir),
-            other => Err(crate::output::unsupported_extension(format!(
-                "unsupported output extension .{other}; use .png, .jpg, .jpeg, .tif, .tiff, .zif, .webp, .iiif, or an extensionless directory path for iiif-dir"
-            ))),
-        }
+    OutputFormat::from_extension(&ext).ok_or_else(|| unsupported_extension(format!(
+        "unsupported output extension .{ext}; use {}, or an extensionless directory path for iiif-dir",
+        dezoomify::model::output_extensions(),
+    )))
 }
 
 /// Image extensions that always name a single file, never an `iiif-dir`
 /// directory destination. `.zif` names a single multi-directory pyramid
 /// file; `.iiif` names a directory and is intentionally absent here.
 fn is_single_file_extension(path: &Path) -> bool {
-    matches!(
-        path.extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("")
-            .to_ascii_lowercase()
-            .as_str(),
-        "png" | "jpg" | "jpeg" | "tif" | "tiff" | "zif" | "webp"
-    )
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .and_then(|ext| OutputFormat::from_extension(&ext.to_ascii_lowercase()))
+        .is_some_and(|format| !format.is_directory())
 }
 
 pub fn validate_destination(
@@ -464,30 +452,6 @@ pub fn validate_destination(
         }
     }
     Ok(())
-}
-
-/// Sibling path for a kept partial output: inserts `.partial` before the
-/// last extension when one exists (`out.png` becomes `out.partial.png`,
-/// `tiles.iiif` becomes `tiles.partial.iiif`), else appends `.partial`
-/// (`out` becomes `out.partial` for extensionless `iiif-dir` destinations).
-/// A kept partial stays distinguishable from complete success on disk;
-/// `--no-partial` writes nothing.
-#[must_use]
-pub(crate) fn partial_path_for(path: &Path) -> std::path::PathBuf {
-    let file_name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("");
-    let partial_name = match file_name.rsplit_once('.') {
-        Some((stem, ext)) if !stem.is_empty() && !ext.is_empty() => {
-            format!("{stem}.partial.{ext}")
-        }
-        _ => format!("{file_name}.partial"),
-    };
-    match path.parent() {
-        Some(parent) if !parent.as_os_str().is_empty() => parent.join(partial_name),
-        _ => std::path::PathBuf::from(partial_name),
-    }
 }
 
 fn output_exists() -> Error {
@@ -617,32 +581,5 @@ mod tests {
         drop(staged);
         assert_eq!(std::fs::read_dir(&directory).unwrap().count(), 2);
         std::fs::remove_dir_all(directory).unwrap();
-    }
-
-    #[test]
-    fn partial_path_inserts_partial_before_the_extension() {
-        assert_eq!(
-            partial_path_for(Path::new("out.png")),
-            std::path::PathBuf::from("out.partial.png"),
-        );
-        assert_eq!(
-            partial_path_for(Path::new("/tmp/a/out.jpg")),
-            std::path::PathBuf::from("/tmp/a/out.partial.jpg"),
-        );
-        assert_eq!(
-            partial_path_for(Path::new("tiles.iiif")),
-            std::path::PathBuf::from("tiles.partial.iiif"),
-        );
-        assert_eq!(
-            partial_path_for(Path::new("out")),
-            std::path::PathBuf::from("out.partial"),
-        );
-        // The partial sibling keeps its own encoder extension, so the output
-        // file name still selects the encoder on a later inspection.
-        assert_eq!(
-            crate::output::infer_from_path(&partial_path_for(Path::new("out.png")))
-                .expect("partial png still infers"),
-            OutputFormat::Png,
-        );
     }
 }

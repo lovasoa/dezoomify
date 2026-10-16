@@ -78,6 +78,9 @@ pub enum RequestPurpose {
 /// One portable resource description. URI text is preserved exactly after
 /// the core's approved normalization; secret headers are never carried here
 /// (hosts attach scoped authorization out-of-band).
+/// A finite single `Range: bytes=start-end` asks the Host for exactly that
+/// inclusive interval. Hosts validate partial response headers and body length
+/// before returning bytes, and include the range in any resource cache key.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub struct ResourceRequest {
@@ -122,76 +125,243 @@ pub enum ProcessingRecipe {
     GoogleArtsDecrypt,
 }
 
-/// The requested output encoding.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+/// How an output owns its encoded image or pyramid.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
-pub enum OutputFormat {
-    #[default]
-    Png,
-    Jpeg,
-    Tiff,
-    Zif,
-    Webp,
-    IiifDir,
+pub enum OutputLayout {
+    Streaming,
+    Buffered,
+    Pyramid,
+    Directory,
 }
 
-impl OutputFormat {
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Png => "png",
-            Self::Jpeg => "jpeg",
-            Self::Tiff => "tiff",
-            Self::Zif => "zif",
-            Self::Webp => "webp",
-            Self::IiifDir => "iiif-dir",
-        }
-    }
-
-    #[must_use]
-    pub const fn extension(self) -> &'static str {
-        match self {
-            Self::Jpeg => "jpg",
-            Self::Tiff => "tif",
-            Self::IiifDir => "iiif",
-            format => format.as_str(),
-        }
-    }
-
-    #[must_use]
-    pub const fn is_directory(self) -> bool {
-        matches!(self, Self::IiifDir)
-    }
-}
-
-/// Saved encoding preference, distinct from the concrete published format.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
+/// The meaning of the existing compression setting for a codec.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
-pub enum OutputPreference {
-    #[default]
-    Auto,
-    Png,
-    Jpeg,
-    Tiff,
-    Zif,
-    Webp,
-    IiifDir,
+pub enum OutputControl {
+    Quality { minimum: u8, warning_below: u8 },
+    Effort,
+    None,
 }
 
-impl OutputPreference {
-    pub const fn format(self) -> Option<OutputFormat> {
-        match self {
-            Self::Auto => None,
-            Self::Png => Some(OutputFormat::Png),
-            Self::Jpeg => Some(OutputFormat::Jpeg),
-            Self::Tiff => Some(OutputFormat::Tiff),
-            Self::Zif => Some(OutputFormat::Zif),
-            Self::Webp => Some(OutputFormat::Webp),
-            Self::IiifDir => Some(OutputFormat::IiifDir),
-        }
+impl OutputControl {
+    pub fn quality(self, compression: u8) -> u8 {
+        let minimum = match self {
+            Self::Quality { minimum, .. } => minimum,
+            _ => 0,
+        };
+        100u8.saturating_sub(compression).max(minimum)
     }
+}
+
+/// Native output capabilities, also exported as generated data for presentation.
+#[derive(Debug, Serialize)]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub struct OutputCodec {
+    pub format: OutputFormat,
+    pub name: &'static str,
+    pub extensions: &'static [&'static str],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_side: Option<u32>,
+    pub control: OutputControl,
+    pub layout: OutputLayout,
+    pub hint: &'static str,
+    /// Quality samples and estimated bytes/pixel, interpolated between samples.
+    pub size_coefficients: &'static [(u8, f64)],
+}
+
+impl OutputCodec {
+    /// Interpolate the registered samples using the encoder's compression mapping.
+    pub fn estimated_bytes_per_pixel(&self, compression: u8) -> f64 {
+        let quality = self.control.quality(compression);
+        let (mut lower_quality, mut lower_bytes) = self.size_coefficients[0];
+        let mut bytes = lower_bytes;
+        for &(upper_quality, upper_bytes) in &self.size_coefficients[1..] {
+            if quality <= lower_quality {
+                break;
+            }
+            if quality <= upper_quality {
+                let fraction =
+                    f64::from(quality - lower_quality) / f64::from(upper_quality - lower_quality);
+                bytes = lower_bytes + fraction * (upper_bytes - lower_bytes);
+                break;
+            }
+            lower_quality = upper_quality;
+            lower_bytes = upper_bytes;
+            bytes = upper_bytes;
+        }
+        let levels = match self.layout {
+            OutputLayout::Pyramid | OutputLayout::Directory => 4.0 / 3.0,
+            _ => 1.0,
+        };
+        bytes * levels
+    }
+}
+
+/// Presentation data derived from the codec registry, including automatic output.
+#[derive(Debug, Serialize)]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub struct OutputOption {
+    pub format: OutputPreference,
+    pub name: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label_key: Option<&'static str>,
+    pub hint: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_side: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description_max_side: Option<u32>,
+    pub compression_supported: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub compression_warning_above: Option<u8>,
+    /// Estimated bytes/pixel for each integer compression value from 0 to 100.
+    pub compression_estimates: Vec<f64>,
+}
+
+pub fn output_options() -> Vec<OutputOption> {
+    std::iter::once(OutputPreference::Auto)
+        .chain(OUTPUT_CODECS.iter().map(|codec| codec.format.into()))
+        .map(|preference| {
+            let format = preference.format();
+            // Tiled images almost never have alpha; budget Auto as opaque JPEG.
+            let codec = format.unwrap_or(OutputFormat::Jpeg).codec();
+            OutputOption {
+                format: preference,
+                name: if format.is_none() { "Auto" } else { codec.name },
+                label_key: format.is_none().then_some("desktop.quick.auto"),
+                hint: if format.is_none() {
+                    "adaptive"
+                } else {
+                    codec.hint
+                },
+                max_side: format.and_then(|format| format.codec().max_side),
+                description_max_side: codec.max_side,
+                compression_supported: codec.control != OutputControl::None,
+                compression_warning_above: match codec.control {
+                    OutputControl::Quality { warning_below, .. } => Some(100 - warning_below),
+                    _ => None,
+                },
+                compression_estimates: (0..=100)
+                    .map(|compression| codec.estimated_bytes_per_pixel(compression))
+                    .collect(),
+            }
+        })
+        .collect()
+}
+
+// One declaration owns the format/preference wire variants and their metadata.
+// A buffered image-crate codec needs one row here and its Cargo feature. Only
+// encoders with configurable construction need an override in native imaging.
+macro_rules! output_codecs {
+    ($($variant:ident => ($id:literal, $name:literal, $extensions:expr, $limit:expr,
+        $control:expr, $layout:ident, $hint:literal, $sizes:expr)),* $(,)?) => {
+        #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+        #[serde(rename_all = "kebab-case")]
+        #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+        pub enum OutputFormat { $(#[serde(rename = $id)] $variant),* }
+
+        impl Default for OutputFormat { fn default() -> Self { Self::Png } }
+
+        #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+        #[serde(rename_all = "kebab-case")]
+        #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+        pub enum OutputPreference { #[default] Auto, $(#[serde(rename = $id)] $variant),* }
+
+        impl OutputPreference {
+            pub const fn format(self) -> Option<OutputFormat> {
+                match self { Self::Auto => None, $(Self::$variant => Some(OutputFormat::$variant)),* }
+            }
+        }
+
+        impl From<OutputFormat> for OutputPreference {
+            fn from(format: OutputFormat) -> Self {
+                match format { $(OutputFormat::$variant => Self::$variant),* }
+            }
+        }
+
+        pub const OUTPUT_CODECS: &[OutputCodec] = &[$(OutputCodec {
+            format: OutputFormat::$variant, name: $name, extensions: $extensions,
+            max_side: $limit, control: $control, layout: OutputLayout::$layout,
+            hint: $hint, size_coefficients: $sizes,
+        }),*];
+
+        impl OutputFormat {
+            pub const fn as_str(self) -> &'static str {
+                match self { $(Self::$variant => $id),* }
+            }
+            pub fn codec(self) -> &'static OutputCodec {
+                OUTPUT_CODECS.iter().find(|codec| codec.format == self)
+                    .expect("every output format has a registry entry")
+            }
+            pub fn extension(self) -> &'static str { self.codec().extensions[0] }
+            pub fn is_directory(self) -> bool {
+                matches!(self.codec().layout, OutputLayout::Directory)
+            }
+            pub fn from_extension(extension: &str) -> Option<Self> {
+                OUTPUT_CODECS.iter().find(|codec| codec.extensions.contains(&extension))
+                    .map(|codec| codec.format)
+            }
+        }
+    };
+}
+
+// Paired native image 0.25.10 JPEG/AVIF measurements on opaque Zoomify
+// test_custom_size, Arts & Culture tile and generic map_expected, fitted within
+// 512x512, using AVIF speed 4. Transparency and different content may cost more.
+// Low-quality samples keep finer precision so heavy compression remains visible.
+const JPEG_SIZES: &[(u8, f64)] = &[
+    (1, 0.035),
+    (5, 0.044),
+    (10, 0.057),
+    (20, 0.076),
+    (25, 0.085),
+    (50, 0.15),
+    (75, 0.25),
+    (90, 0.4),
+    (95, 0.55),
+    (98, 0.85),
+    (100, 1.15),
+];
+const AVIF_SIZES: &[(u8, f64)] = &[
+    (1, 0.012),
+    (5, 0.013),
+    (10, 0.016),
+    (20, 0.023),
+    (25, 0.027),
+    (50, 0.1),
+    (75, 0.15),
+    (90, 0.3),
+    (95, 0.45),
+    (98, 0.7),
+    (100, 1.15),
+];
+
+// Warning thresholds are conservative UI heuristics, not universal usability
+// cutoffs. JPEG guidance describes <50 as low quality and 5-10 as index-only:
+// https://github.com/libjpeg-turbo/libjpeg-turbo/blob/main/doc/usage.txt
+// ravif's scale is only roughly comparable; warn well below its normal range:
+// https://github.com/kornelski/cavif-rs#advanced-usage
+output_codecs! {
+    Png => ("png", "PNG", &["png"], None, OutputControl::Effort, Streaming, "lossless", &[(100, 1.6)]),
+    Jpeg => ("jpeg", "JPEG", &["jpg", "jpeg"], Some(65_535), OutputControl::Quality { minimum: 0, warning_below: 25 }, Streaming, "compressed", JPEG_SIZES),
+    Tiff => ("tiff", "TIFF", &["tif", "tiff"], None, OutputControl::Effort, Streaming, "archival", &[(100, 3.0)]),
+    Webp => ("webp", "WebP", &["webp"], Some(16_383), OutputControl::None, Buffered, "lossless", &[(100, 1.3)]),
+    Avif => ("avif", "AVIF", &["avif"], Some(65_535), OutputControl::Quality { minimum: 1, warning_below: 30 }, Buffered, "advancedCompression", AVIF_SIZES),
+    Zif => ("zif", "ZIF", &["zif"], None, OutputControl::Effort, Pyramid, "zoomable", &[(100, 3.0)]),
+    IiifDir => ("iiif-dir", "IIIF folder", &["iiif", ""], None, OutputControl::Quality { minimum: 0, warning_below: 25 }, Directory, "tiled", JPEG_SIZES),
+}
+
+/// File suffixes accepted by native output, for command help and diagnostics.
+pub fn output_extensions() -> String {
+    OUTPUT_CODECS
+        .iter()
+        .flat_map(|codec| codec.extensions)
+        .filter(|ext| !ext.is_empty())
+        .map(|ext| format!(".{ext}"))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// How an acquired tile participates in probing and final output. `probe`
@@ -314,6 +484,8 @@ pub enum DiscoveryInputKind {
     Source,
     ObservedDocument,
     ObservedResource,
+    /// Complete metadata reconstructed from a loaded viewer; never fetched.
+    ObservedMetadata,
 }
 
 /// One discovery input. An omitted kind is a user-supplied source for
@@ -327,6 +499,10 @@ pub struct JobInput {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<DiscoveryInputKind>,
 }
+
+/// Additional discovery evidence supplied by a Host. Empty means no more
+/// sources are available under the requested interaction policy.
+pub type JobInputs = Vec<JobInput>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "kebab-case")]
@@ -355,10 +531,9 @@ impl JobInput {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
-pub enum RecoveryChoice {
-    Keep,
+pub enum RetryChoice {
     Retry,
-    Discard,
+    Cancel,
 }
 
 // ---------------------------------------------------------------------------
@@ -484,10 +659,8 @@ pub enum LimitReason {
     /// Output assembly (canvas, tile retention, or spooling) exceeded a
     /// memory budget.
     Memory,
-    /// A side exceeded the JPEG 65535 px bound.
-    JpegSide,
-    /// A side exceeded the WebP 16383 px bound.
-    WebpSide,
+    /// A side exceeded the registered codec's dimension limit.
+    CodecSide(OutputFormat),
 }
 
 /// Structured facts behind an output-limit refusal. Every field is optional
@@ -656,22 +829,14 @@ pub enum Error {
     PlanEmpty,
     #[error("the tile plan is invalid{}", .0.suffix())]
     PlanInvalid(Failure),
-    /// The derived verdict and largest hint of the settled failure set;
-    /// the evidence itself lives in `missing[]` and the diagnostics report.
-    #[error("no usable tiles were acquired")]
-    NoUsableTiles {
-        transient: bool,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        retry_after_ms: Option<u64>,
-    },
-    #[error("partial output was discarded")]
-    PartialDiscarded {
-        transient: bool,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        retry_after_ms: Option<u64>,
-    },
-
     // ---- Tiles ----
+    #[error("tile {tile} failed after {}: {cause}", attempt_count(.attempts))]
+    TileFailed {
+        tile: u32,
+        attempts: u32,
+        #[source]
+        cause: Box<Error>,
+    },
     #[error("a tile could not be decoded{}", .0.suffix())]
     DecodeFailed(Failure),
     #[error("a tile could not be processed{}", .0.suffix())]
@@ -757,15 +922,21 @@ pub fn bounded_uri(uri: impl Into<String>) -> String {
     uri
 }
 
+fn attempt_count(attempts: &u32) -> String {
+    format!(
+        "{attempts} attempt{}",
+        if *attempts == 1 { "" } else { "s" }
+    )
+}
+
 /// Structured limit facts for message templates; the localized copy layer
 /// reads the same fields and never parses this text.
 fn limit_facts(limit: &LimitContext) -> String {
     let reason = match limit.reason {
-        LimitReason::Memory => "memory",
-        LimitReason::JpegSide => "jpeg per-side",
-        LimitReason::WebpSide => "webp per-side",
+        LimitReason::Memory => "memory".to_string(),
+        LimitReason::CodecSide(format) => format!("{} per-side", format.as_str()),
     };
-    let mut facts = vec![reason.to_string()];
+    let mut facts = vec![reason];
     if let Some(dimensions) = &limit.dimensions {
         facts.push(format!("{}x{}", dimensions.width, dimensions.height));
     }
@@ -798,7 +969,8 @@ impl Error {
     pub fn cause(&self) -> &Self {
         match self {
             Self::Resource { source, .. } => source.cause(),
-            Self::DiscoveryFailed {
+            Self::TileFailed { cause, .. }
+            | Self::DiscoveryFailed {
                 cause: Some(cause), ..
             } => cause.cause(),
             other => other,
@@ -837,8 +1009,7 @@ impl Error {
             Self::Stale => "stale",
             Self::PlanEmpty => "plan-empty",
             Self::PlanInvalid { .. } => "plan-invalid",
-            Self::NoUsableTiles { .. } => "no-usable-tiles",
-            Self::PartialDiscarded { .. } => "partial-discarded",
+            Self::TileFailed { .. } => "tile-failed",
             Self::DecodeFailed { .. } => "decode-failed",
             Self::ProcessingFailed { .. } => "processing-failed",
             Self::LimitExceeded { .. } => "limit-exceeded",
@@ -883,12 +1054,10 @@ impl Error {
             | Self::NetworkFailure { .. }
             | Self::ProxyError { .. } => true,
             Self::Resource { source, .. } => source.retryable(),
-            Self::DiscoveryFailed {
+            Self::TileFailed { cause, .. }
+            | Self::DiscoveryFailed {
                 cause: Some(cause), ..
             } => cause.retryable(),
-            Self::NoUsableTiles { transient, .. } | Self::PartialDiscarded { transient, .. } => {
-                *transient
-            }
             _ => false,
         }
     }
@@ -906,17 +1075,10 @@ impl Error {
             | Self::RateLimited {
                 retry_after_ms: Some(hint),
                 ..
-            }
-            | Self::NoUsableTiles {
-                retry_after_ms: Some(hint),
-                ..
-            }
-            | Self::PartialDiscarded {
-                retry_after_ms: Some(hint),
-                ..
             } => Some(*hint),
             Self::Resource { source, .. } => source.retry_after_ms(),
-            Self::DiscoveryFailed {
+            Self::TileFailed { cause, .. }
+            | Self::DiscoveryFailed {
                 cause: Some(cause), ..
             } => cause.retry_after_ms(),
             _ => None,
@@ -965,6 +1127,9 @@ impl Error {
 pub struct Progress {
     pub phase: ProgressPhase,
     pub source_format: Option<String>,
+    /// Format-designated reusable URL for the selected image's catalog, if known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_url: Option<String>,
     pub title: Option<String>,
     pub selected: Option<Size>,
     pub maximum: Option<Size>,
@@ -987,6 +1152,7 @@ impl Default for Progress {
         Self {
             phase: ProgressPhase::Discovery,
             source_format: None,
+            source_url: None,
             title: None,
             selected: None,
             maximum: None,
@@ -995,14 +1161,6 @@ impl Default for Progress {
             preparation: None,
         }
     }
-}
-
-/// One tile settled as missing, with its full structured detail.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
-pub struct MissingTile {
-    pub tile: u32,
-    pub failures: Vec<Error>,
 }
 
 /// Honest output disposition reported by the host that performed the save.
@@ -1016,13 +1174,12 @@ pub enum OutputDisposition {
     DisplayOnly,
 }
 
-/// Output summary: geometry, completeness, and the honest disposition.
+/// Output summary after every required tile has been acquired.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub struct Output {
     pub canvas: Option<Size>,
     pub format: OutputFormat,
-    pub missing: Vec<u32>,
     pub disposition: OutputDisposition,
 }
 
@@ -1049,14 +1206,6 @@ pub enum SavedOutputState {
 pub struct DesktopOutput {
     pub output: Output,
     pub saved_output: Option<SavedOutput>,
-}
-
-impl Output {
-    /// Complete output has no missing tiles; the two cannot disagree.
-    #[must_use]
-    pub fn is_complete(&self) -> bool {
-        self.missing.is_empty()
-    }
 }
 
 // Bounded diagnostic observations.
@@ -1125,7 +1274,9 @@ pub struct DiagnosticReport {
     pub truncated_fields: u32,
 }
 
-/// A direct resource read, including its redirected base address.
+/// A direct resource read, including its redirected base address. For a ranged
+/// request, bytes cover exactly the requested interval; the Host validates this
+/// contract before returning a successful response.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub struct ResourceResponse {
@@ -1177,6 +1328,28 @@ pub struct Tile {
     pub placement: TilePlacement,
 }
 
+/// One acquisition attempt. The core owns retries; Hosts await approval for
+/// optional attempts before performing I/O. Attempt zero is the initial request.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub struct TileAcquisition {
+    pub tile: Tile,
+    pub attempt: u32,
+    pub requires_approval: bool,
+    pub previous_failure: Option<Box<Error>>,
+}
+
+impl From<Tile> for TileAcquisition {
+    fn from(tile: Tile) -> Self {
+        Self {
+            tile,
+            attempt: 0,
+            requires_approval: false,
+            previous_failure: None,
+        }
+    }
+}
+
 /// Final plan position and index of a tile already acquired during probing.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
@@ -1217,44 +1390,7 @@ pub struct FinishRequest {
     pub canvas: Option<Size>,
     pub format: OutputFormat,
     pub title: Option<String>,
-    pub missing: Vec<u32>,
     pub reused_tiles: Vec<ReusedTile>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
-pub struct MissingTiles {
-    pub missing: Vec<MissingTile>,
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "kebab-case")]
-#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
-pub enum SelectionPolicy {
-    #[default]
-    Interactive,
-    Fitting {
-        max_width: u32,
-        max_height: u32,
-        max_area: u64,
-    },
-    Automatic {
-        image_index: usize,
-        largest: bool,
-        max_width: Option<u32>,
-        max_height: Option<u32>,
-        zoom_level: Option<usize>,
-    },
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
-pub enum PartialPolicy {
-    #[default]
-    Prompt,
-    Keep,
-    Discard,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1262,8 +1398,8 @@ pub enum PartialPolicy {
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub struct Options {
     pub format: Option<String>,
-    pub selection: SelectionPolicy,
-    pub partial: PartialPolicy,
+    /// Issue approval-required attempts after the automatic retry allowance.
+    pub interactive_retries: bool,
     pub output: OutputFormat,
     pub max_concurrent: u32,
     pub max_tiles: u32,
@@ -1277,8 +1413,7 @@ impl Default for Options {
     fn default() -> Self {
         Self {
             format: None,
-            selection: SelectionPolicy::default(),
-            partial: PartialPolicy::default(),
+            interactive_retries: false,
             output: OutputFormat::Png,
             max_concurrent: 4,
             max_tiles: 4096,
@@ -1405,6 +1540,30 @@ mod tests {
     use super::*;
 
     #[test]
+    fn compression_estimates_follow_encoder_mapping_and_output_layout() {
+        let avif = OutputFormat::Avif.codec();
+        assert!((avif.estimated_bytes_per_pixel(9) - 0.33).abs() < 1e-12);
+        assert_eq!(avif.estimated_bytes_per_pixel(100), 0.012);
+        assert!(avif.estimated_bytes_per_pixel(99) < avif.estimated_bytes_per_pixel(90));
+        assert!(avif.estimated_bytes_per_pixel(90) < avif.estimated_bytes_per_pixel(80));
+        assert_eq!(avif.estimated_bytes_per_pixel(0), 1.15);
+        let webp = OutputFormat::Webp.codec();
+        assert_eq!(
+            webp.estimated_bytes_per_pixel(0),
+            webp.estimated_bytes_per_pixel(100)
+        );
+        assert_eq!(OutputFormat::Zif.codec().estimated_bytes_per_pixel(5), 4.0);
+        let auto = output_options().remove(0);
+        assert_eq!(auto.format, OutputPreference::Auto);
+        assert_eq!(auto.max_side, None);
+        assert_eq!(auto.compression_estimates.len(), 101);
+        assert_eq!(
+            auto.compression_estimates[5],
+            OutputFormat::Jpeg.codec().estimated_bytes_per_pixel(5)
+        );
+    }
+
+    #[test]
     fn messages_render_from_structured_facts_only() {
         let refused = Error::HttpError {
             status: 403,
@@ -1458,11 +1617,12 @@ mod tests {
         assert!(throttled.retryable());
         assert_eq!(throttled.retry_after_ms(), Some(9_000));
         assert_eq!(throttled.cause().kind(), "rate-limited");
-        // Aggregates report the largest retained hint.
-        let aggregate = Error::NoUsableTiles {
-            transient: true,
-            retry_after_ms: Some(9_000),
+        // Exhaustion preserves the last failure's retry hint.
+        let exhausted = Error::TileFailed {
+            tile: 0,
+            attempts: 4,
+            cause: Box::new(throttled),
         };
-        assert_eq!(aggregate.retry_after_ms(), Some(9_000));
+        assert_eq!(exhausted.retry_after_ms(), Some(9_000));
     }
 }

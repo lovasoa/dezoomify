@@ -56,41 +56,42 @@ function serveStatic(staticDir, pathname, req, res) {
     res.end("bad request");
     return;
   }
-  const rel = decoded === "/" ? "index.html" : decoded.replace(/^\/+/, "");
-  if (rel.includes("..") || rel.includes("\0")) {
+  const full = checkedStaticPath(staticDir, decoded);
+  if (!full) {
     res.writeHead(403, { "content-type": "text/plain", "content-length": "9" });
     res.end(headOnly ? undefined : "forbidden");
     return;
   }
-  const full = path.resolve(staticDir, rel);
-  const base = path.resolve(staticDir);
-  if (full !== base && !full.startsWith(base + path.sep)) {
-    res.writeHead(403, { "content-type": "text/plain", "content-length": "9" });
-    res.end(headOnly ? undefined : "forbidden");
-    return;
-  }
-  let stat;
-  try {
-    stat = fs.statSync(full);
-  } catch {
+  const file = readStaticFile(full);
+  if (!file) {
     res.writeHead(404, { "content-type": "text/plain", "content-length": "9" });
     res.end(headOnly ? undefined : "not found");
     return;
   }
-  const target = stat.isDirectory() ? path.join(full, "index.html") : full;
-  let bytes;
-  try {
-    bytes = fs.readFileSync(target);
-  } catch {
-    res.writeHead(404, { "content-type": "text/plain", "content-length": "9" });
-    res.end(headOnly ? undefined : "not found");
-    return;
-  }
+  const { target, bytes } = file;
   res.writeHead(200, {
     "content-type": contentTypeFor(target),
     "content-length": bytes.length,
   });
   res.end(headOnly ? undefined : bytes);
+}
+
+function checkedStaticPath(staticDir, decoded) {
+  const relative = decoded === "/" ? "index.html" : decoded.replace(/^\/+/, "");
+  if (relative.includes("..") || relative.includes("\0")) return null;
+  const full = path.resolve(staticDir, relative),
+    base = path.resolve(staticDir);
+  return full === base || full.startsWith(base + path.sep) ? full : null;
+}
+
+function readStaticFile(full) {
+  try {
+    const stat = fs.statSync(full);
+    const target = stat.isDirectory() ? path.join(full, "index.html") : full;
+    return { target, bytes: fs.readFileSync(target) };
+  } catch {
+    return null;
+  }
 }
 
 /**

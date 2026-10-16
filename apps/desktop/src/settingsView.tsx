@@ -1,6 +1,7 @@
-import { getLocale, t } from "@dezoomify/shared-ui";
+import { getDictionary, getLocale, type I18nKey, t } from "@dezoomify/shared-ui";
+import { outputOptions } from "@dezoomify/wasm-bindings/codecs";
 import type { ReactElement, ReactNode } from "react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { DesktopSettings, NetworkProfile } from "./settings.ts";
 import { headersToEditableText, pickDirectory } from "./settings.ts";
 
@@ -12,15 +13,10 @@ interface Props {
 }
 
 function formatChoices(): Array<{ value: DesktopSettings["output_format"]; label: string }> {
-  return [
-    { value: "auto", label: t("desktop.quick.auto") },
-    { value: "png", label: "PNG" },
-    { value: "jpeg", label: "JPEG" },
-    { value: "tiff", label: "TIFF" },
-    { value: "webp", label: "WebP" },
-    { value: "zif", label: "ZIF" },
-    { value: "iiif-dir", label: "IIIF folder" },
-  ];
+  return outputOptions.map((option) => ({
+    value: option.format,
+    label: option.label_key ? t(option.label_key as I18nKey) : option.name,
+  }));
 }
 
 const profiles: NetworkProfile[] = ["maximum", "balanced", "gentle"];
@@ -36,39 +32,48 @@ const sizes = [
 ];
 type SizePreset = string;
 
-function formatLimit(format: DesktopSettings["output_format"]): number {
-  return format === "jpeg" ? 65_535 : format === "webp" ? 16_383 : 1_000_000;
+function optionFor(format: DesktopSettings["output_format"]) {
+  const option = outputOptions.find((option) => option.format === format);
+  if (!option) throw new Error(`Unregistered output format: ${format}`);
+  return option;
 }
 
-// Rounded-up measurements from the native JPEG encoder on the Zoomify painting
-// and map fixtures plus Met artwork 437498. Small sample; these are heuristics.
-const jpegSizeCoefficients = [
-  { quality: 25, bytes: 0.1 },
-  { quality: 50, bytes: 0.15 },
-  { quality: 75, bytes: 0.2 },
-  { quality: 90, bytes: 0.3 },
-  { quality: 95, bytes: 0.4 },
-  { quality: 98, bytes: 0.45 },
-  { quality: 100, bytes: 0.5 },
-];
+function formatLimit(format: DesktopSettings["output_format"]): number {
+  return optionFor(format).max_side ?? 1_000_000;
+}
+
+function formatDescription(format: DesktopSettings["output_format"]): string {
+  const option = optionFor(format);
+  const name = format.replace(/-([a-z])/g, (_match, letter: string) => letter.toUpperCase());
+  const key = `desktop.quick.format.${name}` as I18nKey;
+  return key in getDictionary(getLocale())
+    ? t(key, {
+        maxSide: new Intl.NumberFormat(getLocale()).format(option.description_max_side ?? 0),
+      })
+    : t("desktop.quick.format.generic", { format: option.name });
+}
 
 function estimateSize(width: number, height: number, settings: DesktopSettings): string {
-  const format = settings.output_format;
-  const quality = 100 - settings.compression;
-  const jpeg = jpegSizeCoefficients.find((entry) => quality <= entry.quality)?.bytes ?? 0.5;
-  const bytesPerPixel =
-    format === "auto" || format === "jpeg" || format === "iiif-dir"
-      ? jpeg
-      : format === "webp"
-        ? 1.3
-        : format === "png"
-          ? 1.6
-          : 3;
-  const pyramid = format === "zif" || format === "iiif-dir" ? 4 / 3 : 1;
+  const option = optionFor(settings.output_format);
+  const compression = Math.round(Math.max(0, Math.min(100, settings.compression)));
+  const bytesPerPixel = option.compression_estimates[compression];
   const pixels = width * height;
-  const mb = (pixels * bytesPerPixel * pyramid) / 1_000_000;
+  const bytes = pixels * bytesPerPixel * 1.1;
+  const step = 10 ** (Math.floor(Math.log10(bytes)) - 1);
+  const rounded = Math.max(1, Math.ceil(bytes / step) * step);
+  const unit =
+    rounded < 1_000
+      ? { name: "byte", bytes: 1 }
+      : rounded < 1_000_000
+        ? { name: "kilobyte", bytes: 1_000 }
+        : { name: "megabyte", bytes: 1_000_000 };
   return t("desktop.quick.sizeEstimate", {
-    size: new Intl.NumberFormat(getLocale()).format(Math.ceil((mb * 1.1) / 5) * 5),
+    size: new Intl.NumberFormat(getLocale(), {
+      style: "unit",
+      unit: unit.name,
+      unitDisplay: "short",
+      maximumSignificantDigits: 2,
+    }).format(rounded / unit.bytes),
   });
 }
 
@@ -91,11 +96,13 @@ function QuickChoice({
   value,
   choices,
   onChange,
+  children,
 }: {
   label: string;
   value: string;
   choices: Array<{ value: string; label: string; hint: string; disabled?: boolean }>;
   onChange(value: string): void;
+  children?: ReactNode;
 }) {
   const ref = useRef<HTMLDetailsElement>(null);
   const selected = choices.find((choice) => choice.value === value) ?? choices[0];
@@ -118,6 +125,7 @@ function QuickChoice({
         <span aria-hidden="true">▾</span>
       </summary>
       <fieldset className="dz-quick-menu" aria-label={label}>
+        {children}
         {choices.map((choice) => (
           <div className="dz-quick-menu-row" key={choice.value}>
             <button
@@ -207,14 +215,7 @@ export function DesktopSettingsView({ settings, error, onChange, onReset }: Prop
   useEffect(() => {
     const dialog = dialogRef.current;
     if (!dialog) return;
-    const isOpen = dialog.open || dialog.hasAttribute("open");
-    if ((advancedOpen || help) && !isOpen) {
-      if (typeof dialog.showModal === "function") dialog.showModal();
-      else dialog.setAttribute("open", "");
-    } else if (!advancedOpen && !help && isOpen) {
-      if (typeof dialog.close === "function") dialog.close();
-      else dialog.removeAttribute("open");
-    }
+    syncDialog(dialog, Boolean(advancedOpen || help));
   }, [advancedOpen, help]);
 
   // These caps select source levels, not resized output dimensions. The smallest
@@ -243,14 +244,6 @@ export function DesktopSettingsView({ settings, error, onChange, onReset }: Prop
     else setAdvancedOpen(true);
   };
 
-  const jpeg = settings.output_format === "jpeg" || settings.output_format === "auto";
-  const showCompression =
-    settings.output_format !== "webp" && settings.output_format !== "iiif-dir";
-  const compressionValue = jpeg ? 100 - settings.compression : settings.compression;
-  const compressionLabel = jpeg
-    ? t("desktop.advanced.jpegQuality")
-    : t("desktop.advanced.compressionEffort");
-
   return (
     <section
       id="dz-desktop-settings"
@@ -276,15 +269,7 @@ export function DesktopSettingsView({ settings, error, onChange, onReset }: Prop
             onChange={(value) =>
               commit({ output_format: value as DesktopSettings["output_format"] })
             }
-            choices={formats.map((format) => ({
-              ...format,
-              disabled:
-                Math.max(settings.max_width ?? 0, settings.max_height ?? 0) >
-                formatLimit(format.value),
-              hint: t(
-                `desktop.quick.hint.${format.value === "iiif-dir" ? "iiifDir" : format.value}`,
-              ),
-            }))}
+            choices={formatOptions(settings)}
           />
         </QuickOption>
 
@@ -311,7 +296,9 @@ export function DesktopSettingsView({ settings, error, onChange, onReset }: Prop
                 hint: t("desktop.quick.exact"),
               },
             ]}
-          />
+          >
+            <CompressionControl settings={settings} commit={commit} />
+          </QuickChoice>
         </QuickOption>
 
         <QuickOption label={t("desktop.quick.network")} onInfo={() => setHelp("network")}>
@@ -375,11 +362,7 @@ export function DesktopSettingsView({ settings, error, onChange, onReset }: Prop
                   {formats.map((format) => (
                     <div key={format.value}>
                       <dt>{format.label}</dt>
-                      <dd>
-                        {t(
-                          `desktop.quick.format.${format.value === "iiif-dir" ? "iiifDir" : format.value}`,
-                        )}
-                      </dd>
+                      <dd>{formatDescription(format.value)}</dd>
                     </div>
                   ))}
                 </dl>
@@ -437,69 +420,11 @@ export function DesktopSettingsView({ settings, error, onChange, onReset }: Prop
             </div>
           ) : (
             <>
-              {showCompression ? (
-                <PreferenceRow
-                  title={compressionLabel}
-                  description={
-                    jpeg
-                      ? t("desktop.advanced.jpegQualityDesc")
-                      : t("desktop.advanced.compressionEffortDesc")
-                  }
-                >
-                  <div className="dz-slider-control">
-                    <input
-                      type="range"
-                      min="0"
-                      max="100"
-                      aria-label={compressionLabel}
-                      value={compressionValue}
-                      onChange={(event) => {
-                        const value = Number(event.currentTarget.value);
-                        commit({ compression: jpeg ? 100 - value : value });
-                      }}
-                    />
-                    <output>{jpeg ? `${compressionValue}%` : compressionValue}</output>
-                  </div>
-                </PreferenceRow>
-              ) : null}
-
               <PreferenceRow
                 title={t("desktop.advanced.dimensions")}
                 description={t("desktop.advanced.dimensionsDesc")}
               >
-                <div className="dz-size-control">
-                  <input
-                    type="number"
-                    min="1"
-                    max={formatLimit(settings.output_format)}
-                    placeholder={t("desktop.advanced.width")}
-                    aria-label={t("desktop.advanced.width")}
-                    value={settings.max_width ?? ""}
-                    onChange={(event) =>
-                      commit({
-                        max_width: event.currentTarget.value
-                          ? Number(event.currentTarget.value)
-                          : null,
-                      })
-                    }
-                  />
-                  <span aria-hidden="true">×</span>
-                  <input
-                    type="number"
-                    min="1"
-                    max={formatLimit(settings.output_format)}
-                    placeholder={t("desktop.advanced.height")}
-                    aria-label={t("desktop.advanced.height")}
-                    value={settings.max_height ?? ""}
-                    onChange={(event) =>
-                      commit({
-                        max_height: event.currentTarget.value
-                          ? Number(event.currentTarget.value)
-                          : null,
-                      })
-                    }
-                  />
-                </div>
+                <DimensionInputs settings={settings} commit={commit} />
               </PreferenceRow>
 
               <PreferenceRow
@@ -559,5 +484,119 @@ export function DesktopSettingsView({ settings, error, onChange, onReset }: Prop
         </div>
       </dialog>
     </section>
+  );
+}
+
+function DimensionInputs({
+  settings,
+  commit,
+}: {
+  settings: DesktopSettings;
+  commit(patch: Partial<DesktopSettings>): void;
+}) {
+  return (
+    <div className="dz-size-control">
+      <input
+        type="number"
+        min="1"
+        max={formatLimit(settings.output_format)}
+        placeholder={t("desktop.advanced.width")}
+        aria-label={t("desktop.advanced.width")}
+        value={settings.max_width ?? ""}
+        onChange={(event) =>
+          commit({
+            max_width: event.currentTarget.value ? Number(event.currentTarget.value) : null,
+          })
+        }
+      />
+      <span aria-hidden="true">×</span>
+      <input
+        type="number"
+        min="1"
+        max={formatLimit(settings.output_format)}
+        placeholder={t("desktop.advanced.height")}
+        aria-label={t("desktop.advanced.height")}
+        value={settings.max_height ?? ""}
+        onChange={(event) =>
+          commit({
+            max_height: event.currentTarget.value ? Number(event.currentTarget.value) : null,
+          })
+        }
+      />
+    </div>
+  );
+}
+
+function formatOptions(settings: DesktopSettings) {
+  const maximum = Math.max(settings.max_width ?? 0, settings.max_height ?? 0);
+  return formatChoices().map((format) => ({
+    ...format,
+    disabled: maximum > formatLimit(format.value),
+    hint: t(`desktop.quick.hint.${optionFor(format.value).hint}` as I18nKey),
+  }));
+}
+
+function syncDialog(dialog: HTMLDialogElement, open: boolean): void {
+  const isOpen = dialog.open || dialog.hasAttribute("open");
+  if (open && !isOpen) {
+    if (typeof dialog.showModal === "function") dialog.showModal();
+    else dialog.setAttribute("open", "");
+  } else if (!open && isOpen) {
+    if (typeof dialog.close === "function") dialog.close();
+    else dialog.removeAttribute("open");
+  }
+}
+
+function CompressionControl({
+  settings,
+  commit,
+}: {
+  settings: DesktopSettings;
+  commit(patch: Partial<DesktopSettings>): void;
+}) {
+  const id = useId();
+  const option = optionFor(settings.output_format);
+  const supported = option.compression_supported;
+  const warning =
+    option.compression_warning_above !== undefined &&
+    settings.compression > option.compression_warning_above;
+  return (
+    <label
+      className="dz-compression-control"
+      htmlFor={id}
+      title={t(
+        supported ? "desktop.quick.compressionInfo" : "desktop.quick.compressionUnavailable",
+      )}
+    >
+      <span>{t("desktop.quick.compression")}</span>
+      <output htmlFor={id}>
+        {warning ? (
+          <span
+            id={`${id}-warning`}
+            className="dz-compression-warning"
+            role="img"
+            aria-label={t("desktop.quick.compressionWarning")}
+            title={t("desktop.quick.compressionWarning")}
+          >
+            ⚠
+          </span>
+        ) : null}
+        {settings.compression}%
+      </output>
+      <input
+        id={id}
+        type="range"
+        min="0"
+        max="100"
+        step="1"
+        aria-label={t("desktop.quick.compression")}
+        aria-describedby={warning ? `${id}-warning` : undefined}
+        disabled={!supported}
+        value={settings.compression}
+        onInput={(event) => {
+          if (supported) commit({ compression: Number(event.currentTarget.value) });
+        }}
+      />
+    </label>
   );
 }

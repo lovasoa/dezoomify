@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { outputCodecs } from "@dezoomify/wasm-bindings/codecs";
 import { renderSaveGuidance } from "../packages/shared-ui/src/components.ts";
-import { canRetry, detailOf, plainMessageFor } from "../packages/shared-ui/src/failure.ts";
+import {
+  canRetry,
+  detailOf,
+  isJobError,
+  plainMessageFor,
+} from "../packages/shared-ui/src/failure.ts";
 import {
   presentFailure,
   presentIdle,
@@ -14,9 +20,31 @@ const progress = (extra = {}) => ({ phase: "acquisition", completed: 2, total: 4
 const output = (extra = {}) => ({
   canvas: { width: 512, height: 512 },
   format: "png",
-  missing: [],
+
   disposition: "browser-save-ready",
   ...extra,
+});
+
+test("codec dimension failures use the registry for validation and guidance", () => {
+  for (const codec of outputCodecs.filter((codec) => codec.max_side)) {
+    const error = {
+      kind: "limit-exceeded",
+      limit: {
+        reason: { "codec-side": codec.format },
+        dimensions: { width: codec.max_side + 1, height: 12 },
+      },
+    };
+    assert.equal(isJobError(error), true);
+    const message = plainMessageFor(error, "museum.test");
+    assert.ok(message.includes(codec.name));
+    assert.ok(message.includes(String(codec.max_side)));
+    assert.match(message, /PNG/);
+    assert.match(message, /museum.test/);
+  }
+  assert.equal(
+    isJobError({ kind: "limit-exceeded", limit: { reason: { "codec-side": "unknown" } } }),
+    false,
+  );
 });
 
 test("native output preparation uses pixel progress and does not pause compression", () => {
@@ -70,15 +98,14 @@ test("ordinary image display keeps progress during work and presents its final p
   assert.equal(done.headlineKey, "view.display.title");
 });
 
-test("results without progress retain partial output and exact missing tile identities", () => {
+test("results without progress retain output disposition", () => {
   const result = output({
-    missing: [10, 11, 12],
     disposition: "native-publication",
   });
-  const partial = presentOutput(result, undefined);
-  assert.equal(partial.phase, "completed");
-  assert.equal(partial.progress, null);
-  assert.deepEqual(partial.output, result);
+  const presented = presentOutput(result, undefined);
+  assert.equal(presented.phase, "completed");
+  assert.equal(presented.progress, null);
+  assert.deepEqual(presented.output, result);
 });
 
 test("failed presentation retains the canonical failure", () => {

@@ -5,6 +5,10 @@
   "type": "module",
   "types": "./src/generated.d.ts",
   "exports": {
+    "./codecs": {
+      "types": "./src/codecs.d.mts",
+      "default": "./src/codecs.mjs"
+    },
     ".": {
       "types": "./src/generated.d.ts"
     }

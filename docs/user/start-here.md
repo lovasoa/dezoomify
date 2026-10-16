@@ -36,8 +36,8 @@ it cannot finish a job, and suggests the app that can.
 ## What Dezoomify is not
 
 - Dezoomify never breaks passwords or paywalls. If you can see the image in
-  your browser after signing in, the extension or the desktop app can usually
-  save it; if you cannot see it at all, neither can Dezoomify.
+  your browser after signing in, the extension can usually
+  save it; Dezoomify cannot grant access to an image you are not allowed to see.
 - Dezoomify works on the images it recognizes. If a site uses an unusual
   viewer, see [finding the image address](./finding-the-image-address.md) for
   a way to help it, and [troubleshooting](./troubleshooting.md) when

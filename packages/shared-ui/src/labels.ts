@@ -1,13 +1,13 @@
 // Portable suggested file names shared by the graphical products.
+import { defaultSaveExtension, outputCodecs } from "@dezoomify/wasm-bindings/codecs";
 
 export function extensionForSaveFormat(format: unknown): string {
-  const lower = typeof format === "string" ? format.toLowerCase() : "png";
-  if (lower === "jpeg" || lower === "jpg") return "jpg";
-  if (lower === "tiff" || lower === "tif") return "tif";
-  if (lower === "zif") return "zif";
-  if (lower === "webp") return "webp";
-  if (lower === "iiif" || lower === "iiif-dir") return "iiif";
-  return "png";
+  if (typeof format !== "string" || format.length === 0) return defaultSaveExtension;
+  const lower = format.toLowerCase();
+  const codec = outputCodecs.find(
+    (codec) => codec.format === lower || codec.extensions.includes(lower),
+  );
+  return codec?.extensions[0] ?? defaultSaveExtension;
 }
 
 // Control characters (U+0000-U+001F) are illegal in portable file stems.

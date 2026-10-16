@@ -11,7 +11,7 @@
 //! (`pnpm --filter ./apps/desktop exec tauri build --bundles deb`) (needs
 //! `dpkg-deb` plus the generated PNG icons); Windows builds `msi`/`nsis`
 //! (needs WebView2 plus WiX for msi and NSIS for nsis plus `icon.ico`);
-//! macOS builds `dmg` (needs the Xcode Command Line Tools plus `icon.icns`).
+//! macOS builds `app`/`dmg` (needs the Xcode Command Line Tools plus `icon.icns`).
 //! A target is available only when its recipe and host tools are present;
 //! otherwise bundling fails closed naming the exact prerequisites.
 //! `--unsigned-test` is the no-bundle CI path: lean shell, frontend, and
@@ -474,7 +474,7 @@ fn tauri_system_ready() -> bool {
 }
 
 /// The bundler set for this host. Linux produces a real `deb`; Windows
-/// produces `msi`/`nsis`; macOS produces `dmg`. Any other host has no
+/// produces `msi`/`nsis`; macOS produces `app`/`dmg`. Any other host has no
 /// bundle recipe.
 #[cfg(target_os = "linux")]
 fn bundle_targets() -> &'static [&'static str] {
@@ -488,7 +488,9 @@ fn bundle_targets() -> &'static [&'static str] {
 
 #[cfg(target_os = "macos")]
 fn bundle_targets() -> &'static [&'static str] {
-    &["dmg"]
+    // Tauri only creates the signed updater archive when `app` is an explicit
+    // target. Building just `dmg` deletes its temporary app without an updater.
+    &["app", "dmg"]
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
@@ -881,12 +883,17 @@ fn bundle() -> Result<(), String> {
         "--bundles",
     ];
     pnpm_args.extend(targets.iter().copied());
-    let version_config = std::env::var("DEZOOMIFY_VERSION")
-        .ok()
-        .map(|version| format!(r#"{{"version":"{version}"}}"#));
-    if let Some(config) = version_config.as_deref() {
-        pnpm_args.extend(["--config", config]);
+    // Local bundles need no release secret. Release builds require the key
+    // before reaching this pipeline and leave updater artifact creation enabled.
+    let mut config = serde_json::json!({});
+    if let Ok(version) = std::env::var("DEZOOMIFY_VERSION") {
+        config["version"] = version.into();
     }
+    if std::env::var_os("TAURI_SIGNING_PRIVATE_KEY").is_none() {
+        config["bundle"] = serde_json::json!({"createUpdaterArtifacts": false});
+    }
+    let config = config.to_string();
+    pnpm_args.extend(["--config", &config]);
     // The prebuilt CLI goes through `pnpm_command()` so Windows resolves the
     // `.cmd` shim via `cmd /c`.
     #[cfg(target_os = "macos")]

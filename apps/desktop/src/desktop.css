@@ -157,8 +157,7 @@ body {
   margin-top: 0.5rem;
 }
 
-/* Missing-tile and partial/cancel notes: plain left-aligned flow, no box. */
-#dz-desktop-aux .dz-missing-list,
+/* Cancellation cleanup stays in the main flow. */
 #dz-cancel-cleanup-note {
   text-align: left;
   font-variant-numeric: tabular-nums;
@@ -188,8 +187,7 @@ body {
 #root .dz-tile-counts,
 #root .dz-pending-line,
 #root .dz-notice-message,
-#root .dz-completed-summary,
-#root .dz-error-message {
+#root .dz-completed-summary {
   text-align: left;
 }
 
@@ -578,26 +576,61 @@ body {
   line-height: 1.4;
 }
 
-#dz-desktop-settings .dz-slider-control {
+#dz-desktop-settings .dz-compression-control {
   display: grid;
-  grid-template-columns: 160px 2.5rem;
-  gap: 0.7rem;
+  grid-template-columns: 1fr auto;
+  gap: 0.65rem;
   align-items: center;
-}
-
-#dz-desktop-settings .dz-slider-control input[type="range"] {
-  width: 160px;
-  height: auto;
-  padding: 0;
-  accent-color: var(--dz-accent-blue);
-  background: transparent;
-  border: 0;
-}
-
-#dz-desktop-settings .dz-slider-control output {
+  padding: 0.45rem 0.5rem 0.8rem;
+  margin-bottom: 0.25rem;
+  border-bottom: 1px solid var(--dz-surface-border);
   color: var(--dz-text-secondary);
+  font-size: 0.73rem;
+}
+
+#dz-desktop-settings .dz-compression-control input[type="range"] {
+  grid-column: 1 / -1;
+  appearance: none;
+  width: 100%;
+  height: 2px;
+  margin: 0.25rem 0;
+  padding: 0;
+  background: var(--dz-surface-border);
+  border: 0;
+  cursor: pointer;
+}
+
+#dz-desktop-settings .dz-compression-control input::-webkit-slider-thumb {
+  appearance: none;
+  width: 10px;
+  height: 10px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--dz-accent-blue);
+}
+
+#dz-desktop-settings .dz-compression-control input::-moz-range-thumb {
+  width: 10px;
+  height: 10px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--dz-accent-blue);
+}
+
+#dz-desktop-settings .dz-compression-control input:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+#dz-desktop-settings .dz-compression-control output {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
   font-variant-numeric: tabular-nums;
-  font-size: 0.8rem;
+}
+
+#dz-desktop-settings .dz-compression-warning {
+  color: var(--dz-notice-accent);
 }
 
 #dz-desktop-settings .dz-size-control {
@@ -697,21 +730,8 @@ body {
   }
 }
 
-/* Partial output details remain inline with the completed result. */
-#dz-desktop-aux .dz-partial-note {
-  display: flex;
-  flex-direction: column;
-  gap: 0.6rem;
-  background: transparent;
-  border: none;
-  box-shadow: none;
-  border-radius: 0;
-  padding: 0;
-  text-align: left;
-}
-
 /* Crisp 2px architectural focus for every desktop-only action: submit, save,
- * cancel, reset, recovery choices, settings inputs, browse, help/about, and
+ * cancel, reset, retry approval, settings inputs, browse, help/about, and
  * confirm. Shared actions (Dezoomify/Cancel/Save buttons, URL input) already
  * use the same token in theme.css; these rules cover the desktop aux,
  * settings and help DOM. One token only, no blur, no neon halo. */

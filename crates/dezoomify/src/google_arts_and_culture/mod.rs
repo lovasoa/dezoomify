@@ -22,7 +22,7 @@ fn is_google_arts_url(uri: &str) -> bool {
 }
 
 fn parse_page(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
-    Ok(ParsedResource::FollowWith(
+    Ok(ParsedResource::FollowIntermediate(
         Request::new(page_info(resource)?.tile_info_url()),
         parse_tile_information,
     ))
@@ -167,6 +167,10 @@ mod tests {
                 .display_label(position)
                 .contains("©Designers Anonymes")
         }));
+        assert_fixture_geometry(image);
+    }
+
+    fn assert_fixture_geometry(image: &crate::core::ResolvedImage) {
         let areas: Vec<_> = image
             .levels
             .iter()

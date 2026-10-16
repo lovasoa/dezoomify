@@ -1,9 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createElement } from "react";
 import { createDiagnosticRecorder } from "../packages/shared-ui/src/diagnostics.ts";
 import { setLocale, t } from "../packages/shared-ui/src/i18n.ts";
-import { PartialDecisionActions } from "../packages/shared-ui/src/partial-decision.tsx";
 import {
   presentFailure,
   presentIdle,
@@ -171,8 +169,7 @@ test("renderView mounts card and updates job section in place without DOM destru
     presentOutput(
       {
         format: "png",
-        complete: true,
-        missing: [],
+
         disposition: "browser-save-ready",
         canvas: { width: 4000, height: 3000 },
       },
@@ -194,7 +191,7 @@ test("output actions belong to their completed result", async () => {
   const el = container();
   const old = Promise.withResolvers();
   const done = presentOutput(
-    { format: "png", complete: true, missing: [], disposition: "native-publication" },
+    { format: "png", disposition: "native-publication" },
     { phase: "acquisition", completed: 0, total: null },
   );
   render(el, done, { ...callbacks, onOpenOutput: () => old.promise }, { outputKey: "old" });
@@ -207,82 +204,54 @@ test("output actions belong to their completed result", async () => {
   assert.equal(el.querySelector("#dz-btn-open").disabled, false);
 });
 
-test("partial controls return the selected choice", () => {
+test("retry controls return retry or cancel", () => {
   const el = container();
   const answers = [];
-  act(() =>
-    renderView(el, presentIdle(), callbacks, undefined, {
-      after: createElement(PartialDecisionActions, {
-        decision: {
-          missing: [
-            { tile: 1, failures: [{ kind: "timeout", transport: "direct", retryable: true }] },
-          ],
-        },
-        onAnswer: (command) => answers.push(command),
-      }),
-    }),
+  render(
+    el,
+    {
+      ...presentProgress({ phase: "acquisition", completed: 3, total: 4 }),
+      retryApproval: { tile: {}, attempt: 4, requires_approval: true },
+    },
+    { ...callbacks, onRetryChoice: (choice) => answers.push(choice) },
   );
-  for (const choice of ["keep", "discard", "retry"])
-    click(el.querySelector(`[data-dz-partial-choice="${choice}"]`));
-  assert.deepEqual(answers, ["keep", "discard", "retry"]);
+  for (const choice of ["retry", "cancel"])
+    click(el.querySelector(`[data-dz-retry-choice="${choice}"]`));
+  assert.deepEqual(answers, ["retry", "cancel"]);
 });
 
-test("partial refusal is a static decision with useful actions before diagnostics", () => {
+test("retry approval replaces running progress with one warning before diagnostics", () => {
   const el = container();
-  const decision = {
-    missing: [
-      {
-        tile: 1,
-        failures: [
-          { kind: "http-error", status: 403, transport: "browser-session", retryable: false },
-        ],
-      },
-    ],
-  };
   const presentation = {
     ...presentProgress({ phase: "acquisition", completed: 3, total: 4 }),
-    decision,
+    retryApproval: { tile: {}, attempt: 4, requires_approval: true },
   };
   act(() =>
     renderView(
       el,
       presentation,
-      callbacks,
-      { diagnosticReport: createDiagnosticRecorder({ id: "partial", now: () => 0 }).report() },
-      {
-        after: createElement(PartialDecisionActions, { decision, onAnswer() {} }),
-      },
+      { ...callbacks, onRetryChoice() {} },
+      { diagnosticReport: createDiagnosticRecorder({ id: "retry", now: () => 0 }).report() },
     ),
   );
-  assert.match(el.textContent, /The image is incomplete/);
+  const notice = el.querySelector(".dz-retry-section");
+  const status = notice.querySelector('[role="status"]');
+  assert.equal(notice.querySelector("h2").id, notice.getAttribute("aria-labelledby"));
+  assert.equal(notice.querySelectorAll("[data-dz-retry-actions]").length, 1);
+  assert.equal(
+    status.querySelector("button"),
+    null,
+    "live announcements exclude interactive actions",
+  );
+  assert.match(el.textContent, /Download paused/);
   assert.match(el.textContent, /3 of 4 tiles/);
-  assert.match(el.textContent, /website refused/);
-  assert.match(el.textContent, /Save incomplete image/);
+  assert.match(el.textContent, /no file has been saved/);
+  assert.match(el.textContent, /Retry once more/);
   assert.equal(el.querySelector("[role=progressbar]"), null);
   assert.equal(el.querySelector(".dz-pulse"), null);
-  assert.equal(el.querySelector("[data-dz-partial-choice=retry]"), null);
   assert.ok(
-    el.innerHTML.indexOf("data-dz-partial-decision") < el.innerHTML.indexOf("dz-job-diagnostics"),
+    el.innerHTML.indexOf("data-dz-retry-actions") < el.innerHTML.indexOf("dz-job-diagnostics"),
   );
-});
-
-test("zero-tile refusal has no partial controls and opens the source", () => {
-  const el = container();
-  let opened = false;
-  render(el, presentFailure({ kind: "no-usable-tiles", transient: false }), {
-    ...callbacks,
-    onOpenSource() {
-      opened = true;
-    },
-  });
-  assert.ok(el.textContent.includes(t("view.partial.empty")));
-  assert.match(el.textContent, /No file was saved/);
-  assert.equal(el.querySelector("[role=progressbar]"), null);
-  assert.equal(el.querySelector("[data-dz-partial-decision]"), null);
-  click(
-    [...el.querySelectorAll("button")].find((button) => button.textContent === "Open source page"),
-  );
-  assert.equal(opened, true);
 });
 
 test("slow discovery replaces the phase with one waiting status", () => {
@@ -347,6 +316,56 @@ test("failed state updates error details in place without destroying error conta
     card.querySelector("#dz-error-message").textContent,
     t("desktop.transport.stalled", { host: "the server" }),
   );
+});
+
+test("website discovery failure keeps the extension suggestion and opens its guidance modal", () => {
+  setLocale("en");
+  const el = container();
+  render(el, failurePresentation({ kind: "no-image-found" }), callbacks, { product: "website" });
+  assert.match(el.querySelector("#dz-error-message").textContent, /try the browser extension/);
+  click(el.querySelector("#dz-card-extension"));
+  const modal = document.querySelector(".dz-modal-backdrop");
+  assert.ok(modal);
+  assert.match(modal.textContent, /Chrome Web Store/);
+  click(modal.querySelector(".dz-modal-close"));
+});
+
+test("extension discovery failure offers a diagnostic issue draft and the hosted URL guide", () => {
+  const el = container();
+  const input = "https://museum.example/viewer?item=123";
+  const error = { kind: "no-image-found", detail: "no image references were found on this page" };
+  const d = createDiagnosticRecorder({
+    id: "extension-failure",
+    now: () => 0,
+    context: { product: "extension", input },
+  });
+  d.record("debug", "scan-complete", { candidates: 0 });
+  d.finish("failed", error);
+  for (const locale of ["en", "fr", "de", "it"]) {
+    setLocale(locale);
+    render(el, failurePresentation(error), callbacks, {
+      product: "extension",
+      diagnosticReport: d.report(),
+    });
+    assert.equal(
+      el.querySelector("#dz-error-message").textContent,
+      t("view.discovery.noneExtension"),
+    );
+    const guidance = el.querySelector(".dz-guidance-grid");
+    assert.equal(guidance.children.length, 2);
+    assert.equal(el.querySelector("#dz-card-extension"), null);
+    assert.equal(el.querySelector("#dz-card-desktop"), null);
+    const draft = new URL(guidance.querySelector("#dz-card-report-bug").getAttribute("href"));
+    assert.equal(draft.origin + draft.pathname, "https://github.com/lovasoa/dezoomify/issues/new");
+    assert.match(draft.searchParams.get("body"), /scan-complete/);
+    assert.ok(draft.searchParams.get("body").includes(input));
+    assert.ok(draft.searchParams.get("body").includes(t("view.discovery.noneExtension")));
+    assert.equal(
+      guidance.querySelectorAll("a")[1].getAttribute("href"),
+      "https://dezoomify.ophir.dev/help/finding-the-image-address.html",
+    );
+  }
+  setLocale("en");
 });
 
 test("error layering: plain message prominent, parser diagnostics only in technical details", () => {
@@ -493,19 +512,15 @@ test("failed view offers retry only for retryable errors and start over only whe
   assert.equal(retried, 2, "retry stays wired without a reset callback");
 });
 
-test("resolution notice offers maximum retry and stop while fetching, keeps the choice when done", () => {
+test("resolution notice has one desktop action during the job and after output actions", () => {
   const el = container();
   let stopped = 0;
-  let tried = 0;
   const actions = {
     onSubmitUrl: () => {},
     onCancel: () => {
       stopped += 1;
     },
     onReset: () => {},
-    onTryMaximum: () => {
-      tried += 1;
-    },
   };
   render(
     el,
@@ -517,22 +532,24 @@ test("resolution notice offers maximum retry and stop while fetching, keeps the 
       maximum: { width: 40000, height: 20000 },
     }),
     actions,
+    { offerDesktopApp: true },
   );
   assert.ok(el.querySelector("#dz-resolution-notice"), "shown while tiles are still in flight");
-  const sizes = el.querySelector("#dz-resolution-sizes").textContent;
+  const notice = el.querySelector("#dz-resolution-notice");
+  assert.equal(notice.querySelector("h2").textContent, "Lower-resolution image");
+  assert.ok(notice.querySelector('[role="status"]'));
+  assert.ok(el.querySelector('[role="progressbar"]'), "size warning leaves downloading visible");
+  assert.ok(notice.querySelector("#dz-btn-download-desktop"));
+  const sizes = el.querySelector("#dz-resolution-message").textContent;
   assert.match(sizes, /20000×10000/, "selected resolution");
   assert.match(sizes, /40000×20000/, "maximum resolution");
-  assert.match(el.querySelector("#dz-resolution-message").textContent, /maximal resolution/i);
-  click(el.querySelector("#dz-btn-try-maximum"));
-  assert.equal(tried, 1, "Try maximum restarts at the maximum known resolution");
-  assert.ok(el.querySelector("#dz-btn-resolution-stop"));
-  click(el.querySelector("#dz-btn-resolution-stop"));
-  assert.equal(stopped, 1, "Stop ends the smaller download");
+  assert.equal(notice.querySelectorAll("button").length, 1);
+  assert.equal(stopped, 0);
 
   render(
     el,
     presentOutput(
-      { format: "png", complete: true, missing: [], disposition: "browser-save-ready" },
+      { format: "png", disposition: "browser-save-ready" },
       {
         phase: "acquisition",
         completed: 4,
@@ -542,13 +559,66 @@ test("resolution notice offers maximum retry and stop while fetching, keeps the 
       },
     ),
     actions,
+    { offerDesktopApp: true },
   );
   assert.ok(el.querySelector("#dz-resolution-notice"), "the offer survives completion");
   assert.equal(el.querySelector("#dz-btn-resolution-stop"), null, "stop is gone once done");
-  assert.ok(el.querySelector("#dz-btn-try-maximum"));
+  assert.equal(el.querySelector("#dz-btn-try-maximum"), null);
+  assert.ok(el.querySelector(".dz-actions-row + #dz-resolution-notice"));
 });
 
-test("hosts without a maximum retry never show the resolution notice", () => {
+test("desktop handoff shows and copies the discovered URL, handles failure and unavailable sources", async () => {
+  const el = container();
+  const result = presentOutput(
+    { format: "png", disposition: "browser-save-initiated" },
+    {
+      phase: "output",
+      completed: 4,
+      total: 4,
+      selected: { width: 20000, height: 10000 },
+      maximum: { width: 40000, height: 20000 },
+    },
+  );
+  const source = "https://image.test/selected/info.json?signature=exact%2Bvalue";
+  let copied;
+  let rejectCopy = false;
+  const actions = {
+    ...callbacks,
+    async onCopyText(text) {
+      if (rejectCopy) throw new Error("unavailable");
+      copied = text;
+    },
+  };
+  render(el, result, actions, {
+    offerDesktopApp: true,
+    sourceUrl: "https://museum.test/page",
+    desktopSourceUrl: source,
+  });
+  click(el.querySelector("#dz-btn-download-desktop"));
+  let dialog = document.querySelector('[role="dialog"]');
+  assert.ok(dialog.querySelector('a[href="https://github.com/lovasoa/dezoomify/releases/latest"]'));
+  assert.equal(dialog.querySelector("input").value, source);
+  assert.ok(dialog.querySelector("label").textContent.includes("Paste"));
+  const copy = dialog.querySelector(".dz-btn-secondary");
+  await act(async () => click(copy));
+  assert.equal(copied, source);
+  assert.match(dialog.querySelector('[role="status"]').textContent, /URL copied/);
+  rejectCopy = true;
+  await act(async () => click(copy));
+  assert.match(dialog.querySelector('[role="alert"]').textContent, /copy it manually/);
+  assert.equal(dialog.querySelector("input").value, source);
+  click(dialog.querySelector(".dz-modal-close"));
+  assert.equal(document.querySelector('[role="dialog"]'), null);
+
+  render(el, result, actions, { offerDesktopApp: true, sourceUrl: "https://museum.test/page" });
+  click(el.querySelector("#dz-btn-download-desktop"));
+  dialog = document.querySelector('[role="dialog"]');
+  assert.equal(dialog.querySelector("input"), null, "never substitutes the scanned page URL");
+  assert.match(dialog.textContent, /No reusable source URL/);
+  click(dialog.querySelector(".dz-modal-close"));
+});
+
+test("hosts without desktop handoff never show the resolution notice", () => {
   const el = container();
   render(
     el,

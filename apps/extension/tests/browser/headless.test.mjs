@@ -7,12 +7,14 @@ import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import {
   copyFileSync,
+  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
   rmSync,
+  writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -25,7 +27,6 @@ import { formats } from "../../../../test/support/formats.cjs";
 import {
   assertSavedPyramid,
   decodePngPixels,
-  decodePngSize,
   EXPECTED_HEIGHT,
   EXPECTED_WIDTH,
   pixelAt,
@@ -108,6 +109,16 @@ function stagePackage(
 }
 
 async function startFixtureServer(workDir) {
+  const staticDir = path.join(workDir, "static");
+  cpSync(STATIC_DIR, staticDir, { recursive: true });
+  const library = readFileSync(
+    new URL(import.meta.resolve("openseadragon/build/openseadragon/openseadragon.min.js")),
+    "utf8",
+  );
+  writeFileSync(
+    path.join(staticDir, "openseadragon-fixture.js"),
+    `(()=>{${library}\nwindow.OpenSeadragon=OpenSeadragon;})()`,
+  );
   const addrFile = path.join(workDir, "server.addr");
   const proc = spawn(process.execPath, [
     path.join(REPO_ROOT, "test/fixture-server.mjs"),
@@ -119,7 +130,7 @@ async function startFixtureServer(workDir) {
     "--scenarios-dir",
     path.join(REPO_ROOT, "testdata/scenarios"),
     "--static-dir",
-    STATIC_DIR,
+    staticDir,
     "--request-log",
     path.join(workDir, "fixture-requests.jsonl"),
   ]);
@@ -148,11 +159,6 @@ function assertPng(bytes) {
     const actual = pixelAt(decoded, ...center);
     assert.deepEqual(actual, expected, `${tile} center pixel`);
   }
-}
-
-function assertPngShape(bytes) {
-  const { width, height } = decodePngSize(bytes);
-  assert.deepEqual([width, height], [EXPECTED_WIDTH, EXPECTED_HEIGHT], "saved image dimensions");
 }
 
 async function readCompletedPng(outputDir, deadline) {
@@ -227,7 +233,7 @@ async function waitForVisible(page, selector, label) {
   }
 }
 
-async function runChromiumJob(base, work, options = {}) {
+async function chromiumJobContext(base, work, options) {
   const shared = options.scenario?.startsWith("fixtures/");
   let context = shared ? matrixChromium : null;
   if (!context) {
@@ -243,6 +249,12 @@ async function runChromiumJob(base, work, options = {}) {
     });
     if (shared) matrixChromium = context;
   }
+  return context;
+}
+
+async function runChromiumJob(base, work, options = {}) {
+  const shared = options.scenario?.startsWith("fixtures/");
+  const context = await chromiumJobContext(base, work, options);
   // Browser-level events also see downloads from job tabs before Playwright
   // has attached its page observer. Tiny fixtures can finish that quickly.
   let downloadSession;
@@ -286,35 +298,31 @@ async function runChromiumJob(base, work, options = {}) {
     // can observe the onInstalled-opened page. Reuse that page when it exists
     // so its test driver starts only one job; create a page only as fallback.
     const extensionId = new URL(serviceWorker.url()).hostname;
-    const driverUrl = `chrome-extension://${extensionId}/test/driver.html`;
-    let driverPage = context.pages().find((page) => page.url().startsWith(driverUrl));
-    const driverDeadline = Date.now() + 5000;
-    while (!driverPage && Date.now() < driverDeadline) {
-      await new Promise((resolve) => setTimeout(resolve, 50));
-      driverPage = context.pages().find((page) => page.url() === driverUrl);
+    if (options.nativeFrameGrant) {
+      const settings = await context.newPage();
+      await settings.goto("chrome://extensions/");
+      await settings.evaluate(
+        async ({ id, origin }) => {
+          await chrome.developerPrivate.updateExtensionConfiguration({
+            extensionId: id,
+            hostAccess: "ON_SPECIFIC_SITES",
+          });
+          await chrome.developerPrivate.addHostPermission(id, `${origin}/*`);
+        },
+        { id: extensionId, origin: new URL(base).origin },
+      );
+      await settings.close();
     }
-    if (!driverPage) {
-      driverPage = await context.newPage();
-      await driverPage.goto(driverUrl);
-    }
-    await driverPage.goto(`${driverUrl}?scenario=${encodeURIComponent(options.scenario ?? "")}`);
-    await driverPage.waitForFunction(
-      () => typeof globalThis.__DEZOOMIFY_TEST_RUN__?.then === "function",
-      { timeout: 15000 },
-    );
-    const driverResult = await driverPage.evaluate(() =>
-      globalThis.__DEZOOMIFY_TEST_RUN__.then(
-        () => ({ ok: true }),
-        (error) => ({ ok: false, error: String(error?.message ?? error) }),
-      ),
-    );
-    assert.deepEqual(
-      driverResult,
-      { ok: true },
-      `Chromium test driver failed: ${JSON.stringify(driverResult)}`,
-    );
+    const driverPage = await chromiumDriverPage(context, serviceWorker, options);
     const jobPage = await waitForJobPage(context);
+    await grantChromiumFrame(context, jobPage, extensionId, options);
     if (options.beforeCompletion) await options.beforeCompletion(jobPage);
+    if (options.expectFailure) {
+      await waitForVisible(jobPage, ".dz-error-section", "failed acquisition");
+      assert.equal(downloads.length, 0, "a failed acquisition publishes no download");
+      assert.equal(await jobPage.locator("[data-dz-retry-choice]").count(), 0);
+      return null;
+    }
     const download = await Promise.race([
       downloadReady,
       jobPage
@@ -351,34 +359,8 @@ async function runChromiumJob(base, work, options = {}) {
       `the job starts exactly one image download: ${JSON.stringify(downloads)}\n${diagnostics.join("\n")}`,
     );
     if (options.afterSave) await options.afterSave(jobPage);
-    if (options.restartBackground) {
-      await waitForVisible(jobPage, ".dz-completed-section", "completed job before worker restart");
-      const cdp = await context.browser().newBrowserCDPSession();
-      const { targetInfos } = await cdp.send("Target.getTargets");
-      const workerTarget = targetInfos.find(
-        (target) => target.type === "service_worker" && target.url === serviceWorker.url(),
-      );
-      assert.ok(workerTarget, "background service worker target is active");
-      const closed = await cdp.send("Target.closeTarget", { targetId: workerTarget.targetId });
-      assert.equal(closed.success, true, "background service worker target closed");
-      await cdp.detach();
-      const restarted = await jobPage.evaluate(async () => {
-        return (globalThis.browser ?? globalThis.chrome).runtime.sendMessage({
-          type: "dezoomify-test-wake-background",
-        });
-      });
-      assert.deepEqual(restarted, { ok: true }, "closed background worker restarted for a message");
-      const directResult = await jobPage.evaluate(async () => {
-        const access = globalThis.__DEZOOMIFY_TEST_SOURCE_ACCESS__;
-        if (!access) throw new Error("job page direct source access is missing");
-        const scanned = await access.scan();
-        const fetched = await access.fetch(scanned.firstUrl);
-        return { count: scanned.count, byteLength: fetched.byteLength };
-      });
-      assert.ok(directResult.count > 0, "source scan still works after worker restart");
-      assert.ok(directResult.byteLength > 0, "source fetch still works after worker restart");
-      await driverPage.evaluate(() => globalThis.__DEZOOMIFY_TEST_RELEASE__?.());
-    }
+    if (options.restartBackground)
+      await restartChromiumWorker(context, serviceWorker, jobPage, driverPage);
     const navigationResult = await driverPage.evaluate(() =>
       globalThis.__DEZOOMIFY_TEST_AFTER_JOB__.then(
         () => ({ ok: true }),
@@ -388,21 +370,117 @@ async function runChromiumJob(base, work, options = {}) {
     assert.deepEqual(navigationResult, { ok: true }, "source navigation invalidates direct access");
     return await readCompletedPng(downloadsDir, Date.now() + 10000);
   } finally {
-    await downloadSession?.detach();
-    context.off("page", onPage);
-    if (shared) {
-      await context.clearCookies();
-      // Retire source/job tabs. The next fixture navigates the retained driver
-      // to a fresh document, resetting its messages and completion promises.
-      for (const page of context.pages()) {
-        if (page.url().includes("/test/driver.html")) {
-          page.removeAllListeners("console");
-          page.removeAllListeners("pageerror");
-          page.removeAllListeners("crash");
-        } else await page.close();
-      }
-    } else await context.close();
+    await retireChromiumFixture(context, onPage, downloadSession, shared);
   }
+}
+
+async function grantChromiumFrame(context, jobPage, extensionId, options) {
+  if (!options.grantAccess) return;
+  await waitForVisible(jobPage, "[data-dz-allow-access=true]", "deferred frame permission");
+  assert.equal(await jobPage.locator(".dz-error-section").count(), 0);
+  if (options.nativeFrameGrant) {
+    const sourceTabId = Number(
+      new URLSearchParams(new URL(jobPage.url()).hash.slice(1)).get("sourceTabId"),
+    );
+    const accessible = await jobPage.evaluate(
+      async (tabId) =>
+        chrome.scripting.executeScript({
+          target: { tabId, allFrames: true },
+          func: () => location.href,
+        }),
+      sourceTabId,
+    );
+    assert.ok(
+      accessible.every((frame) => new URL(frame.result).hostname !== "localhost"),
+      "native permissions withhold the viewer frame",
+    );
+    const settings = await context.newPage();
+    await settings.goto("chrome://extensions/");
+    await settings.evaluate(
+      async (id) => chrome.developerPrivate.addHostPermission(id, "http://localhost/*"),
+      extensionId,
+    );
+    await settings.close();
+  }
+  await jobPage.locator("[data-dz-allow-access=true]").click();
+}
+
+async function chromiumDriverPage(context, serviceWorker, options) {
+  const extensionId = new URL(serviceWorker.url()).hostname;
+  const driverUrl = `chrome-extension://${extensionId}/test/driver.html`;
+  let driverPage = context.pages().find((page) => page.url().startsWith(driverUrl));
+  const driverDeadline = Date.now() + 5000;
+  while (!driverPage && Date.now() < driverDeadline) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    driverPage = context.pages().find((page) => page.url() === driverUrl);
+  }
+  if (!driverPage) {
+    driverPage = await context.newPage();
+    await driverPage.goto(driverUrl);
+  }
+  await driverPage.goto(`${driverUrl}?scenario=${encodeURIComponent(options.scenario ?? "")}`);
+  await driverPage.waitForFunction(
+    () => typeof globalThis.__DEZOOMIFY_TEST_RUN__?.then === "function",
+    { timeout: 15000 },
+  );
+  const driverResult = await driverPage.evaluate(() =>
+    globalThis.__DEZOOMIFY_TEST_RUN__.then(
+      () => ({ ok: true }),
+      (error) => ({ ok: false, error: String(error?.message ?? error) }),
+    ),
+  );
+  assert.deepEqual(
+    driverResult,
+    { ok: true },
+    `Chromium test driver failed: ${JSON.stringify(driverResult)}`,
+  );
+  return driverPage;
+}
+
+async function restartChromiumWorker(context, serviceWorker, jobPage, driverPage) {
+  await waitForVisible(jobPage, ".dz-completed-section", "completed job before worker restart");
+  const cdp = await context.browser().newBrowserCDPSession();
+  const { targetInfos } = await cdp.send("Target.getTargets");
+  const workerTarget = targetInfos.find(
+    (target) => target.type === "service_worker" && target.url === serviceWorker.url(),
+  );
+  assert.ok(workerTarget, "background service worker target is active");
+  const closed = await cdp.send("Target.closeTarget", { targetId: workerTarget.targetId });
+  assert.equal(closed.success, true, "background service worker target closed");
+  await cdp.detach();
+  const restarted = await jobPage.evaluate(async () => {
+    return (globalThis.browser ?? globalThis.chrome).runtime.sendMessage({
+      type: "dezoomify-test-wake-background",
+    });
+  });
+  assert.deepEqual(restarted, { ok: true }, "closed background worker restarted for a message");
+  const directResult = await jobPage.evaluate(async () => {
+    const access = globalThis.__DEZOOMIFY_TEST_SOURCE_ACCESS__;
+    if (!access) throw new Error("job page direct source access is missing");
+    const scanned = await access.scan();
+    const fetched = await access.fetch(scanned.firstUrl);
+    return { count: scanned.count, byteLength: fetched.byteLength };
+  });
+  assert.ok(directResult.count > 0, "source scan still works after worker restart");
+  assert.ok(directResult.byteLength > 0, "source fetch still works after worker restart");
+  await driverPage.evaluate(() => globalThis.__DEZOOMIFY_TEST_RELEASE__?.());
+}
+
+async function retireChromiumFixture(context, onPage, downloadSession, shared) {
+  await downloadSession?.detach();
+  context.off("page", onPage);
+  if (shared) {
+    await context.clearCookies();
+    // Retire source/job tabs. The next fixture navigates the retained driver
+    // to a fresh document, resetting its messages and completion promises.
+    for (const page of context.pages()) {
+      if (page.url().includes("/test/driver.html")) {
+        page.removeAllListeners("console");
+        page.removeAllListeners("pageerror");
+        page.removeAllListeners("crash");
+      } else await page.close();
+    }
+  } else await context.close();
 }
 
 function findFirefoxBinary() {
@@ -438,15 +516,7 @@ async function runFirefoxJob(base, work, runOptions = {}) {
   );
   // Firefox treats extension documents as privileged WebDriver contexts.
   const service = new firefox.ServiceBuilder(GECKODRIVER).addArguments("--allow-system-access");
-  const reused = shared && matrixFirefox;
-  const driver =
-    reused ||
-    (await new webdriver.Builder()
-      .forBrowser("firefox")
-      .setFirefoxOptions(browserOptions)
-      .setFirefoxService(service)
-      .build());
-  if (shared) matrixFirefox = driver;
+  const { driver, reused } = await firefoxJobDriver(shared, browserOptions, service);
   try {
     await driver.manage().setTimeouts({ pageLoad: 15000, script: 15000, implicit: 0 });
     if (!reused) {
@@ -470,11 +540,7 @@ async function runFirefoxJob(base, work, runOptions = {}) {
             fixtureStarted = true;
             return false;
           }
-          const [body] = await driver.findElements(webdriver.By.css("body"));
-          if (!body) continue;
-          const state = await body.getDomAttribute("data-driver");
-          if (state === "failed") throw new Error(await body.getText());
-          if (state === "ready") return true;
+          if (await firefoxDriverReady(driver)) return true;
         }
         return false;
       },
@@ -482,6 +548,18 @@ async function runFirefoxJob(base, work, runOptions = {}) {
       undefined,
       50,
     );
+    if (runOptions.grantAccess) {
+      for (const handle of await driver.getAllWindowHandles()) {
+        await driver.switchTo().window(handle);
+        if ((await driver.getCurrentUrl()).includes("/job.html#sourceTabId=")) break;
+      }
+      const grant = await driver.wait(async () => {
+        const [button] = await driver.findElements(webdriver.By.css("[data-dz-allow-access=true]"));
+        return button;
+      }, 30000);
+      assert.equal((await driver.findElements(webdriver.By.css(".dz-error-section"))).length, 0);
+      await grant.click();
+    }
     const deadline = Date.now() + 90000;
     const output = await readCompletedPng(downloadsDir, deadline).catch(async (error) => {
       const pages = [];
@@ -491,15 +569,7 @@ async function runFirefoxJob(base, work, runOptions = {}) {
       }
       throw new Error(`${error.message}\n${pages.join("\n")}`, { cause: error });
     });
-    const handles = await driver.getAllWindowHandles();
-    let jobTab;
-    for (const handle of handles) {
-      await driver.switchTo().window(handle);
-      if ((await driver.getCurrentUrl()).includes("/job.html#sourceTabId=")) {
-        jobTab = handle;
-        break;
-      }
-    }
+    const jobTab = await findFirefoxTab(driver, "/job.html#sourceTabId=");
     assert.ok(jobTab, "Firefox job tab remains available after saving");
     const { By } = webdriver;
     await driver.wait(
@@ -530,14 +600,7 @@ async function runFirefoxJob(base, work, runOptions = {}) {
     }
     // Wait for the driver to verify invalidation, not just the navigation's
     // HTTP request, before retiring this fixture's source and job tabs.
-    let driverTab;
-    for (const handle of await driver.getAllWindowHandles()) {
-      await driver.switchTo().window(handle);
-      if ((await driver.getCurrentUrl()).includes("/test/driver.html")) {
-        driverTab = handle;
-        break;
-      }
-    }
+    const driverTab = await findFirefoxTab(driver, "/test/driver.html");
     assert.ok(driverTab, "Firefox test driver remains available");
     await driver.wait(
       async () => {
@@ -551,18 +614,51 @@ async function runFirefoxJob(base, work, runOptions = {}) {
       50,
     );
     if (shared) {
-      for (const handle of await driver.getAllWindowHandles()) {
-        if (handle === driverTab) continue;
-        await driver.switchTo().window(handle);
-        await driver.close();
-      }
-      await driver.switchTo().window(driverTab);
+      await retireFirefoxFixture(driver, driverTab);
       // The next fixture reloads this driver with its own scenario query.
     }
     return output;
   } finally {
     if (!shared) await driver.quit();
   }
+}
+
+async function firefoxJobDriver(shared, browserOptions, service) {
+  const reused = shared && matrixFirefox;
+  const driver =
+    reused ||
+    (await new webdriver.Builder()
+      .forBrowser("firefox")
+      .setFirefoxOptions(browserOptions)
+      .setFirefoxService(service)
+      .build());
+  if (shared) matrixFirefox = driver;
+  return { driver, reused };
+}
+
+async function firefoxDriverReady(driver) {
+  const [body] = await driver.findElements(webdriver.By.css("body"));
+  if (!body) return false;
+  const state = await body.getDomAttribute("data-driver");
+  if (state === "failed") throw new Error(await body.getText());
+  return state === "ready";
+}
+
+async function findFirefoxTab(driver, fragment) {
+  for (const handle of await driver.getAllWindowHandles()) {
+    await driver.switchTo().window(handle);
+    if ((await driver.getCurrentUrl()).includes(fragment)) return handle;
+  }
+  return undefined;
+}
+
+async function retireFirefoxFixture(driver, driverTab) {
+  for (const handle of await driver.getAllWindowHandles()) {
+    if (handle === driverTab) continue;
+    await driver.switchTo().window(handle);
+    await driver.close();
+  }
+  await driver.switchTo().window(driverTab);
 }
 
 test("packaged browser format matrices", { concurrency: 2 }, async (matrix) => {
@@ -665,23 +761,38 @@ test("chromium: optional host grant keeps the React job view mounted", {
   }
 });
 
-test("chromium: partial-output actions disappear after the terminal event", {
+test("chromium: a direct DZI tab pauses exhausted retries and approval saves the complete image", {
   timeout: 180000,
 }, async () => {
-  const work = mkdtempSync(path.join(tmpdir(), "dezoomify-e2e-partial-"));
+  const work = mkdtempSync(path.join(tmpdir(), "dezoomify-e2e-retry-"));
   try {
-    assertPngShape(
+    assertPng(
       await runChromiumJob(fixtureServer.base, work, {
-        scenario: "corrupt",
+        scenario: "retry",
         async beforeCompletion(jobPage) {
-          const keep = jobPage.locator("[data-dz-partial-choice=keep]");
-          await waitForVisible(jobPage, "[data-dz-partial-choice=keep]", "partial-output action");
-          await keep.click();
-          await waitForVisible(jobPage, ".dz-completed-section", "partial completion");
-          assert.equal(await jobPage.locator("[data-dz-partial-choice]").count(), 0);
+          await waitForVisible(jobPage, "[data-dz-retry-choice=retry]", "retry approval");
+          assert.equal(await jobPage.locator("[data-dz-retry-actions]").count(), 1);
+          assert.match(
+            await jobPage.locator(".dz-retry-section").innerText(),
+            /no file has been saved/,
+          );
+          await jobPage.locator("[data-dz-retry-choice=retry]").click();
+          await waitForVisible(jobPage, ".dz-completed-section", "complete save after approval");
+          assert.equal(await jobPage.locator("[data-dz-retry-choice]").count(), 0);
         },
       }),
     );
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+});
+
+test("chromium: a corrupt tile fails without saving an incomplete image", {
+  timeout: 180000,
+}, async () => {
+  const work = mkdtempSync(path.join(tmpdir(), "dezoomify-e2e-corrupt-"));
+  try {
+    await runChromiumJob(fixtureServer.base, work, { scenario: "corrupt", expectFailure: true });
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
@@ -745,6 +856,56 @@ for (const [browser, runJob] of [
   ["chromium", runChromiumJob],
   ["firefox", runFirefoxJob],
 ]) {
+  const deferredAccess = browser === "chromium";
+  test(`${browser}: recursive iframe scanning ${deferredAccess ? "defers access" : "uses existing access"} and saves a dynamic viewer`, {
+    timeout: 180000,
+  }, async () => {
+    const work = mkdtempSync(path.join(tmpdir(), "dezoomify-e2e-recursive-iframe-"));
+    try {
+      assertPng(
+        await runJob(fixtureServer.base, work, {
+          scenario: "recursive-iframe",
+          grantAccess: deferredAccess,
+          nativeFrameGrant: deferredAccess,
+        }),
+      );
+    } finally {
+      rmSync(work, { recursive: true, force: true });
+    }
+  });
+  test(`${browser}: private OpenSeadragon sources download through existing metadata parsers`, {
+    timeout: 240000,
+  }, async () => {
+    const work = mkdtempSync(path.join(tmpdir(), "dezoomify-e2e-memory-openseadragon-"));
+    try {
+      for (const type of ["deepzoom", "iiif", "zoomify", "iip"]) {
+        const caseWork = path.join(work, type);
+        mkdirSync(caseWork);
+        const offset = readFileSync(fixtureServer.logFile, "utf8").length;
+        assertPng(
+          await runJob(fixtureServer.base, caseWork, { scenario: `memory-openseadragon-${type}` }),
+        );
+        const events = newFixtureEvents(fixtureServer.logFile, offset);
+        assert.equal(
+          events.filter(
+            (e) =>
+              e.path !== "/extension-inputs/pyramid.dzi" &&
+              /info\.json|\.dzi|ImageProperties\.xml/.test(e.path),
+          ).length,
+          0,
+          `${type}: no metadata discovery fetch`,
+        );
+        if (type === "iip")
+          assert.equal(
+            events.filter((e) => e.path === "/memory-iip" && e.query?.includes("obj=")).length,
+            1,
+            "only the page initializes IIP metadata",
+          );
+      }
+    } finally {
+      rmSync(work, { recursive: true, force: true });
+    }
+  });
   test(`${browser}: observed Zoomify metadata wins without analytics access`, {
     timeout: 180000,
   }, async () => {

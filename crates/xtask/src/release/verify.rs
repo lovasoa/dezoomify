@@ -72,5 +72,6 @@ pub(crate) fn release_verify(plan: &Plan, artifacts: &Path) -> Result<(), String
             ));
         }
     }
+    super::updater::manifest(plan, artifacts)?;
     Ok(())
 }

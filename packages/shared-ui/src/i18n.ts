@@ -78,19 +78,23 @@ function parseAcceptLanguage(header: string): Array<string> {
     const segments = parts[i].split(";");
     const tag = segments[0].trim();
     if (tag === "" || tag === "*") continue;
-    let q = 1;
-    for (let s = 1; s < segments.length; s++) {
-      const pair = segments[s].trim().split("=");
-      if (pair.length === 2 && pair[0].trim().toLowerCase() === "q") {
-        const parsed = Number(pair[1].trim());
-        if (Number.isFinite(parsed)) q = parsed;
-      }
-    }
+    const q = languageQuality(segments.slice(1));
     if (!(q > 0)) continue;
     ranked.push({ tag, q, order: i });
   }
   ranked.sort((a, b) => (b.q !== a.q ? b.q - a.q : a.order - b.order));
   return ranked.map((entry) => entry.tag);
+}
+
+function languageQuality(parameters: string[]): number {
+  let quality = 1;
+  for (const parameter of parameters) {
+    const pair = parameter.trim().split("=");
+    if (pair.length !== 2 || pair[0].trim().toLowerCase() !== "q") continue;
+    const parsed = Number(pair[1].trim());
+    if (Number.isFinite(parsed)) quality = parsed;
+  }
+  return quality;
 }
 
 export type I18nVars = Record<string, string | number>;
@@ -102,8 +106,13 @@ const en = {
   "view.diagnostics.copyFailed": "Could not copy. Select and copy the details below.",
   "view.diagnostics.loadFailed":
     "Could not read the full report. The available details are shown below.",
+  "view.retry.title": "Download paused",
+  "view.retry.summary": "{done} of {total} tiles were retrieved.",
+  "view.retry.explanation":
+    "Automatic retries were exhausted. Retry once more or cancel; no file has been saved.",
+  "view.retry.retry": "Retry once more",
+  "view.retry.cancel": "Cancel",
   "desktop.done.title": "Image saved",
-  "desktop.done.partial": "Image saved with gaps",
   "desktop.done.size": "{width} × {height} pixels",
   "desktop.done.saved": "Saved in your chosen folder.",
   "desktop.done.open": "Open image",
@@ -210,12 +219,23 @@ const en = {
   "view.display.startOver": "Start over",
   // Resolution downgrade notice: automatic selection took a smaller known
   // level than the maximum because of browser limits (website and extension).
-  "view.resolution.notice":
-    "Not downloading at maximal resolution due to browser limitations. Try the desktop app to remove browser limitations.",
-  "view.resolution.sizes": "Saving at {selected} pixels instead of the maximum {maximum} pixels.",
-  "view.resolution.download": "Download desktop app",
-  "view.resolution.tryMaximum": "Try maximum",
-  "view.resolution.stop": "Stop",
+  "view.resolution.title": "Lower-resolution image",
+  "view.resolution.sizes": "Image size: {selected} pixels. Maximum available: {maximum} pixels.",
+  "view.resolution.download": "Get full resolution with the desktop app",
+  "view.desktop.handoffTitle": "Download this image in the desktop app",
+  "view.desktop.handoffDownload": "Download desktop app",
+  "view.desktop.handoffInstall":
+    "Choose the installer for your operating system, then open Dezoomify.",
+  "view.desktop.handoffPaste": "Paste this URL into the desktop app’s URL field:",
+  "view.desktop.handoffCopy": "Copy URL",
+  "view.desktop.handoffCopied": "URL copied. Paste it into the desktop app.",
+  "view.desktop.handoffCopyFailed": "Could not copy. Select the URL above and copy it manually.",
+  "view.desktop.handoffStart":
+    "Start the download and choose the largest resolution. If several images appear, choose the one you want.",
+  "view.desktop.handoffAccess":
+    "The desktop app does not share your browser’s sign-in session. This URL must be accessible from the app.",
+  "view.desktop.handoffUnavailable":
+    "No reusable source URL is available for this job. Open the original page and find the zoomable image or manifest URL to paste into the app.",
   // Completion section.
   "view.done.ready": "Your image is ready.",
   "view.done.readyTitle": "Ready to save",
@@ -229,6 +249,7 @@ const en = {
   "view.fail.helpDesc":
     "How to find the image address on museum & archive sites, and what to try when nothing is found.",
   "view.fail.reportBug": "Report a bug on GitHub",
+  "view.fail.reportBugDesc": "Prepare a GitHub issue with the diagnostics from this attempt.",
   "view.fail.retry": "Try again",
   // Browser canvas failure family (allocation, 2D context):
   // the desktop app is the recovery, so every message names it.
@@ -252,15 +273,14 @@ const en = {
   "view.history.empty": "No recent pictures yet. Images you start appear here.",
   "view.history.localOnly": "Kept only on this device.",
   "view.history.clear": "Clear history",
-  "view.history.image": "Image",
+  "view.history.source": "Source",
   "view.history.time": "Started",
   "view.history.size": "Size (px)",
-  "view.history.status": "Status",
+  "view.history.result": "Result",
   "view.history.remove": "Remove",
   "view.history.removeImage": "Remove {image} from recent pictures",
   "view.history.status.started": "Started",
   "view.history.status.completed": "Completed",
-  "view.history.status.partial": "With gaps",
   "view.history.status.preview": "Preview only",
   "view.history.status.failed": "Failed",
   "view.history.status.cancelled": "Cancelled",
@@ -320,17 +340,15 @@ const en = {
   "desktop.msg.dimsPixels": "{a} by {b} pixels",
   "desktop.msg.needAbout": " It needs about {need} of memory",
   "desktop.output.canvasLimit":
-    "This picture is too large to assemble on this computer ({dims},{need} at 4 bytes per pixel, limit {limit}). Save a smaller version with Max width (CLI: --max-width). Note: JPEG saves at most {jpegMax} pixels per side; keep PNG for larger pictures. From {host}.",
-  "desktop.output.jpegLimit":
-    "This picture ({dims}) is too large for JPEG, which allows at most {jpegMax} pixels per side. Save it as PNG instead. From {host}.",
-  "desktop.output.webpLimit":
-    "This picture ({dims}) is too large for WebP, which allows at most {webpMax} pixels per side. Save it as PNG instead. From {host}.",
-  "desktop.tile.partialDiscarded":
-    "The partial picture was discarded so no file was kept. Try again from {host} with a steady connection.",
-  "desktop.tile.partialChoice":
-    "Some pieces of this picture from {host} could not be saved. Retry the failed pieces, or keep the partial picture with blank areas.",
+    "This picture needs more memory than is available ({dims},{need}; limit {limit}). Save a smaller version with Max width (CLI: --max-width), or choose a tile folder. From {host}.",
+  "desktop.output.codecLimit":
+    "This picture ({dims}) is too large for {format}, which allows at most {maxSide} pixels per side. Save it as PNG instead. From {host}.",
+  "desktop.tile.failed":
+    "Could not retrieve a tile from {host}. Check the source image and try again.",
   "view.discovery.none":
     "No zoomable image was found at this address. Try a page that contains a zoom viewer, or try the browser extension.",
+  "view.discovery.noneExtension":
+    "No zoomable image was found on this page. Report a bug with the diagnostics, or follow the guide to find the image address.",
   "desktop.plan.none":
     "This picture has no usable size to save from {host}. Try a different picture or a smaller Max width.",
   "desktop.transport.stalled":
@@ -344,33 +362,7 @@ const en = {
     "Something unexpected stopped this save from {host}. Try again, and copy diagnostics if it keeps happening.",
   "desktop.save.fallback": "Could not save this picture from {host}. Try again.",
   "desktop.invoke.startFallback": "Could not start the job.",
-  "desktop.invoke.partial": "The partial-image choice was rejected.",
-  "desktop.rec.missing": "Missing tiles: {shown}{rest}.",
-  "desktop.rec.more": " and {n} more",
-  "desktop.rec.keep": "Keep partial image",
-  "desktop.rec.discard": "Discard partial",
-  "desktop.rec.retryTiles": "Retry failed tiles",
-  "view.partial.title": "The image is incomplete",
-  "view.partial.summary": "{done} of {total} tiles were retrieved.",
-  "view.partial.gaps": "The saved image will have gaps. No file has been saved yet.",
-  "view.partial.refused":
-    "The website refused the remaining tiles. The saved image will have gaps.",
-  "view.partial.save": "Save incomplete image",
-  "view.partial.cancel": "Cancel",
-  "view.partial.retry": "Retry failed tiles",
-  "view.partial.accessDenied": "The website refused access to this image",
-  "view.partial.empty": "The image could not be retrieved",
-  "view.partial.noneSaved": "None of the image could be retrieved. No file was saved.",
-  "view.partial.checkSource": "Open the source page and check that its image viewer works.",
-  "view.partial.openSource": "Open source page",
-  "desktop.rec.missingSome": "Some tiles could not be saved.",
-  "desktop.rec.missingCount": "Could not save {count} fragments.",
-  "desktop.rec.missingOne": "Could not save {count} fragment.",
-  "desktop.rec.missingList": "{n} missing fragments: {shown}{rest}.",
-  "desktop.rec.missingOneList": "{n} missing fragment: {shown}{rest}.",
-  "desktop.done.partialTitle": "Partial image saved",
-  "desktop.done.partialDesc":
-    "This file is marked as partial: {summary} Missing areas are left blank. This distinguishes it from a complete save.",
+  "desktop.invoke.retry": "The retry choice was rejected.",
   "desktop.cancel.note": "Save cancelled. Cleanup is done and any unfinished file was removed.",
   "desktop.copy.diagnostics": "Copy diagnostics",
   "desktop.copy.copied": "Copied!",
@@ -378,37 +370,45 @@ const en = {
   "desktop.settings.reset": "Reset settings",
   "desktop.quick.info": "More information",
   "desktop.quick.auto": "Auto",
-  "desktop.quick.sizeEstimate": "<{size} MB",
+  "desktop.quick.compression": "Compression",
+  "desktop.quick.compressionInfo":
+    "Higher values aim for smaller files. Each format determines the effect on image quality and encoding time.",
+  "desktop.quick.compressionUnavailable": "Compression cannot be adjusted for this format.",
+  "desktop.quick.compressionWarning":
+    "Severe detail loss: this compression may make text and fine details unreadable.",
+  "desktop.quick.sizeEstimate": "Up to about {size}",
   "desktop.quick.folderInfo": "Choose where downloaded images are saved.",
   "desktop.quick.formatInfo":
-    "Choose an output format. Auto saves JPEG for opaque images up to 65,535 pixels per side; otherwise PNG.",
+    "Choose an output format. Auto selects a format appropriate for the image.",
   "desktop.quick.sizeInfo":
-    "Presets select the largest source level within these width and height targets. If none fits, the smallest level is used, which may exceed the targets and encoder limits. Images are not resized. Estimates assume the listed dimensions; actual sizes and format compatibility depend on the source. Estimated MB = width × height × bytes/pixel / 1,000,000. PNG uses 1.6 bytes/pixel; lossless WebP 1.3; TIFF/ZIF 3. JPEG uses a small native-encoder calibration sample (two paintings and a map): quality ≤25: 0.1; ≤50: 0.15; ≤75: 0.2; ≤90: 0.3; ≤95: 0.4; ≤98: 0.45; ≤100: 0.5 bytes/pixel. Auto estimates an opaque JPEG; transparency uses PNG instead. ZIF/IIIF add one third for pyramid levels. Every estimate gets a 10% buffer, then rounds up to the next 5 MB. These are heuristics, not guaranteed file-size limits; detail, source compression, aspect ratio, metadata and encoder settings affect actual files. Full/custom sizes need source dimensions.",
+    "Each estimate assumes an image filling the preset's maximum width and height. A smaller source or different aspect ratio can produce a much smaller file. Estimates interpolate measurements for the codec and compression setting, include extra pyramid levels where applicable, add a 10% buffer and round up to two significant digits with units appropriate to the size. They are rough budgets, not guaranteed file-size or memory limits; detail, transparency and metadata affect actual files. Auto assumes an opaque JPEG; transparency uses PNG. Presets select a source level without resizing. If none fits, the smallest level is used and may exceed the selected maximum. Full/custom sizes depend on the source.",
   "desktop.quick.maxWidth": "Max width",
   "desktop.quick.maxHeight": "Max height",
   "desktop.quick.original": "Original",
   "desktop.quick.userDefined": "User-defined",
-  "desktop.quick.estimatedSize": "Estimated size ({format})",
+  "desktop.quick.estimatedSize": "Estimate at max size ({format})",
   "desktop.quick.networkInfo":
     "Fast uses up to 16 simultaneous requests without pacing. Balanced starts up to 5 requests per second; Gentle starts up to 2. Slower pacing can help busy servers.",
   "desktop.quick.source": "Source-dependent",
   "desktop.quick.exact": "Custom",
   "desktop.quick.upTo": "Up to {size}K",
-  "desktop.quick.hint.auto": "adaptive",
-  "desktop.quick.hint.png": "lossless",
-  "desktop.quick.hint.jpeg": "compressed",
-  "desktop.quick.hint.tiff": "archival",
-  "desktop.quick.hint.webp": "lossless",
-  "desktop.quick.hint.zif": "zoomable",
-  "desktop.quick.hint.iiifDir": "tiled",
+  "desktop.quick.hint.adaptive": "adaptive",
+  "desktop.quick.hint.lossless": "lossless",
+  "desktop.quick.hint.compressed": "compressed",
+  "desktop.quick.hint.advancedCompression": "advanced compression",
+  "desktop.quick.hint.archival": "archival",
+  "desktop.quick.hint.zoomable": "zoomable",
+  "desktop.quick.hint.tiled": "tiled",
   "desktop.quick.format.auto":
-    "JPEG for opaque images up to 65,535 pixels per side; PNG for transparency or larger images. JPEG quality also applies to Auto.",
+    "JPEG for opaque images up to {maxSide} pixels per side; PNG for transparency or larger images. Compression also applies to Auto.",
   "desktop.quick.format.png":
     "Lossless pixels and transparency; larger files, suitable for editing.",
   "desktop.quick.format.jpeg":
-    "Smaller lossy files. No transparency; limited to 65,535 pixels per side. Adjust quality in More settings.",
+    "Smaller lossy files. No transparency; limited to {maxSide} pixels per side. Adjust compression in the Size menu.",
   "desktop.quick.format.tiff": "Lossless output for archiving and editing.",
-  "desktop.quick.format.webp": "Lossless compressed output, limited to 16,383 pixels per side.",
+  "desktop.quick.format.webp": "Lossless compressed output, limited to {maxSide} pixels per side.",
+  "desktop.quick.format.avif":
+    "Advanced compression with transparency. Lossy output, limited to {maxSide} pixels per side. Adjust compression in the Size menu. Needs the complete image in memory and does not preserve embedded color profiles. Even the lowest compression is lossy.",
   "desktop.quick.format.zif": "A lossless tiled TIFF pyramid for zooming at several resolutions.",
   "desktop.quick.format.iiifDir": "A folder of JPEG tiles and info.json for hosting an IIIF image.",
   "desktop.quick.rate.maximum": "16 parallel",
@@ -431,18 +431,14 @@ const en = {
   "desktop.quick.more": "More settings",
   "desktop.advanced.title": "Advanced settings",
   "desktop.advanced.done": "Done",
-  "desktop.advanced.jpegQuality": "JPEG quality",
-  "desktop.advanced.jpegQualityDesc": "Higher keeps more image detail.",
-  "desktop.advanced.compressionEffort": "Compression effort",
-  "desktop.advanced.compressionEffortDesc":
-    "Image quality stays lossless; higher values take longer.",
+  "desktop.quick.format.generic": "Save the image as {format}.",
   "desktop.advanced.dimensions": "Custom dimensions",
   "desktop.advanced.dimensionsDesc":
     "Leave either value empty to preserve the original proportion.",
   "desktop.advanced.width": "Width",
   "desktop.advanced.height": "Height",
   "desktop.advanced.retries": "Retries",
-  "desktop.advanced.retriesDesc": "Try failed image tiles again before keeping a partial result.",
+  "desktop.advanced.retriesDesc": "Automatic retries before asking whether to retry once more.",
   "desktop.advanced.resumeCache": "Resume cache",
   "desktop.advanced.resumeCacheDesc": "Reuse tiles after an interrupted save.",
   "desktop.advanced.choose": "Choose…",

@@ -6,6 +6,8 @@ use dezoomify_native::cache;
 use dezoomify_native::client;
 use dezoomify_native::output;
 use std::collections::BTreeMap;
+mod support;
+use support::tile_request;
 
 #[test]
 fn public_headers_reject_cookie_and_authorization() {
@@ -19,22 +21,20 @@ fn cache_keys_distinguish_resources_and_never_persist_secrets() {
     // The key digests the full URI: query-addressed resources must never
     // collide (serving one tile's bytes for another is silent corruption).
     assert_ne!(
-        cache::cache_key("https://h/tile?x=0&y=0"),
-        cache::cache_key("https://h/tile?x=9&y=9")
+        cache::cache_key(&tile_request("https://h/tile?x=0&y=0")),
+        cache::cache_key(&tile_request("https://h/tile?x=9&y=9"))
     );
     assert_ne!(
-        cache::cache_key("https://h/tile"),
-        cache::cache_key("https://h/tile?token=secret")
+        cache::cache_key(&tile_request("https://h/tile")),
+        cache::cache_key(&tile_request("https://h/tile?token=secret"))
     );
     let dir = std::env::temp_dir().join(format!("dz-cache-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     // A credential-bearing URL must never leak into the cache path or the
     // stored artifact: only the digest key and the payload itself.
-    let path = cache::store(&dir, "job1", "https://h/item?token=CANARY", b"bytes").unwrap();
-    assert_eq!(
-        cache::load(&dir, "job1", "https://h/item?token=CANARY").unwrap(),
-        b"bytes"
-    );
+    let first = tile_request("https://h/item?token=CANARY");
+    let path = cache::store(&dir, "job1", &first, b"bytes").unwrap();
+    assert_eq!(cache::load(&dir, "job1", &first).unwrap(), b"bytes");
     let path_text = path.to_string_lossy();
     assert!(
         !path_text.contains("CANARY") && !path_text.contains("token"),
@@ -47,17 +47,50 @@ fn cache_keys_distinguish_resources_and_never_persist_secrets() {
     );
     // Two distinct query-addressed URIs produce two distinct entries, each
     // loading back its own bytes.
-    let path_b = cache::store(&dir, "job1", "https://h/item?token=CANARY&x=1", b"bytes-b").unwrap();
+    let second = tile_request("https://h/item?token=CANARY&x=1");
+    let path_b = cache::store(&dir, "job1", &second, b"bytes-b").unwrap();
     assert_ne!(path, path_b);
-    assert_eq!(
-        cache::load(&dir, "job1", "https://h/item?token=CANARY&x=1").unwrap(),
-        b"bytes-b"
-    );
-    assert_eq!(
-        cache::load(&dir, "job1", "https://h/item?token=CANARY").unwrap(),
-        b"bytes"
-    );
+    assert_eq!(cache::load(&dir, "job1", &second).unwrap(), b"bytes-b");
+    assert_eq!(cache::load(&dir, "job1", &first).unwrap(), b"bytes");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn container_tile_cache_isolates_ranges_without_persisting_headers() {
+    use dezoomify::model::{Header, RequestPurpose, ResourceRequest};
+    let work = dezoomify_fixture_server::temp_dir("range-cache");
+    let request = |range: &str| ResourceRequest {
+        uri: "https://h/container.zif?token=CANARY".into(),
+        purpose: RequestPurpose::Tile,
+        headers: vec![
+            Header {
+                name: "Range".into(),
+                value: range.into(),
+            },
+            Header {
+                name: "X-Private".into(),
+                value: "SECRET-HEADER".into(),
+            },
+        ],
+    };
+    let first = request("bytes=0-3");
+    let second = request("bytes=4-7");
+    let whole = tile_request(&first.uri);
+    let path = cache::store(&work, "job", &first, b"tile1").unwrap();
+    assert!(cache::load(&work, "job", &second).is_none());
+    cache::store(&work, "job", &second, b"tile2").unwrap();
+    cache::store(&work, "job", &whole, b"whole").unwrap();
+    assert_eq!(cache::load(&work, "job", &first).unwrap(), b"tile1");
+    assert_eq!(cache::load(&work, "job", &second).unwrap(), b"tile2");
+    assert_eq!(cache::load(&work, "job", &whole).unwrap(), b"whole");
+    let mut equivalent = first.clone();
+    equivalent.headers[0].name = "rAnGe".into();
+    equivalent.headers[1].value = "OTHER-SECRET".into();
+    assert_eq!(cache::cache_key(&first), cache::cache_key(&equivalent));
+    assert!(!path.to_string_lossy().contains("CANARY"));
+    assert!(!path.to_string_lossy().contains("bytes"));
+    assert_eq!(std::fs::read(path).unwrap(), b"tile1");
+    std::fs::remove_dir_all(work).unwrap();
 }
 
 #[test]
@@ -73,17 +106,15 @@ fn cache_namespaces_isolate_jobs_and_reject_traversal() {
     );
     let dir = std::env::temp_dir().join(format!("dz-ns-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
-    cache::store(&dir, &first, "https://h/tile?x=0", b"bytes").unwrap();
-    assert_eq!(
-        cache::load(&dir, &first, "https://h/tile?x=0").unwrap(),
-        b"bytes"
-    );
+    let tile = tile_request("https://h/tile?x=0");
+    cache::store(&dir, &first, &tile, b"bytes").unwrap();
+    assert_eq!(cache::load(&dir, &first, &tile).unwrap(), b"bytes");
     // A missing entry is a miss, not an error.
-    assert!(cache::load(&dir, &first, "https://h/tile?x=1").is_none());
+    assert!(cache::load(&dir, &first, &tile_request("https://h/tile?x=1")).is_none());
     // Foreign namespaces never read or write outside the cache root.
-    assert!(cache::store(&dir, "../escape", "https://h/t", b"x").is_err());
-    assert!(cache::store(&dir, "a/b", "https://h/t", b"x").is_err());
-    assert!(cache::load(&dir, "../escape", "https://h/t").is_none());
+    assert!(cache::store(&dir, "../escape", &tile, b"x").is_err());
+    assert!(cache::store(&dir, "a/b", &tile, b"x").is_err());
+    assert!(cache::load(&dir, "../escape", &tile).is_none());
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -111,65 +142,33 @@ fn output_refuses_mismatch_and_requires_overwrite() {
 #[test]
 fn output_format_follows_the_destination_extension() {
     use std::path::Path;
-    assert_eq!(
-        output::infer_from_path(Path::new("painting.png")),
-        Ok(OutputFormat::Png)
-    );
-    assert_eq!(
-        output::infer_from_path(Path::new("painting.jpg")),
-        Ok(OutputFormat::Jpeg)
-    );
-    assert_eq!(
-        output::infer_from_path(Path::new("painting.jpeg")),
-        Ok(OutputFormat::Jpeg)
-    );
-    assert_eq!(
-        output::infer_from_path(Path::new("painting.tif")),
-        Ok(OutputFormat::Tiff)
-    );
-    assert_eq!(
-        output::infer_from_path(Path::new("painting.tiff")),
-        Ok(OutputFormat::Tiff)
-    );
-    // `.zif` selects the ZIF pyramid encoder (TIFF-compatible
-    // multi-directory output); `.iiif` selects an `iiif-dir` tree at that
-    // path.
-    assert_eq!(
-        output::infer_from_path(Path::new("painting.zif")),
-        Ok(OutputFormat::Zif)
-    );
-    assert_eq!(
-        output::infer_from_path(Path::new("painting.ZIF")),
-        Ok(OutputFormat::Zif)
-    );
-    assert_eq!(
-        output::infer_from_path(Path::new("painting.webp")),
-        Ok(OutputFormat::Webp)
-    );
-    assert_eq!(
-        output::infer_from_path(Path::new("painting.WEBP")),
-        Ok(OutputFormat::Webp)
-    );
-    assert_eq!(
-        output::infer_from_path(Path::new("painting.iiif")),
-        Ok(OutputFormat::IiifDir)
-    );
-    // Extensionless paths name an iiif-dir directory destination.
-    assert_eq!(
-        output::infer_from_path(Path::new("painting")),
-        Ok(OutputFormat::IiifDir)
-    );
+    for codec in dezoomify::model::OUTPUT_CODECS {
+        for extension in codec.extensions {
+            let name = if extension.is_empty() {
+                "painting".to_string()
+            } else {
+                format!("painting.{extension}")
+            };
+            for name in [name.clone(), name.to_ascii_uppercase()] {
+                assert_eq!(output::infer_from_path(Path::new(&name)), Ok(codec.format));
+            }
+        }
+    }
     // Unknown extensions fail before any work starts, instead of writing a
     // mislabeled file. The error names every supported extension.
-    let bmp = output::infer_from_path(Path::new("painting.bmp"));
-    let error = bmp.expect_err("bmp stays unsupported");
+    let unknown = output::infer_from_path(Path::new("painting.not-an-image"));
+    let error = unknown.expect_err("unknown output suffix stays unsupported");
     assert!(matches!(error, Error::UnsupportedExtension { .. }));
-    for supported in [".png", ".jpg", ".tif", ".zif", ".webp", ".iiif"] {
+    for supported in dezoomify::model::output_extensions().split(", ") {
         assert!(
             error.to_string().contains(supported),
             "unsupported-extension error lists {supported}: {error}"
         );
     }
+}
+
+#[test]
+fn output_destinations_validate_format_and_preserve_existing_content() {
     // An existing directory is always an iiif-dir destination.
     let dir = std::env::temp_dir().join(format!("dz-infer-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -188,15 +187,23 @@ fn output_format_follows_the_destination_extension() {
     // A `.zif` path validates as ZIF (never as single-image TIFF or PNG);
     // a `.iiif` path validates as a directory destination and never as a
     // single file.
-    let zif = dir.join("out.zif");
-    assert!(output::validate_destination(&zif, &OutputFormat::Zif, false).is_ok());
-    assert!(output::validate_destination(&zif, &OutputFormat::Tiff, true).is_err());
-    assert!(output::validate_destination(&zif, &OutputFormat::Png, true).is_err());
-    // A `.webp` path validates as WebP and never as another single file.
-    let webp = dir.join("out.webp");
-    assert!(output::validate_destination(&webp, &OutputFormat::Webp, false).is_ok());
-    assert!(output::validate_destination(&webp, &OutputFormat::Jpeg, true).is_err());
-    assert!(output::validate_destination(&webp, &OutputFormat::IiifDir, true).is_err());
+    for (name, format, overwrite, valid) in [
+        ("out.zif", OutputFormat::Zif, false, true),
+        ("out.zif", OutputFormat::Tiff, true, false),
+        ("out.zif", OutputFormat::Png, true, false),
+        ("out.webp", OutputFormat::Webp, false, true),
+        ("out.webp", OutputFormat::Jpeg, true, false),
+        ("out.webp", OutputFormat::IiifDir, true, false),
+        ("out.avif", OutputFormat::Avif, false, true),
+        ("out.avif", OutputFormat::Jpeg, true, false),
+        ("out.avif", OutputFormat::IiifDir, true, false),
+    ] {
+        assert_eq!(
+            output::validate_destination(&dir.join(name), &format, overwrite).is_ok(),
+            valid,
+            "{name}: {format:?}"
+        );
+    }
     let iiif = dir.join("out.iiif");
     assert!(output::validate_destination(&iiif, &OutputFormat::IiifDir, false).is_ok());
     assert!(output::validate_destination(&iiif, &OutputFormat::Tiff, true).is_err());
@@ -206,6 +213,22 @@ fn output_format_follows_the_destination_extension() {
     assert!(output::validate_destination(&iiif, &OutputFormat::IiifDir, true).is_err());
     assert_eq!(std::fs::read(&iiif).unwrap(), b"stale");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn existing_single_file_outputs_require_overwrite_without_changing_content() {
+    let dir = dezoomify_fixture_server::temp_dir("existing-output");
+    for codec in dezoomify::model::OUTPUT_CODECS
+        .iter()
+        .filter(|codec| !codec.format.is_directory())
+    {
+        let path = dir.join(format!("out.{}", codec.format.extension()));
+        std::fs::write(&path, b"previous output").unwrap();
+        assert!(output::validate_destination(&path, &codec.format, false).is_err());
+        assert!(output::validate_destination(&path, &codec.format, true).is_ok());
+        assert_eq!(std::fs::read(&path).unwrap(), b"previous output");
+    }
+    std::fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]

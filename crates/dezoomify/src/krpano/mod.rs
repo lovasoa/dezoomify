@@ -70,6 +70,9 @@ fn handle_xml(resource: DiscoveryResource<'_>) -> Result<ParsedResource, Discove
     if !is_encrypted_xml(contents) {
         return complete(resource.final_uri(), contents);
     }
+    if let Ok(decrypted) = decrypt_xml(contents, None) {
+        return complete(resource.final_uri(), &decrypted);
+    }
 
     let viewer_js = context
         .resources()
@@ -77,7 +80,7 @@ fn handle_xml(resource: DiscoveryResource<'_>) -> Result<ParsedResource, Discove
         .filter(|candidate| is_javascript_resource(*candidate))
         .filter_map(|candidate| extract_viewer_js(candidate.bytes()))
         .next_back();
-    match decrypt_xml(contents, viewer_js.as_deref()) {
+    let parsed = match decrypt_xml(contents, viewer_js.as_deref()) {
         Ok(decrypted) => complete(resource.final_uri(), &decrypted),
         Err(error) => next_viewer(context, resource, resource.final_uri()).map_or_else(
             || {
@@ -86,13 +89,28 @@ fn handle_xml(resource: DiscoveryResource<'_>) -> Result<ParsedResource, Discove
                 )))
             },
             |uri| {
-                Ok(ParsedResource::FollowWith(
+                Ok(ParsedResource::FollowIntermediate(
                     Request::new(uri),
                     handle_viewer_js,
                 ))
             },
         ),
-    }
+    }?;
+    // Encryption requiring viewer JavaScript can depend on script locations
+    // declared only by the entry page. Keep that page as the reusable source.
+    Ok(
+        match context
+            .resources()
+            .next()
+            .filter(|initial| HTML_RE.is_match(initial.bytes()))
+        {
+            Some(page) => ParsedResource::CanonicalSource {
+                uri: page.final_uri().to_owned(),
+                parsed: Box::new(parsed),
+            },
+            None => parsed,
+        },
+    )
 }
 
 fn try_xml(resource: DiscoveryResource<'_>) -> Option<Result<ParsedResource, DiscoveryError>> {
@@ -131,7 +149,7 @@ fn handle_viewer_js(resource: DiscoveryResource<'_>) -> Result<ParsedResource, D
                 )))
             },
             |uri| {
-                Ok(ParsedResource::FollowWith(
+                Ok(ParsedResource::FollowIntermediate(
                     Request::new(uri),
                     handle_viewer_js,
                 ))
@@ -148,7 +166,7 @@ fn handle_failure(
     if let Some(xml) = find_xml(context)
         && let Some(uri) = next_viewer_after_failure(context, request.uri.as_str(), xml.final_uri())
     {
-        return Ok(ParsedResource::FollowWith(
+        return Ok(ParsedResource::FollowIntermediate(
             Request::new(uri),
             handle_viewer_js,
         ));
@@ -858,8 +876,35 @@ mod tests {
             ("https://example.com/viewer.js", b"function createPanoViewer(opts) { return buildViewer(opts); }", "https://example.com/tour.xml"),
         ];
         for (input, page, next) in cases {
-            let (_, requests) = crate::test_support::discover(SPEC, input, &[(page, None)]);
+            let xml = br#"<krpano><image tilesize="512"><level tiledimagewidth="1000" tiledimageheight="100"><cube url="https://example.com/%s/%r/%c.jpg"/></level></image></krpano>"#;
+            let (result, requests) =
+                crate::test_support::discover(SPEC, input, &[(page, None), (xml, None)]);
             assert_eq!(requests[1].uri, *next, "{input}");
+            assert_eq!(
+                image(result.unwrap()).source_url.as_deref(),
+                Some(*next),
+                "{input}"
+            );
+        }
+    }
+
+    #[test]
+    fn minimap_viewer_handoff_uses_the_self_contained_xml() {
+        let viewer = "https://krpano.com/releases/1.24/viewer/krpano.html?xml=examples/minimap/eiffeltower_minimap.xml";
+        let metadata =
+            "https://krpano.com/releases/1.24/viewer/examples/minimap/eiffeltower_minimap.xml";
+        let page = br#"<script src="krpano.js"></script><script>embedpano({xml:"krpano.xml", passQueryParameters:"xml"});</script>"#;
+        let xml = br#"<krpano><image><flat url="https://krpano.com/panos/eiffeltower/eiffeltower.tiles/l%l/%00v/l%l_%00v_%00h.jpg" multires="512,512x844,1152x1898,2176x3586,4352x7172,8832x14554,17664x29110,35328x58220"/></image></krpano>"#;
+        let (from_page, _) =
+            crate::test_support::discover(SPEC, viewer, &[(page, None), (xml, None)]);
+        let (from_xml, _) = crate::test_support::discover(SPEC, metadata, &[(xml, None)]);
+        for catalog in [from_page.unwrap(), from_xml.unwrap()] {
+            let image = image(catalog);
+            assert_eq!(image.source_url.as_deref(), Some(metadata));
+            assert_eq!(
+                image.levels.last().unwrap().source.image_size(),
+                Some(Vec2d { x: 35328, y: 58220 })
+            );
         }
     }
 

@@ -13,30 +13,30 @@
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.15",
-    "@types/node": "26.6.3",
+    "@types/node": "26.6.5",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
-    "@vitejs/plugin-react": "^6.1.1",
+    "@vitejs/plugin-react": "^6.1.2",
     "esbuild": "0.28.2",
     "linkedom": "^0.18.13",
     "sharp": "0.35.5",
     "typescript": "7.0.2",
-    "vite": "^8.3.1",
-    "wrangler": "4.145.0"
+    "vite": "^8.3.4",
+    "wrangler": "4.149.0"
   },
   "pnpm": {
     "overrides": {
       "sharp": "0.35.5",
-      "@playwright/test": "1.63.0",
-      "playwright": "1.63.0",
-      "playwright-core": "1.63.0",
+      "@playwright/test": "1.64.0",
+      "playwright": "1.64.0",
+      "playwright-core": "1.64.0",
       "undici": "7.29.1"
     }
   },
   "scripts": {
     "lint": "biome lint --error-on-warnings .",
     "format": "biome check --write .",
-    "check:biome": "biome check .",
+    "check:biome": "biome check --error-on-warnings .",
     "fix:biome": "biome lint --write --unsafe .",
     "typecheck": "tsc --noEmit && pnpm -r typecheck",
     "build": "vite build",

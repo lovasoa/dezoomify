@@ -5,6 +5,45 @@ use std::num::NonZeroU64;
 use support::MemoryHost;
 const DZI: &str =
     r#"<Image TileSize="256" Overlap="0" Format="jpg"><Size Width="512" Height="512"/></Image>"#;
+
+#[test]
+fn supplied_viewer_metadata_preserves_all_images_without_fetching() {
+    use dezoomify::core::{
+        default_registry,
+        discovery::{DiscoveryInput, DiscoveryLimits},
+    };
+    let larger = DZI.replace("512", "1024");
+    let catalog = futures::executor::block_on(default_registry().discover(
+        vec![
+            DiscoveryInput::with_contents("https://page.test", DZI),
+            DiscoveryInput::with_contents("https://page.test#openseadragon-0", DZI)
+                .with_kind(DiscoveryInputKind::ObservedMetadata),
+            DiscoveryInput::with_contents("https://page.test#openseadragon-1", larger)
+                .with_kind(DiscoveryInputKind::ObservedMetadata),
+        ],
+        DiscoveryLimits::default(),
+        |_, _| async { panic!("loaded metadata must not fetch") },
+        support::parse_html,
+        |_| async { Ok(Vec::new()) },
+    ))
+    .unwrap();
+    assert_eq!(catalog.len(), 2);
+}
+
+#[test]
+fn unreadable_viewer_metadata_falls_back_without_following_links() {
+    let host = MemoryHost::default();
+    let loaded = JobInput {
+        url: "https://page.test#openseadragon".into(),
+        contents: Some(r#"<a href="https://must-not-fetch.test/info.json">image</a>"#.into()),
+        kind: Some(DiscoveryInputKind::ObservedMetadata),
+    };
+    let result =
+        futures::executor::block_on(dezoomify(vec![input().remove(0), loaded], options(), &host))
+            .unwrap();
+    assert_eq!(result.canvas.unwrap().width, 512);
+    assert!(host.fetched.borrow().is_empty());
+}
 fn input() -> Vec<JobInput> {
     vec![JobInput {
         url: "https://images.test/image.dzi".into(),
@@ -42,7 +81,7 @@ fn full_output_uses_lazy_geometry_and_honest_disposition() {
     let host = MemoryHost::default();
     host.yield_tiles.set(true);
     let output = invoke(&host, options()).unwrap();
-    assert!(output.is_complete());
+    assert!(output.disposition == OutputDisposition::BrowserSaveReady);
     assert_eq!(
         output.canvas,
         Some(Size {
@@ -55,6 +94,9 @@ fn full_output_uses_lazy_geometry_and_honest_disposition() {
     assert_eq!(host.peak.get(), 4);
     assert_eq!(host.settled.get(), 1);
     assert_eq!(host.outputs.borrow().len(), 1);
+    assert!(host.progress.borrow().iter().any(|progress| {
+        progress.source_url.as_deref() == Some("https://images.test/image.dzi")
+    }));
     assert_eq!(
         host.acquired.borrow()[3].placement.position,
         Point { x: 256, y: 256 }
@@ -158,7 +200,7 @@ fn slow_first_tile_does_not_hold_back_other_completions() {
         assert!(job.as_mut().now_or_never().is_none());
         assert_eq!(host.attempts.borrow().len(), 4);
         release.send(()).unwrap();
-        assert!(futures::executor::block_on(job).unwrap().is_complete());
+        assert!(futures::executor::block_on(job).is_ok());
         assert_eq!(
             host.acquired.borrow().len(),
             if output == OutputFormat::Zif { 5 } else { 4 }
@@ -174,6 +216,7 @@ fn slow_first_tile_does_not_hold_back_other_completions() {
 #[test]
 fn accepted_catalog_warns_once_for_malformed_siblings_and_keeps_valid_images() {
     let host = MemoryHost::default();
+    host.image.set(1);
     let output = futures::executor::block_on(dezoomify(
         vec![JobInput {
             url: "https://images.test/tour.xml".into(),
@@ -188,17 +231,12 @@ fn accepted_catalog_warns_once_for_malformed_siblings_and_keeps_valid_images() {
         }],
         Options {
             format: Some("krpano".into()),
-            selection: SelectionPolicy::Fitting {
-                max_width: 1000,
-                max_height: 1000,
-                max_area: 1_000_000,
-            },
             ..Default::default()
         },
         &host,
     ))
     .unwrap();
-    assert!(output.is_complete());
+    assert!(output.disposition == OutputDisposition::BrowserSaveReady);
     assert_eq!(host.acquired.borrow().len(), 1);
     assert_eq!(host.outputs.borrow()[0].title.as_deref(), Some("good"));
     assert_eq!(
@@ -229,89 +267,123 @@ fn transient_failures_honor_exact_budget_and_retry_after() {
         3
     );
     assert_eq!(*host.sleeps.borrow(), [7000, 2000]);
-    assert!(host.partials.borrow().is_empty());
+    assert!(host.approvals.borrow().is_empty());
 }
 #[test]
-fn permanent_failures_ask_partial_after_all_tiles_settle() {
+fn permanent_failures_abort_without_approval_or_publication() {
     for error in [
         failure(403),
-        Error::DecodeFailed("corrupt tile".to_string().into())
-            .resource("https://images.test/tile.jpg", ResourceKind::Tile),
-        Error::ProcessingFailed("invalid encrypted tile".to_string().into())
-            .resource("https://images.test/tile.jpg", ResourceKind::Tile),
+        Error::DecodeFailed("corrupt tile".into()),
+        Error::ProcessingFailed("bad encryption".into()),
     ] {
-        assert!(!error.retryable());
         let host = MemoryHost::default();
         fail(&host, 0, [error.clone()]);
-        host.choices.borrow_mut().push_back(RecoveryChoice::Keep);
-        let output = invoke(&host, options()).unwrap();
-        assert!(!output.is_complete());
-        assert_eq!(output.missing, [0]);
-        assert_eq!(host.attempts.borrow().len(), 4);
+        let result = invoke(
+            &host,
+            Options {
+                interactive_retries: true,
+                ..options()
+            },
+        )
+        .unwrap_err();
+        assert_eq!(
+            result,
+            Error::TileFailed {
+                tile: 0,
+                attempts: 1,
+                cause: Box::new(error)
+            }
+        );
+        assert!(host.approvals.borrow().is_empty());
         assert!(host.sleeps.borrow().is_empty());
-        assert_eq!(host.partials.borrow()[0].missing[0].failures[0], error);
-        assert_eq!(host.acquired.borrow().len(), 3);
+        assert!(host.outputs.borrow().is_empty());
+        assert_eq!(host.settled.get(), 1);
     }
 }
 #[test]
-fn partial_retry_only_reacquires_missing_tiles_with_a_fresh_budget() {
+fn optional_retries_preserve_successes_and_attempt_context() {
     let host = MemoryHost::default();
     fail(&host, 1, [failure(503), failure(503), failure(503)]);
-    host.choices.borrow_mut().push_back(RecoveryChoice::Retry);
-    let output = invoke(
+    host.choices
+        .borrow_mut()
+        .extend([RetryChoice::Retry, RetryChoice::Retry]);
+    invoke(
+        &host,
+        Options {
+            max_retries: 1,
+            interactive_retries: true,
+            ..options()
+        },
+    )
+    .unwrap();
+    assert_eq!(host.acquired.borrow().len(), 4);
+    for id in [0, 2, 3] {
+        assert_eq!(
+            host.attempts.borrow().iter().filter(|i| **i == id).count(),
+            1
+        );
+    }
+    let requests: Vec<_> = host
+        .requests
+        .borrow()
+        .iter()
+        .filter(|r| r.tile.index == 1)
+        .cloned()
+        .collect();
+    assert_eq!(
+        requests
+            .iter()
+            .map(|r| (r.attempt, r.requires_approval))
+            .collect::<Vec<_>>(),
+        [(0, false), (1, false), (2, true), (3, true)]
+    );
+    assert!(requests[0].previous_failure.is_none());
+    assert_eq!(requests[3].previous_failure.as_deref(), Some(&failure(503)));
+    assert_eq!(*host.sleeps.borrow(), [1000, 2000, 4000]);
+}
+#[test]
+fn exhausted_retries_and_cancelled_approval_never_publish() {
+    let host = MemoryHost::default();
+    fail(&host, 0, [failure(503), failure(503)]);
+    let error = invoke(
         &host,
         Options {
             max_retries: 1,
             ..options()
         },
     )
-    .unwrap();
-    assert!(output.is_complete());
+    .unwrap_err();
     assert_eq!(
-        host.attempts.borrow().iter().filter(|i| **i == 1).count(),
-        4
-    );
-    assert_eq!(host.acquired.borrow().len(), 4);
-    assert_eq!(host.partials.borrow().len(), 1);
-    assert_eq!(*host.sleeps.borrow(), [1000, 1000]);
-}
-#[test]
-fn discard_and_empty_output_never_publish() {
-    let host = MemoryHost::default();
-    fail(&host, 0, [failure(404)]);
-    let error = invoke(&host, options()).unwrap_err();
-    assert!(matches!(
-        &error,
-        Error::PartialDiscarded {
-            transient: false,
-            ..
+        error,
+        Error::TileFailed {
+            tile: 0,
+            attempts: 2,
+            cause: Box::new(failure(503))
         }
-    ));
+    );
+    assert!(host.approvals.borrow().is_empty());
+    assert!(host.outputs.borrow().is_empty());
+    let host = MemoryHost::default();
+    fail(&host, 0, [failure(503)]);
+    assert_eq!(
+        invoke(
+            &host,
+            Options {
+                max_retries: 0,
+                interactive_retries: true,
+                ..options()
+            }
+        )
+        .unwrap_err(),
+        Error::Cancelled
+    );
+    assert_eq!(host.approvals.borrow().len(), 1);
+    assert_eq!(
+        host.attempts.borrow().iter().filter(|i| **i == 0).count(),
+        1
+    );
     assert!(host.outputs.borrow().is_empty());
     assert_eq!(host.settled.get(), 1);
-    let host = MemoryHost::default();
-    for tile in 0..4 {
-        fail(&host, tile, [failure(404)]);
-    }
-    let error = invoke(
-        &host,
-        Options {
-            partial: PartialPolicy::Keep,
-            ..options()
-        },
-    )
-    .unwrap_err();
-    // The aggregate retains every settled failure and derives its verdict
-    // from the whole set.
-    assert!(matches!(
-        &error,
-        Error::NoUsableTiles {
-            transient: false,
-            ..
-        }
-    ));
-    assert!(!error.retryable());
-    assert!(host.outputs.borrow().is_empty());
 }
 #[test]
 fn invalid_binding_and_output_failures_abort_immediately() {
@@ -323,17 +395,10 @@ fn invalid_binding_and_output_failures_abort_immediately() {
         let expected = error.clone();
         fail(&host, 0, [error]);
         assert_eq!(
-            invoke(
-                &host,
-                Options {
-                    partial: PartialPolicy::Keep,
-                    ..options()
-                }
-            )
-            .unwrap_err(),
+            invoke(&host, Options { ..options() }).unwrap_err(),
             expected
         );
-        assert!(host.partials.borrow().is_empty());
+        assert!(host.approvals.borrow().is_empty());
         assert!(host.outputs.borrow().is_empty());
         assert_eq!(host.settled.get(), 1);
     }
@@ -513,68 +578,7 @@ fn image_and_level_choices_are_checked() {
     );
     assert!(host.acquired.borrow().is_empty());
 }
-#[test]
-fn browser_fitting_and_native_selection_preserve_dimension_policy() {
-    for (selection, expected) in [
-        (
-            SelectionPolicy::Fitting {
-                max_width: 300,
-                max_height: 300,
-                max_area: 90000,
-            },
-            256,
-        ),
-        (
-            SelectionPolicy::Fitting {
-                max_width: 1,
-                max_height: 1,
-                max_area: 1,
-            },
-            1,
-        ),
-        (
-            SelectionPolicy::Automatic {
-                image_index: usize::MAX,
-                largest: true,
-                max_width: Some(1),
-                max_height: Some(1),
-                zoom_level: None,
-            },
-            512,
-        ),
-        (
-            SelectionPolicy::Automatic {
-                image_index: 0,
-                largest: false,
-                max_width: Some(300),
-                max_height: Some(300),
-                zoom_level: None,
-            },
-            256,
-        ),
-        (
-            SelectionPolicy::Automatic {
-                image_index: 0,
-                largest: true,
-                max_width: None,
-                max_height: None,
-                zoom_level: Some(0),
-            },
-            1,
-        ),
-    ] {
-        let host = MemoryHost::default();
-        let output = invoke(
-            &host,
-            Options {
-                selection,
-                ..options()
-            },
-        )
-        .unwrap();
-        assert_eq!(output.canvas.unwrap().width, expected);
-    }
-}
+
 #[test]
 fn generic_probes_reuse_placed_tiles_and_keep_boundaries() {
     let host = MemoryHost::default();
@@ -676,14 +680,14 @@ fn pause_blocks_new_acquisition_and_retry_waits_until_resume() {
         assert!(host.outputs.borrow().is_empty());
         host.paused.set(false);
         resume.send(()).unwrap();
-        assert!(futures::executor::block_on(future).unwrap().is_complete());
+        assert!(futures::executor::block_on(future).is_ok());
         assert_eq!(host.acquired.borrow().len(), 4);
         assert_eq!(host.sleeps.borrow().len(), usize::from(failed));
     }
 }
 
 #[test]
-fn automatic_selection_follows_catalog_entries_and_rejects_cycles() {
+fn host_selection_follows_catalog_entries_and_rejects_cycles() {
     let mut host = MemoryHost::default();
     host.resources.insert(
         "https://images.test/image.dzi".into(),
@@ -704,17 +708,23 @@ fn automatic_selection_follows_catalog_entries_and_rejects_cycles() {
             kind: Some(DiscoveryInputKind::ObservedResource),
         },
     ];
+    host.level.set(Some(8));
     let opts = Options {
         max_deferred_follows: 1,
-        selection: SelectionPolicy::Fitting {
-            max_width: 300,
-            max_height: 300,
-            max_area: 90000,
-        },
         ..Default::default()
     };
     let output = futures::executor::block_on(dezoomify(inputs, opts, &host)).unwrap();
     assert_eq!(output.canvas.unwrap().width, 256);
+    let catalogs = host.catalogs.borrow();
+    assert_eq!(catalogs.len(), 2);
+    assert!(matches!(
+        catalogs[0].entries[0],
+        CatalogEntry::ImageRequest(_)
+    ));
+    assert!(matches!(catalogs[1].entries[0], CatalogEntry::Image(_)));
+    assert!(host.progress.borrow().iter().filter(|progress| progress.selected.is_some()).all(
+        |progress| progress.source_url.as_deref() == Some("https://images.test/image.dzi")
+    ));
     assert_eq!(
         host.fetched
             .borrow()
@@ -731,16 +741,7 @@ fn automatic_selection_follows_catalog_entries_and_rejects_cycles() {
             final_uri: None,
         },
     );
-    let options = Options {
-        selection: SelectionPolicy::Automatic {
-            image_index: 0,
-            largest: true,
-            max_width: None,
-            max_height: None,
-            zoom_level: None,
-        },
-        ..Default::default()
-    };
+    let options = Options::default();
     let error = futures::executor::block_on(dezoomify(
         vec![JobInput::new("https://images.test/list.txt")],
         options,
@@ -790,7 +791,7 @@ fn deferred_cycles_do_not_reacquire_supplied_sources_or_their_redirected_address
 }
 
 #[test]
-fn unsupported_schemes_and_zero_canvas_limits_are_rejected() {
+fn unsupported_schemes_are_rejected() {
     for uri in [
         "ftp://images.test/image.dzi",
         "javascript:void(0)",
@@ -804,24 +805,10 @@ fn unsupported_schemes_and_zero_canvas_limits_are_rejected() {
         assert_eq!(error.kind(), "invalid-input");
         assert!(host.fetched.borrow().is_empty());
     }
-    let host = MemoryHost::default();
-    let error = invoke(
-        &host,
-        Options {
-            selection: SelectionPolicy::Fitting {
-                max_width: 0,
-                max_height: 10,
-                max_area: 100,
-            },
-            ..options()
-        },
-    )
-    .unwrap_err();
-    assert_eq!(error.kind(), "invalid-options");
 }
 
 #[test]
-fn missing_tiles_preserve_the_complete_original_host_error() {
+fn failed_tiles_preserve_the_complete_original_host_error() {
     let host = MemoryHost::default();
     let error = Error::HttpError {
         status: 403,
@@ -834,13 +821,17 @@ fn missing_tiles_preserve_the_complete_original_host_error() {
         },
     };
     fail(&host, 0, [error.clone()]);
-    host.choices.borrow_mut().push_back(RecoveryChoice::Keep);
-    invoke(&host, options()).unwrap();
-    let partials = host.partials.borrow();
-    assert_eq!(partials[0].missing[0].failures[0], error);
-    assert!(!partials[0].missing[0].failures[0].retryable());
-    assert_eq!(
-        partials[0].missing[0].failures[0].retry_after_ms(),
-        Some(5000)
-    );
+    let result = invoke(&host, options()).unwrap_err();
+    let Error::TileFailed {
+        tile,
+        attempts,
+        cause,
+    } = result
+    else {
+        panic!("tile context is retained")
+    };
+    assert_eq!((tile, attempts), (0, 1));
+    assert_eq!(*cause, error);
+    assert!(!cause.retryable());
+    assert_eq!(cause.retry_after_ms(), Some(5000));
 }

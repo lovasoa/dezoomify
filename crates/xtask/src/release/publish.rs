@@ -86,21 +86,43 @@ fn release_publish(plan: &Plan, artifacts: &std::path::Path) -> Result<(), Strin
             "GitHub release {tag} already exists; refusing to republish"
         ));
     }
+    let manifest_path = artifacts.join("latest.json");
+    let manifest = super::updater::manifest(plan, artifacts)?;
+    std::fs::write(
+        &manifest_path,
+        serde_json::to_string_pretty(&manifest).map_err(|error| error.to_string())?,
+    )
+    .map_err(|error| format!("write latest.json: {error}"))?;
     let mut cmd = Command::new("gh");
     cmd.args(["release", "create", &tag, "--target", &plan.commit])
         .arg("--title")
         .arg(format!("dezoomify v{}", plan.version))
         .arg("--notes-file")
         .arg(artifacts.join("notes.md"));
+    let mut assets = std::collections::BTreeSet::new();
     for target in &plan.targets {
         let name = expected_artifact_name(&target.name, &plan.version)
             .ok_or_else(|| format!("target '{}' has no artifact name rule", target.name))?;
-        cmd.arg(artifacts.join(&target.name).join(name));
+        assets.insert(artifacts.join(&target.name).join(name));
     }
-    cmd.arg("--latest");
+    // Windows uses the same MSI for installation and updating.
+    assets.extend(super::updater::assets(plan, artifacts));
+    assets.insert(manifest_path);
+    cmd.args(assets).arg("--draft");
     let status = cmd.status().map_err(|e| format!("failed to run gh: {e}"))?;
     if !status.success() {
         return Err(format!("gh release create {tag} failed"));
+    }
+    // Expose the new latest endpoint only after every asset has uploaded.
+    let status = Command::new("gh")
+        .args(["release", "edit", &tag, "--draft=false", "--latest"])
+        .current_dir(crate::repo_root())
+        .status()
+        .map_err(|error| format!("publish GitHub release: {error}"))?;
+    if !status.success() {
+        return Err(format!(
+            "gh release edit {tag} failed; release remains a draft"
+        ));
     }
     Ok(())
 }

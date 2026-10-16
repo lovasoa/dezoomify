@@ -25,8 +25,9 @@ pub struct MemoryHost {
     pub acquired: RefCell<Vec<Tile>>,
     pub attempts: RefCell<Vec<u32>>,
     pub failures: RefCell<HashMap<u32, VecDeque<Error>>>,
-    pub choices: RefCell<VecDeque<RecoveryChoice>>,
-    pub partials: RefCell<Vec<MissingTiles>>,
+    pub choices: RefCell<VecDeque<RetryChoice>>,
+    pub approvals: RefCell<Vec<TileAcquisition>>,
+    pub requests: RefCell<Vec<TileAcquisition>>,
     pub sleeps: RefCell<Vec<u32>>,
     pub progress: RefCell<Vec<Progress>>,
     pub warnings: RefCell<Vec<String>>,
@@ -46,6 +47,7 @@ pub struct MemoryHost {
     pub resume: RefCell<Option<futures::channel::oneshot::Receiver<()>>>,
     pub image: Cell<u32>,
     pub level: Cell<Option<u32>>,
+    pub catalogs: RefCell<Vec<Catalog>>,
     pub display_only: Cell<bool>,
 }
 struct Active<'a>(&'a Cell<u32>);
@@ -55,6 +57,10 @@ impl Drop for Active<'_> {
     }
 }
 impl Host for MemoryHost {
+    async fn observe(&self, _: Interaction) -> Result<JobInputs, Error> {
+        Ok(Vec::new())
+    }
+
     async fn parse_html(&self, query: HtmlQuery) -> Result<HtmlDocument, Error> {
         parse_html(query).await
     }
@@ -91,7 +97,22 @@ impl Host for MemoryHost {
             .pop_front()
             .unwrap_or(ProbeOutcome::Missing))
     }
-    async fn acquire_tile(&self, tile: Tile) -> Result<(), Error> {
+    async fn acquire_tile(&self, request: TileAcquisition) -> Result<(), Error> {
+        self.requests.borrow_mut().push(request.clone());
+        if request.requires_approval {
+            self.approvals.borrow_mut().push(request.clone());
+            if self
+                .choices
+                .borrow_mut()
+                .pop_front()
+                .unwrap_or(RetryChoice::Cancel)
+                == RetryChoice::Cancel
+            {
+                self.cancelled.set(true);
+                return Err(Error::Cancelled);
+            }
+        }
+        let tile = request.tile;
         self.active.set(self.active.get() + 1);
         self.peak.set(self.peak.get().max(self.active.get()));
         let _active = Active(&self.active);
@@ -147,7 +168,6 @@ impl Host for MemoryHost {
         let output = Output {
             canvas: request.canvas.clone(),
             format: request.format,
-            missing: request.missing.clone(),
             disposition: if self.display_only.get() {
                 OutputDisposition::DisplayOnly
             } else {
@@ -157,19 +177,15 @@ impl Host for MemoryHost {
         self.outputs.borrow_mut().push(request);
         Ok(output)
     }
-    async fn choose_image(&self, _: Catalog) -> Result<u32, Error> {
+    async fn choose_image(&self, catalog: Catalog) -> Result<u32, Error> {
+        self.catalogs.borrow_mut().push(catalog);
         Ok(self.image.get())
     }
     async fn choose_level(&self, image: Image) -> Result<u32, Error> {
-        Ok(self.level.get().unwrap_or(image.levels.len() as u32 - 1))
-    }
-    async fn choose_partial(&self, missing: MissingTiles) -> Result<RecoveryChoice, Error> {
-        self.partials.borrow_mut().push(missing);
         Ok(self
-            .choices
-            .borrow_mut()
-            .pop_front()
-            .unwrap_or(RecoveryChoice::Discard))
+            .level
+            .get()
+            .unwrap_or(image.levels.len().saturating_sub(1) as u32))
     }
     async fn checkpoint(&self, gate: Gate) -> Result<(), Error> {
         if self.cancelled.get() {

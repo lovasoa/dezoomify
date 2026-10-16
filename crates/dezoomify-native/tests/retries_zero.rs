@@ -32,21 +32,16 @@ fn setup_three_of_four() -> (String, Arc<Mutex<HashMap<String, usize>>>) {
 
 #[test]
 fn retries_zero_sends_no_second_request() {
-    // Explicit `Fail` keeps this a retry-counting test: the missing tile
-    // fails honestly with no output (default `Keep` would keep a partial).
+    // A missing tile fails without publication or an extra request.
     let (base, counts) = setup_three_of_four();
     let input = format!("{base}/pyr.dzi");
     let out_dir = temp_dir("zero");
     let output = out_dir.join("zero.png");
     let error = support::run_file(&input, &output, |options| {
         options.max_retries = 0;
-        options.keep_partial = false;
     })
     .expect_err("missing tile fails");
-    assert!(matches!(
-        error,
-        dezoomify::model::Error::PartialDiscarded { .. }
-    ));
+    assert!(matches!(error, dezoomify::model::Error::TileFailed { .. }));
     assert!(!output.exists());
     let counts = counts.lock().expect("lock");
     // The missing tile is never refetched with retries=0.

@@ -27,7 +27,7 @@ const GATEWAY_DZI = "https://fixtures.test/cli/pyramid.dzi";
 // Two tiles answer 429 with Retry-After, so the job stays running through
 // retry backoff long enough to cancel deterministically.
 const SLOW_DZI = "https://fixtures.test/edge/throttle-429/pyramid.dzi";
-const PARTIAL_DZI = "https://fixtures.test/desktop/tile-failure-keep/corrupt.dzi";
+const CORRUPT_DZI = "https://fixtures.test/cli/corrupt.dzi";
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -48,7 +48,6 @@ async function snapshot(driver) {
       error: !!q(".dz-error-section"),
       errorText: text("#dz-error-message"),
       errorDiagnostics: text("#dz-error-diagnostics"),
-      partialNote: text(".dz-partial-note"),
     };
   });
 }
@@ -136,6 +135,18 @@ describe("Dezoomify desktop window", () => {
   let fixture = null;
   let runDirs = null;
 
+  function historyStatus(expected) {
+    return driver.executeScript((expected) => {
+      const row = document.querySelector(".dz-history-table tbody tr");
+      return row?.cells[3]?.textContent.trim() === expected;
+    }, expected);
+  }
+
+  async function isIdle() {
+    const state = await snapshot(driver);
+    return !state.job && !state.completed && !state.error;
+  }
+
   async function teardown() {
     if (driver) {
       try {
@@ -146,18 +157,9 @@ describe("Dezoomify desktop window", () => {
       driver = null;
     }
     await stopWindowApp(app);
-    if (app) {
-      const logs = app.logs().trim();
-      if (logs) process.stderr.write(`window E2E app log:\n${logs.slice(-4000)}\n`);
-    }
+    writeAppLogs(app);
     app = null;
-    if (fixture) {
-      const requestLog = existsSync(fixture.requestLog)
-        ? readFileSync(fixture.requestLog, "utf8")
-        : "";
-      const logs = `${fixture.logs()}\n${requestLog}`.trim();
-      if (logs) process.stderr.write(`window E2E fixture log:\n${logs.slice(-4000)}\n`);
-    }
+    writeFixtureLogs(fixture);
     stopFixtureServer(fixture);
     fixture = null;
     if (runDirs) {
@@ -168,6 +170,21 @@ describe("Dezoomify desktop window", () => {
       }
       runDirs = null;
     }
+  }
+
+  function writeAppLogs(app) {
+    if (!app) return;
+    const logs = app.logs().trim();
+    if (logs) process.stderr.write(`window E2E app log:\n${logs.slice(-4000)}\n`);
+  }
+
+  function writeFixtureLogs(fixture) {
+    if (!fixture) return;
+    const requestLog = existsSync(fixture.requestLog)
+      ? readFileSync(fixture.requestLog, "utf8")
+      : "";
+    const logs = `${fixture.logs()}\n${requestLog}`.trim();
+    if (logs) process.stderr.write(`window E2E fixture log:\n${logs.slice(-4000)}\n`);
   }
 
   before(async () => {
@@ -232,31 +249,22 @@ describe("Dezoomify desktop window", () => {
     assert.equal(terminal.completed, true, "the completion view is shown");
     const outputs = outputFiles(runOutputDir());
     assert.equal(outputs.length, 1, "automatic save writes exactly one PNG");
-    assert.ok(!outputs[0].includes(".partial."), "a complete save is not a partial sibling");
     assertSavedPyramid(readFileSync(outputs[0]));
     await resetToIdle(driver);
     await waitFor(
       driver,
-      async () =>
-        driver.executeScript(() => {
-          const row = document.querySelector(".dz-history-table tbody tr");
-          return row?.cells[3]?.textContent.trim() === "Completed";
-        }),
+      () => historyStatus(path.basename(outputs[0])),
       30000,
       "saved file history",
     );
-    const title = await driver.findElement(By.css(".dz-history-main"));
+    const title = await driver.findElement(By.css(".dz-history-output"));
     assert.equal(await title.getText(), path.basename(outputs[0]));
     assert.equal(await title.isEnabled(), true);
     rmSync(outputs[0]);
     await driver.executeScript(() => window.dispatchEvent(new Event("focus")));
     await waitFor(
       driver,
-      async () =>
-        driver.executeScript(() => {
-          const row = document.querySelector(".dz-history-table tbody tr");
-          return row?.cells[3]?.textContent.trim() === "Deleted";
-        }),
+      () => historyStatus(`${path.basename(outputs[0])}Deleted`),
       30000,
       "deleted file history",
     );
@@ -291,43 +299,16 @@ describe("Dezoomify desktop window", () => {
     // The throttled job keeps running through retry backoff, so the cancel
     // control is present and reaches the runtime before the job can complete.
     await (await driver.findElement(By.css("#dz-btn-cancel"))).click();
-    await waitFor(
-      driver,
-      async () => {
-        const state = await snapshot(driver);
-        return !state.job && !state.completed && !state.error;
-      },
-      60000,
-      "cancelled view",
-    );
+    await waitFor(driver, isIdle, 60000, "cancelled view");
     assert.equal(outputFiles(runOutputDir()).length, 0, "cancelled jobs publish no output");
   });
 
-  it("keeps a partial download as a .partial sibling", async () => {
+  it("rejects corrupt tiles without publishing an incomplete image", async () => {
     clearOutput();
-    await submitUrl(driver, gatewayInput(PARTIAL_DZI));
-    await waitFor(
-      driver,
-      async () => {
-        const state = await snapshot(driver);
-        return state.completed || state.error;
-      },
-      180000,
-      "partial terminal",
-    );
-
+    await submitUrl(driver, gatewayInput(CORRUPT_DZI));
+    await waitFor(driver, async () => (await snapshot(driver)).error, 180000, "failed tile");
     const terminal = await snapshot(driver);
-    assert.equal(
-      terminal.error,
-      false,
-      `a kept partial is not a hard error: ${errorDetail(terminal)}`,
-    );
-    assert.ok(terminal.partialNote, "the completion view reports missing tiles");
-    const outputs = outputFiles(runOutputDir());
-    assert.equal(outputs.length, 1, "exactly one partial output is published");
-    assert.ok(
-      outputs[0].includes(".partial."),
-      "kept bytes land at the .partial sibling, never the granted path",
-    );
+    assert.equal(terminal.completed, false, errorDetail(terminal));
+    assert.equal(outputFiles(runOutputDir()).length, 0);
   });
 });

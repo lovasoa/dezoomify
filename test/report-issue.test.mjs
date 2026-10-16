@@ -16,7 +16,7 @@ const report = () => {
     context: { input: "https://host/a%2Fb?token=SECRET&page=2", version: "test" },
   });
   d.record("warn", "request-failed", { http: 403, preview: "challenge" });
-  d.finish("failed", { code: "job.partial-discarded", initiator: "policy" });
+  d.finish("failed", { code: "tile-failed", initiator: "policy" });
   return d.report();
 };
 test("issue draft keeps evidence and bounds the encoded URL", () => {
@@ -25,7 +25,7 @@ test("issue draft keeps evidence and bounds the encoded URL", () => {
   const url = new URL(diagnosticIssueUrl(r));
   assert.ok(url.href.length < 7100);
   const body = url.searchParams.get("body");
-  assert.match(body, /job.partial-discarded/);
+  assert.match(body, /tile-failed/);
   assert.match(body, /challenge/);
   assert.ok(body.includes(r.context.input));
 });

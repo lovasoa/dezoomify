@@ -38,16 +38,19 @@ jobs:
           fetch-depth: 0
       - uses: ./.github/actions/setup-pnpm
         with:
-          install: ${{ matrix.lane-group == 'check' || matrix.lane-group == 'browser+web' || matrix.lane-group == 'extension' || matrix.lane-group == 'bindings+security' }}
+          # Native AVIF tests independently decode with the existing Sharp dependency.
+          install: ${{ matrix.lane-group == 'check' || matrix.lane-group == 'rust' || matrix.lane-group == 'browser+web' || matrix.lane-group == 'extension' || matrix.lane-group == 'bindings+security' }}
+      - uses: ./.github/actions/setup-nasm
+        if: matrix.lane-group == 'check' || matrix.lane-group == 'rust'
       - name: Set up Rust toolchain (WASM target)
         if: matrix.lane-group == 'check' || matrix.lane-group == 'wasm' || matrix.lane-group == 'browser+web' || matrix.lane-group == 'extension' || matrix.lane-group == 'bindings+security'
-        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # pinned
+        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # pinned
         with:
           toolchain: 1.98.1 # must match rust-toolchain.toml
           targets: wasm32-unknown-unknown
       - name: Set up Rust toolchain
         if: matrix.lane-group == 'rust'
-        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # pinned
+        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # pinned
         with:
           toolchain: 1.98.1 # must match rust-toolchain.toml
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
@@ -65,7 +68,7 @@ jobs:
         uses: ./.github/actions/setup-wasm-bindgen
       - name: Install cargo-deny 0.20.2
         if: matrix.lane-group == 'check'
-        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
+        uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
         with:
           tool: cargo-deny@0.20.2
       - name: Cache Playwright Chromium
@@ -95,6 +98,9 @@ jobs:
             # browser. Aligned versions make this a no-op.
             pnpm --filter dezoomify-extension-headless exec playwright install chromium
           fi
+      - name: Install Playwright Firefox
+        if: matrix.lane-group == 'extension'
+        run: pnpm --filter dezoomify-extension-headless exec playwright install --with-deps firefox
       - name: Cache pinned Firefox driver
         if: matrix.lane-group == 'extension'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

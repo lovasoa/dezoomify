@@ -18,6 +18,24 @@ const FACT_FIELD = /^(?:.*\.)?(?:kind|status|transport|blocked_reason|resource_k
 // JSON escaping and UTF-8 use at most six bytes per UTF-16 code unit.
 const size = (value: unknown) => JSON.stringify(value).length * 6;
 
+function objectFields(item: object): Array<[string, unknown]> {
+  return Object.entries(
+    item instanceof Error
+      ? {
+          ...item,
+          name: item.name,
+          message: item.message,
+          cause: item.cause,
+          stack: item.stack,
+        }
+      : item,
+  );
+}
+
+function binaryField(name: string, value: unknown): boolean {
+  return /^(contents|body|pixels|tile_bytes|bytes)$/i.test(name) && typeof value !== "number";
+}
+
 /** Flatten bounded facts; explicitly retain Error's non-enumerable properties. */
 export function diagnosticFields(
   value: unknown,
@@ -26,6 +44,29 @@ export function diagnosticFields(
   const out: DiagnosticFields = {};
   const seen = new Set<unknown>();
   let remaining = 8192;
+  function writeString(key: string, item: string): void {
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: Strip terminal control characters.
+    const text = item.replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, "");
+    const limit = Math.max(0, Math.min(FIELD_LIMIT, remaining));
+    out[key] = text.length > limit ? `${text.slice(0, limit)}…[truncated]` : text;
+    remaining -= Math.min(limit, text.length);
+    if (text.length > limit) truncated();
+  }
+  function visitObject(key: string, item: object, depth: number): void {
+    if (item instanceof ArrayBuffer || ArrayBuffer.isView(item)) return;
+    if (seen.has(item) || depth > 3) {
+      truncated();
+      return;
+    }
+    seen.add(item);
+    const entries = objectFields(item);
+    const prefix = key ? `${key}.` : "";
+    for (const [child, next] of entries.slice(0, MAX_FIELDS)) {
+      if (binaryField(child, next)) continue;
+      visit(`${prefix}${child}`, next, depth + 1);
+    }
+    if (entries.length > MAX_FIELDS) truncated();
+  }
   function visit(key: string, item: unknown, depth: number): void {
     key = key.slice(0, 256);
     if (Object.keys(out).length >= MAX_FIELDS) {
@@ -36,35 +77,9 @@ export function diagnosticFields(
     if (typeof item === "boolean" || (typeof item === "number" && Number.isFinite(item))) {
       out[key] = item;
     } else if (typeof item === "string") {
-      // biome-ignore lint/suspicious/noControlCharactersInRegex: Strip terminal control characters.
-      const text = item.replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, "");
-      const limit = Math.max(0, Math.min(FIELD_LIMIT, remaining));
-      out[key] = text.length > limit ? `${text.slice(0, limit)}…[truncated]` : text;
-      remaining -= Math.min(limit, text.length);
-      if (text.length > limit) truncated();
+      writeString(key, item);
     } else if (typeof item === "object") {
-      if (item instanceof ArrayBuffer || ArrayBuffer.isView(item)) return;
-      if (seen.has(item) || depth > 3) {
-        truncated();
-        return;
-      }
-      seen.add(item);
-      const entries =
-        item instanceof Error
-          ? Object.entries({
-              ...item,
-              name: item.name,
-              message: item.message,
-              cause: item.cause,
-              stack: item.stack,
-            })
-          : Object.entries(item);
-      for (const [child, next] of entries.slice(0, MAX_FIELDS)) {
-        if (/^(contents|body|pixels|tile_bytes|bytes)$/i.test(child) && typeof next !== "number")
-          continue;
-        visit(key ? `${key}.${child}` : child, next, depth + 1);
-      }
-      if (entries.length > MAX_FIELDS) truncated();
+      visitObject(key, item, depth);
     }
   }
   if (value && typeof value === "object") visit("", value, 0);
@@ -73,30 +88,140 @@ export function diagnosticFields(
 }
 
 export function formatDiagnosticRecord(record: DiagnosticRecord): string {
-  const facts = Object.entries(record.fields)
+  const fields = { ...record.fields };
+  if (fields.final_url === fields.url) delete fields.final_url;
+  const event = record.event === "phase" && fields.phase ? `phase ${fields.phase}` : record.event;
+  if (record.event === "phase" && fields.phase) delete fields.phase;
+  const facts = formatFacts(fields);
+  return `+${(record.elapsed_ms / 1000).toFixed(3)}s ${event}${facts ? ` ${facts}` : ""}`;
+}
+
+function formatFacts(fields: DiagnosticFields): string {
+  return Object.entries(fields)
+    .filter(([, value]) => value !== "")
     .map(([key, value]) => `${key}=${String(value)}`)
     .join(" ");
-  return `+${(record.elapsed_ms / 1000).toFixed(3)}s ${record.event}${facts ? ` ${facts}` : ""}`;
+}
+
+function takeSource(context: DiagnosticFields): string {
+  const canonical = context.canonical;
+  return ["canonical", "input", "title", "format"]
+    .map((key) => {
+      const value = context[key];
+      delete context[key];
+      if (key === "input" && value === canonical) return "";
+      return value === undefined || value === "" ? "" : `${key}: ${value}`;
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
+function takeRuntime(context: DiagnosticFields): DiagnosticFields {
+  const runtime: DiagnosticFields = {};
+  for (const key of ["product", "version", "build", "user_agent", "platform"]) {
+    if (context[key] !== undefined && context[key] !== "") runtime[key] = context[key];
+    delete context[key];
+  }
+  if (runtime.platform && String(runtime.user_agent ?? "").includes(String(runtime.platform)))
+    delete runtime.platform;
+  return runtime;
+}
+
+function compactContext(context: DiagnosticFields, report: DiagnosticReport): void {
+  if (context.presented_phase === report.outcome?.event) delete context.presented_phase;
+  const lastPhase = [...report.records].reverse().find((record) => record.event === "phase")
+    ?.fields.phase;
+  if (context.phase === lastPhase || !report.outcome) delete context.phase;
+  const result = report.outcome?.fields ?? {};
+  if (context.presented_error === result.kind || context.presented_error === result["error.kind"])
+    delete context.presented_error;
+  for (const [key, value] of Object.entries(context)) {
+    if (result[key] === value) delete context[key];
+  }
+}
+
+function compactDimensions(context: DiagnosticFields, result: DiagnosticFields) {
+  const width = result["canvas.width"] ?? context["canvas.width"];
+  const height = result["canvas.height"] ?? context["canvas.height"];
+  for (const prefix of ["selection", "maximum", "selection.size", "selection.maximum"]) {
+    if (context[`${prefix}.width`] === width && context[`${prefix}.height`] === height) {
+      delete context[`${prefix}.width`];
+      delete context[`${prefix}.height`];
+    }
+  }
+  for (const [maximum, selected] of [
+    ["maximum", "selection"],
+    ["selection.maximum", "selection.size"],
+  ]) {
+    if (
+      context[`${maximum}.width`] === context[`${selected}.width`] &&
+      context[`${maximum}.height`] === context[`${selected}.height`]
+    ) {
+      delete context[`${maximum}.width`];
+      delete context[`${maximum}.height`];
+    }
+  }
+  if (
+    typeof width === "number" &&
+    typeof height === "number" &&
+    context.canvas_bytes === width * height * 4
+  )
+    delete context.canvas_bytes;
+  return { width, height };
+}
+
+function groupContext(context: DiagnosticFields): Map<string, DiagnosticFields> {
+  const groups = new Map<string, DiagnosticFields>();
+  for (const [key, value] of Object.entries(context)) {
+    if (value === "") continue;
+    const dot = key.indexOf(".");
+    const group = dot < 0 ? "context" : key.slice(0, dot);
+    const fields = groups.get(group) ?? {};
+    fields[dot < 0 ? key : key.slice(dot + 1)] = value;
+    groups.set(group, fields);
+  }
+  return groups;
 }
 
 export function formatDiagnosticReport(report: DiagnosticReport): string {
-  const fields = (facts: DiagnosticFields) =>
-    Object.entries(facts)
-      .map(([key, value]) => `${key}: ${value}`)
-      .join("\n");
+  const context = { ...report.context };
+  const source = takeSource(context);
+  const runtime = takeRuntime(context);
+  compactContext(context, report);
+  const { width, height } = compactDimensions(context, report.outcome?.fields ?? {});
+  const groups = groupContext(context);
+  const samples = new Set(
+    report.failures.flatMap((group) => [group.first.sequence, group.last.sequence]),
+  );
+  const isOutcome = (record: DiagnosticRecord) =>
+    record.event === report.outcome?.event &&
+    JSON.stringify(record.fields) === JSON.stringify(report.outcome.fields);
+  const timeline = report.records.filter(
+    (record) => !samples.has(record.sequence) && !isOutcome(record),
+  );
+  const formatTimeline = (record: DiagnosticRecord) => {
+    const fields = { ...record.fields };
+    if (fields["canvas.width"] === width) delete fields["canvas.width"];
+    if (fields["canvas.height"] === height) delete fields["canvas.height"];
+    return formatDiagnosticRecord({ ...record, fields });
+  };
   return [
-    `Dezoomify diagnostics v${report.schema_version} · ${report.id}`,
     report.outcome
       ? `Outcome: ${formatDiagnosticRecord(report.outcome)}`
       : `Status: ${report.context.phase ?? "running"}`,
-    fields(report.context),
-    `Counts\n${fields(report.counters)}`,
-    ...report.failures.map(
-      (group) =>
-        `Problem (${group.count} observations): ${formatDiagnosticRecord(group.first)}${group.count > 1 ? `\nLatest: ${formatDiagnosticRecord(group.last)}` : ""}`,
-    ),
-    `Timeline\n${report.records.map(formatDiagnosticRecord).join("\n")}`,
+    source,
+    ...report.failures
+      .filter((group) => group.count > 1 || !isOutcome(group.first))
+      .map(
+        (group) =>
+          `Problem (${group.count} observations): ${formatDiagnosticRecord(group.first)}${group.count > 1 ? `\nLatest: ${formatDiagnosticRecord(group.last)}` : ""}`,
+      ),
+    [...groups].map(([name, fields]) => `${name}: ${formatFacts(fields)}`).join("\n"),
+    Object.keys(report.counters).length ? `Counts: ${formatFacts(report.counters)}` : "",
+    timeline.length ? `Timeline\n${timeline.map(formatTimeline).join("\n")}` : "",
+    Object.keys(runtime).length ? `Runtime: ${formatFacts(runtime)}` : "",
     `Omitted records: ${report.omitted_records}; truncated fields: ${report.truncated_fields}`,
+    `Dezoomify diagnostics v${report.schema_version} · ${report.id}`,
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -206,7 +331,11 @@ export function createDiagnosticRecorder(options: {
     state.context = Object.fromEntries(Object.entries(merged).slice(0, 128));
   }
   function observe(progress: Progress): void {
-    context({ phase: progress.phase });
+    context({
+      phase: progress.phase,
+      canonical: progress.source_url,
+      format: progress.source_format,
+    });
     state.counters.tiles_completed = progress.completed;
     if (progress.total != null) state.counters.tiles_total = progress.total;
     if (phase !== progress.phase) {
@@ -218,7 +347,6 @@ export function createDiagnosticRecorder(options: {
         selection: progress.selected,
         maximum: progress.maximum,
         title: progress.title,
-        format: progress.source_format,
       });
   }
   function finish(event: string, fields?: unknown): void {

@@ -37,7 +37,7 @@ jobs:
           fetch-depth: 0
       - id: commit
         run: echo "value=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # pinned
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # pinned
         with:
           toolchain: 1.98.1
       - name: Require green CI for a numbered release
@@ -64,7 +64,7 @@ jobs:
           else
             cargo xtask release plan
           fi
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-plan
           path: target/release-dist
@@ -96,7 +96,7 @@ jobs:
       - uses: ./.github/actions/setup-pnpm
         with:
           install: true
-      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # pinned
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # pinned
         with:
           toolchain: 1.98.1
           targets: wasm32-unknown-unknown
@@ -111,6 +111,8 @@ jobs:
       # install` source compile.
       - uses: ./.github/actions/setup-windows-bundlers
         if: matrix.target == 'desktop-windows-x86_64'
+      - uses: ./.github/actions/setup-nasm
+        if: startsWith(matrix.target, 'cli-') || startsWith(matrix.target, 'desktop-')
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Download plan
         env:
@@ -125,34 +127,31 @@ jobs:
         if: runner.os != 'Windows'
         env:
           DEZOOMIFY_VERSION: ${{ needs.prepare.outputs.version }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ startsWith(matrix.target, 'desktop-') && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          APPLE_CERTIFICATE: ${{ runner.os == 'macOS' && secrets.APPLE_CERTIFICATE || '' }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ runner.os == 'macOS' && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
+          APPLE_SIGNING_IDENTITY: ${{ runner.os == 'macOS' && secrets.APPLE_SIGNING_IDENTITY || '' }}
+          APPLE_ID: ${{ runner.os == 'macOS' && secrets.APPLE_ID || '' }}
+          APPLE_PASSWORD: ${{ runner.os == 'macOS' && secrets.APPLE_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ runner.os == 'macOS' && secrets.APPLE_TEAM_ID || '' }}
         run: |
           v="$DEZOOMIFY_VERSION"
           cargo xtask release build --plan "target/release-dist/$v/plan.json" --target "${{ matrix.target }}"
           rm "target/release-dist/$v/plan.json" "target/release-dist/$v/notes.md"
-      - name: Verify packaged macOS app signature
-        if: matrix.target == 'desktop-macos-aarch64'
-        env:
-          DEZOOMIFY_VERSION: ${{ needs.prepare.outputs.version }}
-        run: |
-          set -euo pipefail
-          DMG="target/release-dist/$DEZOOMIFY_VERSION/desktop-macos-aarch64/dezoomify-desktop-v$DEZOOMIFY_VERSION-macos-aarch64.dmg"
-          MNT="$(mktemp -d)"
-          trap 'hdiutil detach "$MNT"; rmdir "$MNT"' EXIT
-          printf 'Y\n' | hdiutil attach "$DMG" -nobrowse -readonly -mountpoint "$MNT"
-          cmp target/desktop-dmg/background.png "$MNT/.background/background.png"
-          test -s "$MNT/.DS_Store"
-          codesign --verify --deep --strict --verbose=4 "$MNT/Dezoomify.app"
       - name: Build artifact (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         env:
           DEZOOMIFY_VERSION: ${{ needs.prepare.outputs.version }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           $v = $env:DEZOOMIFY_VERSION
           cargo xtask release build --plan "target/release-dist/$v/plan.json" --target "${{ matrix.target }}"
           if ($LASTEXITCODE -ne 0) { throw "release artifact build failed" }
           Remove-Item "target/release-dist/$v/plan.json", "target/release-dist/$v/notes.md"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-${{ matrix.target }}
           path: target/release-dist
@@ -166,7 +165,7 @@ jobs:
         with:
           ref: ${{ needs.prepare.outputs.commit }}
           fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # pinned
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # pinned
         with:
           toolchain: 1.98.1
       - name: Reassemble artifacts
@@ -182,7 +181,7 @@ jobs:
         run: |
           v="${{ needs.prepare.outputs.version }}"
           cargo xtask release verify --plan "target/release-dist/$v/plan.json" --artifacts "target/release-dist/$v"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-verified
           path: target/release-dist
@@ -199,7 +198,7 @@ jobs:
         with:
           ref: ${{ needs.prepare.outputs.commit }}
           fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # pinned
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # pinned
         with:
           toolchain: 1.98.1
       - name: Download verified artifacts

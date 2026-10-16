@@ -38,6 +38,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
     run_typecheck()?;
     super::style::verify(&[])?;
     super::content::verify(&[])?;
+    super::bindings::check_codec_manifest()?;
     let status = std::process::Command::new("node")
         .args(["scripts/generate-desktop-capabilities.mjs", "--check"])
         .current_dir(super::repo_root())

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { classifyProxyFailure, createWebFetcher } from "../src/web-fetch.ts";
+import { classifyProxyFailure, createWebFetcher, isProxyEligible } from "../src/web-fetch.ts";
 
 function request(uri, purpose = "metadata", headers = []) {
   return { uri, purpose, headers };
@@ -25,6 +25,95 @@ function makeFetcher(fetchImpl, extra = {}) {
   });
   return { fetcher, events };
 }
+
+test("direct ranges retain exact bytes and qualify for public proxy fallback", async () => {
+  const input = request("https://a.test/image.zif", "metadata", [
+    { name: "Range", value: "bytes=10-13" },
+  ]);
+  assert.equal(isProxyEligible(input).eligible, true);
+  const { fetcher } = makeFetcher(async (_url, init) => {
+    assert.equal(init.headers.Range, "bytes=10-13");
+    return new Response("data", { status: 206, headers: { "content-range": "bytes 10-13/100" } });
+  });
+  assert.equal(
+    new TextDecoder().decode((await fetcher.fetchResource(input, signal)).bytes),
+    "data",
+  );
+});
+
+test("ignored direct byte ranges preserve their cause without proxying", async () => {
+  const { fetcher } = makeFetcher(async () => new Response("whole file"), {
+    isProxyEligible,
+    proxyTransport: {
+      fetchViaProxy: () => assert.fail("invalid ranges must not fall back to proxying"),
+    },
+  });
+  await assert.rejects(
+    fetcher.fetchResource(
+      request("https://a.test/image.zif", "tile", [{ name: "Range", value: "bytes=10-13" }]),
+      signal,
+    ),
+    { kind: "bad-url", detail: "invalid byte-range response: expected HTTP 206, received 200" },
+  );
+});
+
+test("CORS-hidden range headers use the relay without accepting unlocated bytes", async () => {
+  for (const purpose of ["metadata", "tile", "probe"]) {
+    let cancelled = false;
+    let proxyCalls = 0;
+    const response = new Response(
+      new ReadableStream({
+        cancel() {
+          cancelled = true;
+        },
+      }),
+      { status: 206 },
+    );
+    Object.defineProperty(response, "type", { value: "cors" });
+    const input = request("https://a.test/image.zif", purpose, [
+      { name: "Range", value: "bytes=10-13" },
+    ]);
+    const { fetcher } = makeFetcher(async () => response, {
+      isProxyEligible,
+      proxyTransport: {
+        async fetchViaProxy(received) {
+          assert.equal(received, input);
+          assert.equal(cancelled, true);
+          proxyCalls += 1;
+          return { ok: true, status: 206, bytes: new Uint8Array([1, 2, 3, 4]).buffer };
+        },
+      },
+    });
+    const result = await fetcher.fetchResource(input, signal);
+    assert.deepEqual([...result.bytes], [1, 2, 3, 4]);
+    assert.equal(proxyCalls, 1);
+  }
+});
+
+test("tile proxy throttling returns to Rust without a Host retry", async () => {
+  let proxyCalls = 0;
+  const { fetcher } = makeFetcher(
+    async () => {
+      throw new TypeError("CORS");
+    },
+    {
+      isProxyEligible,
+      sleepFn: () => assert.fail("tile retries belong to Rust"),
+      proxyTransport: {
+        async fetchViaProxy() {
+          proxyCalls += 1;
+          return { ok: false, status: 429, code: "PROXY_RATE_LIMITED", retryAfterMs: 3000 };
+        },
+      },
+    },
+  );
+  await assert.rejects(fetcher.fetchResource(request("https://a.test/0.jpg", "tile"), signal), {
+    kind: "rate-limited",
+    transport: "metadata-proxy",
+    retry_after_ms: 3000,
+  });
+  assert.equal(proxyCalls, 1);
+});
 
 test("direct metadata keeps the final URI and readable bytes", async () => {
   const response = new Response(new Uint8Array([1, 2]), {

@@ -40,6 +40,7 @@ async fn run(inputs: Vec<JobInput>, options: &Options, host: &impl Host) -> Resu
     let mut progress = Progress {
         phase: ProgressPhase::Planning,
         source_format: Some(image.format.into()),
+        source_url: image.source_url.clone(),
         title: image.title.clone(),
         selected: image.levels[level].source.image_size().map(size),
         maximum: image
@@ -54,6 +55,36 @@ async fn run(inputs: Vec<JobInput>, options: &Options, host: &impl Host) -> Resu
     };
     host.report(progress.clone());
     host.checkpoint(Gate::Cancellation).await?;
+    let plan = prepare_plan(&image, level, options, host).await?;
+    let canvas = plan.canvas.clone();
+    let reused_tiles = acquire_plan(plan, host, options, &mut progress).await?;
+    host.checkpoint(Gate::Acquisition).await?;
+    progress.phase = ProgressPhase::Output;
+    host.report(progress);
+    host.finish(FinishRequest {
+        canvas,
+        format: options.output,
+        title: image.title,
+        reused_tiles,
+    })
+    .await
+}
+
+struct AcquisitionPlan {
+    source: TileSource,
+    previous: Vec<Vec2d>,
+    lower: Vec<core::tile_plan::Grid>,
+    canvas: Option<Size>,
+    base_count: u64,
+    total: u64,
+}
+
+async fn prepare_plan(
+    image: &core::ResolvedImage,
+    level: usize,
+    options: &Options,
+    host: &impl Host,
+) -> Result<AcquisitionPlan, Error> {
     let (source, previous) = match &image.levels[level].source {
         TileSource::Adaptive(source) => {
             let resolved = source
@@ -73,36 +104,7 @@ async fn run(inputs: Vec<JobInput>, options: &Options, host: &impl Host) -> Resu
         TileSource::Positioned(source) => (TileSource::Positioned(source.clone()), Vec::new()),
     };
     let base_count = source.count().ok_or_else(empty_plan)?;
-    // ZIF can reuse the source pyramid without asking a pixel encoder to
-    // reproduce its codec or JPEG sampling. Keep requests lazy and preserve
-    // the selected level as the full-size output.
-    let mut lower = Vec::new();
-    if options.output == OutputFormat::Zif
-        && let TileSource::Grid(base) = &source
-        && base.overlap() == Vec2d::default()
-        && base.tile_size().x == base.tile_size().y
-        && base.tile_size().x.is_multiple_of(16)
-    {
-        let mut dimensions = base.image_size();
-        while dimensions.x > base.tile_size().x || dimensions.y > base.tile_size().y {
-            dimensions = Vec2d {
-                x: dimensions.x.div_ceil(2),
-                y: dimensions.y.div_ceil(2),
-            };
-            if let Some(grid) = image.levels.iter().find_map(|level| match &level.source {
-                TileSource::Grid(grid)
-                    if grid.image_size() == dimensions
-                        && grid.tile_size() == base.tile_size()
-                        && grid.overlap() == Vec2d::default() =>
-                {
-                    Some(grid.clone())
-                }
-                _ => None,
-            }) {
-                lower.push(grid);
-            }
-        }
-    }
+    let lower = reusable_levels(options.output, &source, image);
     let total = base_count + lower.iter().map(core::tile_plan::Grid::count).sum::<u64>();
     if total == 0 {
         return Err(empty_plan());
@@ -129,6 +131,68 @@ async fn run(inputs: Vec<JobInput>, options: &Options, host: &impl Host) -> Resu
         title: image.title.clone(),
     })
     .await?;
+    Ok(AcquisitionPlan {
+        source,
+        previous,
+        lower,
+        canvas,
+        base_count,
+        total,
+    })
+}
+
+fn reusable_levels(
+    output: OutputFormat,
+    source: &TileSource,
+    image: &core::ResolvedImage,
+) -> Vec<core::tile_plan::Grid> {
+    // ZIF can reuse the source pyramid without asking a pixel encoder to
+    // reproduce its codec or JPEG sampling. Keep requests lazy and preserve
+    // the selected level as the full-size output.
+    let mut lower = Vec::new();
+    if output == OutputFormat::Zif
+        && let TileSource::Grid(base) = source
+        && base.overlap() == Vec2d::default()
+        && base.tile_size().x == base.tile_size().y
+        && base.tile_size().x.is_multiple_of(16)
+    {
+        let mut dimensions = base.image_size();
+        while dimensions.x > base.tile_size().x || dimensions.y > base.tile_size().y {
+            dimensions = Vec2d {
+                x: dimensions.x.div_ceil(2),
+                y: dimensions.y.div_ceil(2),
+            };
+            if let Some(grid) = image.levels.iter().find_map(|level| match &level.source {
+                TileSource::Grid(grid)
+                    if grid.image_size() == dimensions
+                        && grid.tile_size() == base.tile_size()
+                        && grid.overlap() == Vec2d::default() =>
+                {
+                    Some(grid.clone())
+                }
+                _ => None,
+            }) {
+                lower.push(grid);
+            }
+        }
+    }
+    lower
+}
+
+async fn acquire_plan(
+    plan: AcquisitionPlan,
+    host: &impl Host,
+    options: &Options,
+    progress: &mut Progress,
+) -> Result<Vec<ReusedTile>, Error> {
+    let AcquisitionPlan {
+        source,
+        previous,
+        lower,
+        canvas,
+        base_count,
+        total,
+    } = plan;
     let tiles: Box<dyn Iterator<Item = Result<TileSpec, core::TileSourceError>>> = match source {
         TileSource::Grid(grid) => Box::new(grid.tiles_row_major()),
         TileSource::Positioned(source) => Box::new(source.tiles()),
@@ -161,86 +225,25 @@ async fn run(inputs: Vec<JobInput>, options: &Options, host: &impl Host) -> Resu
             tile.map(|tile| portable_tile(tile, canvas.clone()))
                 .map_err(Error::from)
         });
-    let mut missing = acquire_round(tiles, host, options, &mut progress).await?;
-    if progress.completed == 0 {
-        // Lower levels cannot turn an unusable selected image into success.
-        let settled: Vec<&Error> = missing.iter().flat_map(|(_, f)| f.iter()).collect();
-        return Err(Error::NoUsableTiles {
-            transient: settled.iter().any(|f| f.retryable()),
-            retry_after_ms: settled.iter().filter_map(|f| f.retry_after_ms()).max(),
-        });
-    }
+    acquire_tiles(tiles, host, options, progress).await?;
     let mut offset = base_count as u32;
     for grid in lower {
         let dimensions = Some(size(grid.image_size()));
         let count = grid.count() as u32;
-        missing.extend(
-            acquire_round(
-                grid.tiles_row_major().map(|tile| {
-                    let mut tile = portable_tile(tile.map_err(Error::from)?, dimensions.clone());
-                    tile.index += offset;
-                    Ok(tile)
-                }),
-                host,
-                options,
-                &mut progress,
-            )
-            .await?,
-        );
+        acquire_tiles(
+            grid.tiles_row_major().map(|tile| {
+                let mut tile = portable_tile(tile.map_err(Error::from)?, dimensions.clone());
+                tile.index += offset;
+                Ok(tile)
+            }),
+            host,
+            options,
+            progress,
+        )
+        .await?;
         offset += count;
     }
-    while !missing.is_empty() {
-        missing.sort_by_key(|(tile, _)| tile.index);
-        host.checkpoint(Gate::Acquisition).await?;
-        let choice = match options.partial {
-            PartialPolicy::Keep => RecoveryChoice::Keep,
-            PartialPolicy::Discard => RecoveryChoice::Discard,
-            PartialPolicy::Prompt => {
-                host.choose_partial(MissingTiles {
-                    missing: missing
-                        .iter()
-                        .map(|(tile, failures)| MissingTile {
-                            tile: tile.index,
-                            failures: failures.clone(),
-                        })
-                        .collect(),
-                })
-                .await?
-            }
-        };
-        match choice {
-            RecoveryChoice::Keep => break,
-            RecoveryChoice::Discard => {
-                // Like the no-usable-tiles aggregate: derived facts only.
-                let settled: Vec<&Error> = missing.iter().flat_map(|(_, f)| f.iter()).collect();
-                return Err(Error::PartialDiscarded {
-                    transient: settled.iter().any(|f| f.retryable()),
-                    retry_after_ms: settled.iter().filter_map(|f| f.retry_after_ms()).max(),
-                });
-            }
-            RecoveryChoice::Retry => {
-                let retry = std::mem::take(&mut missing);
-                missing = acquire_round(
-                    retry.into_iter().map(|(tile, _)| Ok(tile)),
-                    host,
-                    options,
-                    &mut progress,
-                )
-                .await?;
-            }
-        }
-    }
-    host.checkpoint(Gate::Acquisition).await?;
-    progress.phase = ProgressPhase::Output;
-    host.report(progress);
-    host.finish(FinishRequest {
-        canvas,
-        format: options.output,
-        title: image.title,
-        missing: missing.into_iter().map(|(tile, _)| tile.index).collect(),
-        reused_tiles,
-    })
-    .await
+    Ok(reused_tiles)
 }
 
 async fn discover(
@@ -257,141 +260,25 @@ async fn discover(
     };
     let catalog = registry
         .discover(
-            inputs
-                .into_iter()
-                .map(|input| DiscoveryInput {
-                    url: input.url,
-                    contents: input.contents.map(String::into_bytes),
-                    kind: input.kind.unwrap_or_default(),
-                })
-                .collect(),
+            inputs.into_iter().map(DiscoveryInput::from).collect(),
             DiscoveryLimits {
                 concurrent: options.max_concurrent as usize,
                 ..Default::default()
             },
-            |request, interaction| async move {
-                host.checkpoint(Gate::Cancellation).await?;
-                let uri = request.uri.clone();
-                let result = host
-                    .fetch(
-                        ResourceRequest {
-                            uri: request.uri,
-                            headers: request.headers,
-                            purpose: RequestPurpose::Metadata,
-                        },
-                        interaction,
-                    )
-                    .await
-                    .map_err(|error| match error {
-                        Error::Resource { .. } => error,
-                        other => other.resource(uri.clone(), ResourceKind::Metadata),
-                    })?;
-                if let ResourceRead::Response { response } = &result {
-                    if let Some(final_uri) =
-                        response.final_uri.as_ref().filter(|uri| !uri.is_empty())
-                    {
-                        let mut followed = followed.borrow_mut();
-                        if followed.contains(&uri) {
-                            followed.insert(final_uri.clone());
-                        }
-                    }
-                    let read = response
-                        .final_uri
-                        .as_deref()
-                        .filter(|uri| !uri.is_empty())
-                        .unwrap_or(&uri)
-                        .to_string();
-                    if response.bytes.is_empty() {
-                        return Err(Error::EmptyResource.resource(read, ResourceKind::Metadata));
-                    }
-                    if u64::try_from(response.bytes.len()).unwrap_or(u64::MAX) > options.max_bytes {
-                        return Err(Error::ResourceLimit(
-                            format!("metadata resource exceeds max_bytes {}", options.max_bytes)
-                                .into(),
-                        )
-                        .resource(read, ResourceKind::Metadata));
-                    }
-                }
-                Ok(result)
-            },
+            |request, interaction| fetch_metadata(request, interaction, options, host, followed),
             |query| host.parse_html(query),
+            |interaction| async move {
+                host.checkpoint(Gate::Cancellation).await?;
+                Ok(host
+                    .observe(interaction)
+                    .await?
+                    .into_iter()
+                    .map(DiscoveryInput::from)
+                    .collect())
+            },
         )
         .await
-        .map_err(|error| match error {
-            core::DiscoveryError::Host(error) => *error,
-            error => {
-                // A document some format parsed as an empty image is
-                // `no-image-found`; an unparseable or unrecognized document
-                // is `malformed-metadata`/`discovery-failed`. When every
-                // candidate failed on observed fetch facts, the first typed
-                // cause stays attached: its context and retry verdict are
-                // the authoritative ones.
-                let cause = match &error {
-                    core::DiscoveryError::NoCandidateAccepted { diagnostics }
-                        if diagnostics.iter().all(|diagnostic| {
-                            matches!(
-                                diagnostic.kind,
-                                core::RejectionKind::FetchFailed
-                                    | core::RejectionKind::DidNotMatchUrl
-                            )
-                        }) =>
-                    {
-                        diagnostics
-                            .iter()
-                            .find_map(|diagnostic| diagnostic.cause.clone())
-                    }
-                    _ => None,
-                };
-                let detail = Some(error.detail());
-                let empty_image = matches!(
-                    &error,
-                    core::DiscoveryError::Rejected {
-                        kind: core::RejectionKind::NoImage,
-                        ..
-                    }
-                ) || matches!(&error, core::DiscoveryError::NoCandidateAccepted { diagnostics }
-                if diagnostics.iter().any(|diagnostic| {
-                    diagnostic.kind == core::RejectionKind::NoImage
-                }));
-                let malformed = matches!(
-                    &error,
-                    core::DiscoveryError::InvalidMetadata(_)
-                        | core::DiscoveryError::Rejected {
-                            kind: core::RejectionKind::InvalidMetadata,
-                            ..
-                        }
-                ) || matches!(&error, core::DiscoveryError::NoCandidateAccepted { diagnostics }
-                if !diagnostics.is_empty()
-                    && diagnostics.iter().any(|diagnostic| {
-                        diagnostic.kind == core::RejectionKind::InvalidMetadata
-                    }));
-                match &error {
-                    core::DiscoveryError::ParseLimitExceeded
-                    | core::DiscoveryError::ResourceLimitExceeded
-                    | core::DiscoveryError::MetadataSizeLimitExceeded => {
-                        Error::ResourceLimit(Failure {
-                            request: None,
-                            detail,
-                        })
-                    }
-                    _ if empty_image => Error::NoImageFound(Failure {
-                        request: None,
-                        detail,
-                    }),
-                    _ if cause.is_none() && malformed => Error::MalformedMetadata(Failure {
-                        request: None,
-                        detail,
-                    }),
-                    _ => Error::DiscoveryFailed {
-                        failure: Failure {
-                            request: None,
-                            detail,
-                        },
-                        cause,
-                    },
-                }
-            }
-        })?;
+        .map_err(discovery_failure)?;
     let mut seen = HashSet::new();
     for entry in catalog.entries() {
         let (warnings, levels) = match entry {
@@ -410,6 +297,132 @@ async fn discover(
     Ok(catalog)
 }
 
+async fn fetch_metadata(
+    request: core::Request,
+    interaction: Interaction,
+    options: &Options,
+    host: &impl Host,
+    followed: &RefCell<HashSet<String>>,
+) -> Result<ResourceRead, Error> {
+    host.checkpoint(Gate::Cancellation).await?;
+    let uri = request.uri.clone();
+    let result = host
+        .fetch(
+            ResourceRequest {
+                uri: request.uri,
+                headers: request.headers,
+                purpose: RequestPurpose::Metadata,
+            },
+            interaction,
+        )
+        .await
+        .map_err(|error| match error {
+            Error::Resource { .. } => error,
+            other => other.resource(uri.clone(), ResourceKind::Metadata),
+        })?;
+    if let ResourceRead::Response { response } = &result {
+        if let Some(final_uri) = response.final_uri.as_ref().filter(|uri| !uri.is_empty()) {
+            let mut followed = followed.borrow_mut();
+            if followed.contains(&uri) {
+                followed.insert(final_uri.clone());
+            }
+        }
+        let read = response
+            .final_uri
+            .as_deref()
+            .filter(|uri| !uri.is_empty())
+            .unwrap_or(&uri)
+            .to_string();
+        if response.bytes.is_empty() {
+            return Err(Error::EmptyResource.resource(read, ResourceKind::Metadata));
+        }
+        if u64::try_from(response.bytes.len()).unwrap_or(u64::MAX) > options.max_bytes {
+            return Err(Error::ResourceLimit(
+                format!("metadata resource exceeds max_bytes {}", options.max_bytes).into(),
+            )
+            .resource(read, ResourceKind::Metadata));
+        }
+    }
+    Ok(result)
+}
+
+fn discovery_failure(error: core::DiscoveryError) -> Error {
+    match error {
+        core::DiscoveryError::Host(error) => *error,
+        error => {
+            // A document some format parsed as an empty image is
+            // `no-image-found`; an unparseable or unrecognized document
+            // is `malformed-metadata`/`discovery-failed`. When every
+            // candidate failed on observed fetch facts, the first typed
+            // cause stays attached: its context and retry verdict are
+            // the authoritative ones.
+            let cause = match &error {
+                core::DiscoveryError::NoCandidateAccepted { diagnostics }
+                    if diagnostics.iter().all(|diagnostic| {
+                        matches!(
+                            diagnostic.kind,
+                            core::RejectionKind::FetchFailed | core::RejectionKind::DidNotMatchUrl
+                        )
+                    }) =>
+                {
+                    diagnostics
+                        .iter()
+                        .find_map(|diagnostic| diagnostic.cause.clone())
+                }
+                _ => None,
+            };
+            let detail = Some(error.detail());
+            let empty_image = matches!(
+                &error,
+                core::DiscoveryError::Rejected {
+                    kind: core::RejectionKind::NoImage,
+                    ..
+                }
+            ) || matches!(&error, core::DiscoveryError::NoCandidateAccepted { diagnostics }
+            if diagnostics.iter().any(|diagnostic| {
+                diagnostic.kind == core::RejectionKind::NoImage
+            }));
+            let malformed = matches!(
+                &error,
+                core::DiscoveryError::InvalidMetadata(_)
+                    | core::DiscoveryError::Rejected {
+                        kind: core::RejectionKind::InvalidMetadata,
+                        ..
+                    }
+            ) || matches!(&error, core::DiscoveryError::NoCandidateAccepted { diagnostics }
+            if !diagnostics.is_empty()
+                && diagnostics.iter().any(|diagnostic| {
+                    diagnostic.kind == core::RejectionKind::InvalidMetadata
+                }));
+            match &error {
+                core::DiscoveryError::ParseLimitExceeded
+                | core::DiscoveryError::ResourceLimitExceeded
+                | core::DiscoveryError::MetadataSizeLimitExceeded => {
+                    Error::ResourceLimit(Failure {
+                        request: None,
+                        detail,
+                    })
+                }
+                _ if empty_image => Error::NoImageFound(Failure {
+                    request: None,
+                    detail,
+                }),
+                _ if cause.is_none() && malformed => Error::MalformedMetadata(Failure {
+                    request: None,
+                    detail,
+                }),
+                _ => Error::DiscoveryFailed {
+                    failure: Failure {
+                        request: None,
+                        detail,
+                    },
+                    cause,
+                },
+            }
+        }
+    }
+}
+
 async fn select(
     mut catalog: DiscoveryCatalog,
     options: &Options,
@@ -422,31 +435,7 @@ async fn select(
         if catalog.is_empty() {
             return Err(empty_plan());
         }
-        let index = match &options.selection {
-            SelectionPolicy::Interactive => {
-                host.choose_image(catalog.public_catalog()).await? as usize
-            }
-            SelectionPolicy::Automatic { image_index, .. } => (*image_index).min(catalog.len() - 1),
-            SelectionPolicy::Fitting { .. } => catalog
-                .entries()
-                .iter()
-                .enumerate()
-                .filter_map(|(index, entry)| match entry {
-                    DiscoveredEntry::Ready(image) => Some((
-                        index,
-                        image
-                            .levels
-                            .iter()
-                            .filter_map(|level| level.source.image_size())
-                            .map(|size| size.area())
-                            .max()
-                            .unwrap_or(0),
-                    )),
-                    _ => None,
-                })
-                .max_by_key(|(_, area)| *area)
-                .map_or(0, |(index, _)| index),
-        };
+        let index = host.choose_image(catalog.public_catalog()).await? as usize;
         let Some(entry) = catalog.into_entries().into_iter().nth(index) else {
             return Err(Error::InvalidState(
                 "image selection is out of range".to_string().into(),
@@ -464,12 +453,7 @@ async fn select(
                     discover(vec![JobInput::new(&resource.uri)], options, host, followed).await?;
             }
             DiscoveredEntry::Ready(image) => {
-                let level = match &options.selection {
-                    SelectionPolicy::Interactive => {
-                        host.choose_level((&image).into()).await? as usize
-                    }
-                    policy => select_level(&image, policy).ok_or_else(empty_plan)?,
-                };
+                let level = host.choose_level((&image).into()).await? as usize;
                 if level >= image.levels.len() {
                     return Err(Error::InvalidState(
                         "level selection is out of range".to_string().into(),
@@ -478,69 +462,6 @@ async fn select(
                 return Ok((image, level));
             }
         }
-    }
-}
-
-fn select_level(image: &core::ResolvedImage, policy: &SelectionPolicy) -> Option<usize> {
-    let levels = &image.levels;
-    match policy {
-        SelectionPolicy::Fitting {
-            max_width,
-            max_height,
-            max_area,
-        } => {
-            let sizes = || {
-                levels.iter().enumerate().filter_map(|(i, l)| {
-                    l.source
-                        .image_size()
-                        .filter(|s| s.x > 0 && s.y > 0)
-                        .map(|s| (i, s))
-                })
-            };
-            sizes()
-                .filter(|(_, s)| s.x <= *max_width && s.y <= *max_height && s.area() <= *max_area)
-                .max_by_key(|(_, s)| s.area())
-                .or_else(|| sizes().min_by_key(|(_, s)| s.area()))
-                .map(|(i, _)| i)
-                .or_else(|| levels.len().checked_sub(1))
-        }
-        SelectionPolicy::Automatic {
-            largest,
-            max_width,
-            max_height,
-            zoom_level,
-            ..
-        } => {
-            if let Some(level) = zoom_level {
-                return levels.len().checked_sub(1).map(|last| (*level).min(last));
-            }
-            if *largest || (max_width.is_none() && max_height.is_none()) {
-                return levels
-                    .iter()
-                    .enumerate()
-                    .max_by_key(|(_, l)| l.source.image_size().map_or(0, |size| size.area()))
-                    .map(|(i, _)| i);
-            }
-            levels
-                .iter()
-                .enumerate()
-                .filter(|(_, l)| {
-                    l.source.image_size().is_some_and(|s| {
-                        max_width.is_none_or(|cap| s.x > 0 && s.x <= cap)
-                            && max_height.is_none_or(|cap| s.y > 0 && s.y <= cap)
-                    })
-                })
-                .max_by_key(|(_, l)| l.source.image_size().map_or(0, |size| size.area()))
-                .map(|(i, _)| i)
-                .or_else(|| {
-                    levels
-                        .iter()
-                        .enumerate()
-                        .min_by_key(|(_, l)| l.source.image_size().map_or(u32::MAX, |s| s.x))
-                        .map(|(i, _)| i)
-                })
-        }
-        SelectionPolicy::Interactive => None,
     }
 }
 
@@ -596,58 +517,60 @@ pub(crate) async fn probe(
     }
 }
 
-async fn acquire_round(
+async fn acquire_tiles(
     tiles: impl Iterator<Item = Result<Tile, Error>>,
     host: &impl Host,
     options: &Options,
     progress: &mut Progress,
-) -> Result<Vec<(Tile, Vec<Error>)>, Error> {
-    let mut missing = Vec::new();
+) -> Result<(), Error> {
     let acquisitions =
         stream::iter(tiles.map(|tile| async { acquire(host, tile?, options).await }));
     let mut pending = acquisitions.buffer_unordered(options.max_concurrent as usize);
     while let Some(result) = pending.next().await {
-        let (tile, failures) = result?;
-        if let Some(failures) = failures {
-            missing.push((tile, failures));
-        } else {
-            progress.completed += 1;
-        }
+        result?;
+        progress.completed += 1;
         host.report(progress.clone());
     }
-    Ok(missing)
+    Ok(())
 }
 
-async fn acquire(
-    host: &impl Host,
-    tile: Tile,
-    options: &Options,
-) -> Result<(Tile, Option<Vec<Error>>), Error> {
-    let mut failures = Vec::new();
-    for attempt in 0..=options.max_retries {
+async fn acquire(host: &impl Host, tile: Tile, options: &Options) -> Result<(), Error> {
+    let mut attempt = 0;
+    let mut previous_failure = None;
+    loop {
         host.checkpoint(Gate::Acquisition).await?;
-        match host.acquire_tile(tile.clone()).await {
-            Ok(()) => return Ok((tile, None)),
-            Err(error) if error.is_terminal() || error.is_output() => {
-                return Err(error);
-            }
+        let request = TileAcquisition {
+            tile: tile.clone(),
+            attempt,
+            requires_approval: attempt > options.max_retries,
+            previous_failure,
+        };
+        match host.acquire_tile(request).await {
+            Ok(()) => return Ok(()),
+            Err(error) if error.is_terminal() || error.is_output() => return Err(error),
             Err(error) => {
-                let retry = error.retryable() && attempt < options.max_retries;
+                if !error.retryable()
+                    || (!options.interactive_retries && attempt >= options.max_retries)
+                    || attempt == u32::MAX
+                {
+                    return Err(Error::TileFailed {
+                        tile: tile.index,
+                        attempts: attempt.saturating_add(1),
+                        cause: Box::new(error),
+                    });
+                }
                 let delay = crate::retry::retry_delay_ms(
                     attempt + 1,
                     error.retry_after_ms(),
                     options.retry_base_delay_ms,
                 );
-                failures.push(error);
-                if !retry {
-                    break;
-                }
+                previous_failure = Some(Box::new(error));
+                attempt += 1;
                 host.checkpoint(Gate::Acquisition).await?;
                 host.sleep(delay as u32).await?;
             }
         }
     }
-    Ok((tile, Some(failures)))
 }
 
 fn empty_plan() -> Error {
@@ -717,17 +640,6 @@ fn validate(inputs: &[JobInput], options: &Options) -> Result<(), Error> {
     if options.max_concurrent > options.max_tiles {
         return Err(Error::InvalidOptions(
             "max_concurrent cannot exceed max_tiles".to_string().into(),
-        ));
-    }
-    if let SelectionPolicy::Fitting {
-        max_width,
-        max_height,
-        max_area,
-    } = options.selection
-        && (max_width == 0 || max_height == 0 || max_area == 0)
-    {
-        return Err(Error::InvalidOptions(
-            "canvas limits must be positive".to_string().into(),
         ));
     }
     if inputs.iter().any(|input| {

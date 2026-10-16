@@ -22,8 +22,6 @@ const document = new TextEncoder().encode(
   '<Image TileSize="256" Overlap="0" Format="jpg" xmlns="http://schemas.microsoft.com/deepzoom/2008"><Size Width="512" Height="512"/></Image>',
 );
 const options = {
-  selection: { kind: "automatic", image_index: 0, largest: true },
-  partial: "keep",
   max_concurrent: 2,
   max_retries: 0,
 };
@@ -32,6 +30,9 @@ function host(overrides = {}) {
   const observed = { reads: [], tiles: [], progress: [], warnings: [], delays: [], settled: 0 };
   return {
     observed,
+    async observe() {
+      return [];
+    },
     async parseHtml() {
       return {}; // These bridge fixtures use XML metadata and need no HTML projections.
     },
@@ -47,7 +48,7 @@ function host(overrides = {}) {
       assert.equal(observed.tiles.length, 0);
       observed.plan = plan;
     },
-    async acquireTile(tile) {
+    async acquireTile({ tile }) {
       await Promise.resolve();
       observed.tiles.push(tile);
     },
@@ -55,7 +56,6 @@ function host(overrides = {}) {
       return {
         canvas: request.canvas,
         format: request.format,
-        missing: request.missing,
         disposition: "browser-save-ready",
       };
     },
@@ -64,9 +64,6 @@ function host(overrides = {}) {
     },
     async chooseLevel(image) {
       return image.levels.length - 1;
-    },
-    async choosePartial() {
-      return "keep";
     },
     async checkpoint() {},
     async sleep(delay) {
@@ -89,7 +86,6 @@ test("async Host reads binary metadata and saves the full selected image", async
   const platform = host();
   const output = await wasm.dezoomify([{ url }], options, platform);
   assert.deepEqual(output.canvas, { width: 512, height: 512 });
-  assert.deepEqual(output.missing, []);
   assert.equal(output.disposition, "browser-save-ready");
   assert.equal(platform.observed.tiles.length, 4);
   assert.deepEqual(platform.observed.plan.grid, {
@@ -102,6 +98,36 @@ test("async Host reads binary metadata and saves the full selected image", async
   assert.ok(platform.observed.progress.some((progress) => progress.completed === 4));
 });
 
+test("additional observations finish the same WASM invocation after inert discovery fails", async () => {
+  const interactions = [];
+  const platform = host({
+    async fetch(request) {
+      platform.observed.reads.push(request);
+      return {
+        kind: "response",
+        response: { bytes: new TextEncoder().encode("<html></html>"), final_uri: request.uri },
+      };
+    },
+    async observe(interaction) {
+      interactions.push(interaction);
+      return interaction === "forbidden"
+        ? []
+        : [
+            {
+              url: "https://viewer.example/#loaded",
+              kind: "observed-metadata",
+              contents: new TextDecoder().decode(document),
+            },
+          ];
+    },
+  });
+  const output = await wasm.dezoomify([{ url: "https://example.com/viewer" }], options, platform);
+  assert.deepEqual(output.canvas, { width: 512, height: 512 });
+  assert.deepEqual(interactions, ["forbidden", "allowed"]);
+  assert.equal(platform.observed.tiles.length, 4);
+  assert.equal(platform.observed.settled, 1);
+});
+
 test("FreezoomPack WASM plans match the native/browser fixture golden", async () => {
   const scenario = path.join(root, "testdata/scenarios/formats/fzp");
   const expected = JSON.parse(readFileSync(path.join(scenario, "expected/result.json"), "utf8"));
@@ -112,6 +138,9 @@ test("FreezoomPack WASM plans match the native/browser fixture golden", async ()
         path.join(scenario, `payloads/127.0.0.1/fzp/resources/${profile}/root.xml`),
       );
       const platform = host({
+        async chooseLevel() {
+          return levels.length - 1 - position;
+        },
         async fetch(request) {
           platform.observed.reads.push(request);
           assert.equal(request.uri, source);
@@ -119,21 +148,8 @@ test("FreezoomPack WASM plans match the native/browser fixture golden", async ()
           return { kind: "response", response: { bytes, final_uri: source } };
         },
       });
-      const output = await wasm.dezoomify(
-        [{ url: source }],
-        {
-          ...options,
-          selection: {
-            kind: "automatic",
-            image_index: 0,
-            largest: false,
-            zoom_level: levels.length - 1 - position,
-          },
-        },
-        platform,
-      );
+      const output = await wasm.dezoomify([{ url: source }], options, platform);
       assert.deepEqual(output.canvas, { width: golden.width, height: golden.height });
-      assert.deepEqual(output.missing, []);
       const tiles = platform.observed.tiles.sort((a, b) => a.index - b.index);
       assert.deepEqual(
         tiles.map((tile) => new URL(tile.request.uri).pathname),
@@ -227,7 +243,7 @@ test("accepted format warnings reach the Host without preventing output", async 
     { ...options, format: "zoomify" },
     platform,
   );
-  assert.deepEqual(output.missing, []);
+  assert.equal(output.disposition, "browser-save-ready");
   assert.deepEqual(platform.observed.warnings, [
     "Zoomify tile count mismatch: computed 5, metadata declares 9",
   ]);
@@ -246,25 +262,32 @@ test("Rust classifies raw Host errors while retaining exact failure context", as
       detail: "Original context",
     },
   };
+  const attempts = [];
   const platform = host({
-    async acquireTile(tile) {
+    async acquireTile(request) {
+      const { tile } = request;
       platform.observed.tiles.push(tile);
-      if (tile.index === 1) throw failure;
-    },
-    async choosePartial({ missing }) {
-      assert.equal(missing.length, 1);
-      assert.equal(missing[0].tile, 1);
-      assert.deepEqual(missing[0].failures, [failure, failure]);
-      return "keep";
+      if (tile.index !== 1) return;
+      attempts.push(request);
+      if (request.requires_approval) {
+        assert.equal(request.attempt, 2);
+        assert.deepEqual(request.previous_failure, failure);
+        return;
+      }
+      throw failure;
     },
   });
-  const output = await wasm.dezoomify(
+  await wasm.dezoomify(
     [{ url }],
-    { ...options, partial: "prompt", max_retries: 1 },
+    { ...options, interactive_retries: true, max_retries: 1 },
     platform,
   );
-  assert.deepEqual(platform.observed.delays, [300000]);
-  assert.deepEqual(output.missing, [1]);
+  assert.deepEqual(platform.observed.delays, [300000, 300000]);
+  assert.deepEqual(
+    attempts.map((request) => request.requires_approval),
+    [false, false, true],
+  );
+  assert.equal(platform.observed.settled, 1);
 });
 
 test("concurrent invocations use distinct Host objects and settle each once", async () => {
@@ -274,7 +297,6 @@ test("concurrent invocations use distinct Host objects and settle each once", as
       return {
         canvas: request.canvas,
         format: request.format,
-        missing: request.missing,
         disposition: "display-only",
       };
     },
@@ -291,31 +313,29 @@ test("concurrent invocations use distinct Host objects and settle each once", as
   assert.equal(right.observed.settled, 1);
 });
 
-test("malformed tile processing remains a permanent missing tile eligible for partial output", async () => {
+test("malformed tile processing aborts without optional retries or finalization", async () => {
+  let finished = false;
   const platform = host({
-    async acquireTile(tile) {
-      platform.observed.tiles.push(tile);
+    async acquireTile({ tile, requires_approval }) {
+      assert.equal(requires_approval, false);
       if (tile.index === 1)
         wasm.applyProcessing("google-arts-decrypt", Uint8Array.of(10, 10, 10, 10));
     },
-    async choosePartial({ missing }) {
-      assert.equal(missing.length, 1);
-      assert.equal(missing[0].tile, 1);
-      // Permanence is derived from the kind.
-      assert.equal(missing[0].failures[0].kind, "processing-failed");
-      return "keep";
+    async finish() {
+      finished = true;
     },
   });
-  assert.throws(() => wasm.applyProcessing("google-arts-decrypt", Uint8Array.of(10, 10, 10, 10)), {
-    kind: "processing-failed",
-  });
-  const output = await wasm.dezoomify(
-    [{ url }],
-    { ...options, partial: "prompt", max_retries: 3 },
-    platform,
+  await assert.rejects(
+    wasm.dezoomify([{ url }], { ...options, interactive_retries: true, max_retries: 3 }, platform),
+    (error) => {
+      assert.equal(error.kind, "tile-failed");
+      assert.equal(error.tile, 1);
+      assert.equal(error.attempts, 1);
+      assert.equal(error.cause.kind, "processing-failed");
+      return true;
+    },
   );
-  assert.deepEqual(output.missing, [1]);
-  assert.equal(platform.observed.tiles.length, 4);
+  assert.equal(finished, false);
   assert.equal(platform.observed.delays.length, 0);
   assert.equal(platform.observed.settled, 1);
 });
@@ -350,4 +370,22 @@ test("cancelled invocation settles late reads before returning and never saves",
   await assert.rejects(running, { kind: "cancelled" });
   assert.equal(platform.observed.settled, 1);
   assert.equal(platform.observed.tiles.length, 0);
+});
+
+test("choice failures and cancellation settle without downloading", async () => {
+  for (const method of ["chooseImage", "chooseLevel"]) {
+    for (const error of [
+      { kind: "cancelled" },
+      { kind: "choice-failed", detail: "choice unavailable" },
+    ]) {
+      const platform = host({
+        [method]: async () => {
+          throw error;
+        },
+      });
+      await assert.rejects(wasm.dezoomify([{ url }], options, platform), error);
+      assert.equal(platform.observed.tiles.length, 0);
+      assert.equal(platform.observed.settled, 1);
+    }
+  }
 });

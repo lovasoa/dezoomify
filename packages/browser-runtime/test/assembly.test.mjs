@@ -228,11 +228,11 @@ test("an empty output plan fails before allocating a canvas", async () => {
   assert.deepEqual(fresh.events.created, []);
 });
 
-test("partial output leaves missing regions empty without failing assembly", async () => {
+test("positioned output preserves uncovered regions", async () => {
   const { assembly, ctx2d } = harness();
   assembly.prepare({ width: 32, height: 32 });
   await assembly.acquireTile(0, placement(0, 0), bytes16(16));
-  // tile:1 never arrived (failed acquisition): only tile:0 draws.
+  // The layout contains one positioned tile on a larger transparent canvas.
   await assembly.finalizeOutput({ width: 32, height: 32 });
   assert.equal(ctx2d.draws.length, 1);
 });

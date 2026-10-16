@@ -3,6 +3,7 @@ import test from "node:test";
 import { createDiagnosticRecorder } from "../../shared-ui/src/diagnostics.ts";
 import { createCanvasAssembly } from "../src/assembly.ts";
 import { BrowserHost } from "../src/browser-host.ts";
+import { MAXIMUM_SELECTION_LIMITS } from "../src/limits.ts";
 import { createTileDecoder } from "../src/tile-decode.ts";
 
 const tick = () => new Promise((resolve) => setImmediate(resolve));
@@ -17,6 +18,13 @@ const tile = {
     role: { probe: false, output: true },
   },
 };
+const acquisition = (tile) => ({
+  tile,
+  attempt: 0,
+  requires_approval: false,
+  previous_failure: undefined,
+});
+
 function setup(overrides = {}) {
   const controller = new AbortController(),
     painted = [],
@@ -38,6 +46,7 @@ function setup(overrides = {}) {
   };
   const deps = {
     signal: controller.signal,
+    selectionLimits: { maxWidth: 300, maxHeight: 300, maxArea: 90000 },
     diagnostics,
     assembly,
     decoder: {
@@ -52,7 +61,7 @@ function setup(overrides = {}) {
       response: { bytes: new Uint8Array([1, 2]), final_uri: null },
     }),
     onProgress: (p) => reports.push(p),
-    choosePartial: async () => "keep",
+    approveRetry: async () => {},
     ...overrides,
   };
   return { host: new BrowserHost(deps), deps, controller, assembly, painted, reports, diagnostics };
@@ -60,7 +69,7 @@ function setup(overrides = {}) {
 
 test("acquisition decodes and paints readable bytes before returning", async () => {
   const h = setup();
-  assert.equal(await h.host.acquireTile(tile), undefined);
+  assert.equal(await h.host.acquireTile(acquisition(tile)), undefined);
   assert.deepEqual([...new Uint8Array(h.painted[0][2])], [1, 2]);
   assert.equal(h.painted[0][0], 0);
   assert.equal(h.painted[0][1], tile.placement);
@@ -126,7 +135,7 @@ test("HTTP failures retain status, retry hints and preview without ordinary-imag
         return { naturalWidth: 256, naturalHeight: 256 };
       },
     });
-    await assert.rejects(h.host.acquireTile(tile), {
+    await assert.rejects(h.host.acquireTile(acquisition(tile)), {
       kind: "resource",
       request: tile.request.uri,
       resource_kind: "tile",
@@ -162,14 +171,53 @@ test("an unreadable origin is classified once across concurrent probes and ordin
   });
   const [measured, ...results] = await Promise.all([
     h.host.probe({ ...tile, placement: { ...tile.placement, role: { output: false } } }),
-    ...[1, 2].map((index) => h.host.acquireTile({ ...tile, index })),
+    ...[1, 2].map((index) => h.host.acquireTile(acquisition({ ...tile, index }))),
   ]);
   assert.deepEqual(measured, { status: "available", width: 256, height: 256 });
   assert.equal(reads, 1);
   assert.equal(displays, 3);
   assert.ok(results.every((result) => result === undefined));
-  await h.host.acquireTile({ ...tile, index: 3 });
+  await h.host.acquireTile(acquisition({ ...tile, index: 3 }));
   assert.equal(reads, 1);
+});
+
+test("ranged tiles require readable bytes even on a display-only origin", async () => {
+  for (const preclassified of [false, true]) {
+    let reads = 0;
+    let displays = 0;
+    const failure = { kind: "network-failure", transport: "direct", detail: "unreadable" };
+    const h = setup({
+      fetchResource: async () => {
+        reads++;
+        throw failure;
+      },
+      loadDisplayImage: async () => {
+        displays++;
+        return { naturalWidth: 256, naturalHeight: 256 };
+      },
+    });
+    if (preclassified) await h.host.acquireTile(acquisition(tile));
+    const beforeReads = reads;
+    const beforeDisplays = displays;
+    const ranged = {
+      ...tile,
+      request: {
+        ...tile.request,
+        uri: "https://tiles.test/image.zif",
+        headers: [{ name: "rAnGe", value: "bytes=10-13" }],
+      },
+    };
+    await assert.rejects(h.host.acquireTile(acquisition(ranged)), {
+      kind: "resource",
+      request: ranged.request.uri,
+      resource_kind: "tile",
+      source: failure,
+    });
+    assert.equal(reads, beforeReads + 1);
+    assert.equal(displays, beforeDisplays);
+    assert.deepEqual(await h.host.probe(ranged), { status: "missing" });
+    assert.equal(displays, beforeDisplays);
+  }
 });
 
 test("processed tiles, policy and resource limits never use ordinary images", async () => {
@@ -201,7 +249,7 @@ test("processed tiles, policy and resource limits never use ordinary images", as
         ? failure
         : { kind: "resource", request: tile.request.uri, resource_kind: "tile", source: failure };
     await assert.rejects(
-      h.host.acquireTile({ ...tile, placement: { ...tile.placement, processing } }),
+      h.host.acquireTile(acquisition({ ...tile, placement: { ...tile.placement, processing } })),
       expected,
     );
     if (["policy-denied", "cancelled"].includes(failure.kind))
@@ -285,7 +333,7 @@ test("only successful ordinary-image loading establishes display-only mode", asy
     throw { kind: "output-unavailable", detail: "paint failed" };
   };
   for (let index = 1; index <= 2; index++)
-    await assert.rejects(h.host.acquireTile({ ...tile, index }), {
+    await assert.rejects(h.host.acquireTile(acquisition({ ...tile, index })), {
       source: { kind: "output-unavailable", detail: "paint failed" },
     });
   assert.equal(
@@ -299,80 +347,84 @@ test("only successful ordinary-image loading establishes display-only mode", asy
 test("decode, processing and painting failures retain their cause without transport fallback", async () => {
   for (const stage of ["decode", "processing", "painting"])
     for (const typed of [true, false]) {
-      const original = typed
-        ? { kind: stage === "painting" ? "output-unavailable" : `${stage}-failed`, detail: stage }
-        : new Error(stage);
-      let reads = 0,
-        displays = 0,
-        closed = 0;
-      const h = setup({
-        decoder: createTileDecoder({
-          createImageBitmap: async () => {
-            if (stage === "decode") throw original;
-            return {
-              width: 256,
-              height: 256,
-              close() {
-                closed++;
-              },
-            };
-          },
-        }),
-        fetchResource: async () => {
-          reads++;
-          return { kind: "response", response: { bytes: [1], final_uri: null } };
-        },
-        loadDisplayImage: async () => {
-          displays++;
-          assert.fail("post-fetch failures cannot trigger fallback");
-        },
-      });
-      h.deps.assembly = createCanvasAssembly({
-        decode: (bytes) => h.deps.decoder.decode(bytes, h.controller.signal),
-        processTile: () => {
-          throw original;
-        },
-        createCanvas: (width, height) => ({
-          width,
-          height,
-          ctx2d: {
-            drawImage() {
-              if (stage === "painting") throw original;
-            },
-          },
-        }),
-      });
-      const input = {
-        ...tile,
-        placement: {
-          ...tile.placement,
-          processing: stage === "processing" ? "google-arts-decrypt" : "none",
-        },
-      };
-      const expectedKind = stage === "painting" ? "internal" : `${stage}-failed`;
-      const rejects = (error) => {
-        assert.equal(error.kind, "resource");
-        assert.equal(error.request, tile.request.uri);
-        assert.equal(error.resource_kind, "tile");
-        if (typed) assert.equal(error.source, original);
-        else {
-          assert.equal(error.source.kind, expectedKind);
-          assert.equal(error.source.detail, String(original));
-        }
-        return true;
-      };
-      await assert.rejects(h.host.acquireTile(input), rejects);
-      if (stage === "decode") assert.deepEqual(await h.host.probe(input), { status: "missing" });
-      else await assert.rejects(h.host.probe(input), rejects);
-      assert.equal(reads, 2);
-      assert.equal(displays, 0);
-      if (stage === "painting")
-        assert.equal(closed, 3, "measurement and painted bitmaps close on failure");
-      await h.host.settle();
+      await checkAcquisitionFailure(stage, typed);
     }
 });
 
-test("output waits for saving and preserves actual disposition and missing tiles", async () => {
+async function checkAcquisitionFailure(stage, typed) {
+  const original = typed
+    ? { kind: stage === "painting" ? "output-unavailable" : `${stage}-failed`, detail: stage }
+    : new Error(stage);
+  let reads = 0,
+    displays = 0,
+    closed = 0;
+  const h = setup({
+    decoder: createTileDecoder({
+      createImageBitmap: async () => {
+        if (stage === "decode") throw original;
+        return {
+          width: 256,
+          height: 256,
+          close() {
+            closed++;
+          },
+        };
+      },
+    }),
+    fetchResource: async () => {
+      reads++;
+      return { kind: "response", response: { bytes: [1], final_uri: null } };
+    },
+    loadDisplayImage: async () => {
+      displays++;
+      assert.fail("post-fetch failures cannot trigger fallback");
+    },
+  });
+  h.deps.assembly = createCanvasAssembly({
+    decode: (bytes) => h.deps.decoder.decode(bytes, h.controller.signal),
+    processTile: () => {
+      throw original;
+    },
+    createCanvas: (width, height) => ({
+      width,
+      height,
+      ctx2d: {
+        drawImage() {
+          if (stage === "painting") throw original;
+        },
+      },
+    }),
+  });
+  const input = {
+    ...tile,
+    placement: {
+      ...tile.placement,
+      processing: stage === "processing" ? "google-arts-decrypt" : "none",
+    },
+  };
+  const expectedKind = stage === "painting" ? "internal" : `${stage}-failed`;
+  const rejects = (error) => {
+    assert.equal(error.kind, "resource");
+    assert.equal(error.request, tile.request.uri);
+    assert.equal(error.resource_kind, "tile");
+    if (typed) assert.equal(error.source, original);
+    else {
+      assert.equal(error.source.kind, expectedKind);
+      assert.equal(error.source.detail, String(original));
+    }
+    return true;
+  };
+  await assert.rejects(h.host.acquireTile(acquisition(input)), rejects);
+  if (stage === "decode") assert.deepEqual(await h.host.probe(input), { status: "missing" });
+  else await assert.rejects(h.host.probe(input), rejects);
+  assert.equal(reads, 2);
+  assert.equal(displays, 0);
+  if (stage === "painting")
+    assert.equal(closed, 3, "measurement and painted bitmaps close on failure");
+  await h.host.settle();
+}
+
+test("output waits for saving and preserves actual disposition", async () => {
   const h = setup();
   let save;
   h.assembly.finalizeOutput = () =>
@@ -380,19 +432,17 @@ test("output waits for saving and preserves actual disposition and missing tiles
       save = resolve;
     });
   let finished = false;
-  const pending = h.host
-    .finish({ canvas: tile.placement.canvas, format: "png", missing: [2] })
-    .then((output) => {
-      finished = true;
-      return output;
-    });
+  const pending = h.host.finish({ canvas: tile.placement.canvas, format: "png" }).then((output) => {
+    finished = true;
+    return output;
+  });
   await tick();
   assert.equal(finished, false);
   save("browser-save-initiated");
   assert.deepEqual(await pending, {
     canvas: tile.placement.canvas,
     format: "png",
-    missing: [2],
+
     disposition: "browser-save-initiated",
   });
 });
@@ -402,7 +452,7 @@ test("surface and output failures retain their typed kind", async () => {
   h.assembly.prepare = () => {
     throw { kind: "output-unavailable", detail: "No canvas" };
   };
-  await assert.rejects(h.host.acquireTile(tile), {
+  await assert.rejects(h.host.acquireTile(acquisition(tile)), {
     kind: "resource",
     request: tile.request.uri,
     resource_kind: "tile",
@@ -452,7 +502,7 @@ test("canonical failures retain their precise request and affected resource", as
       };
     },
   });
-  await assert.rejects(h.host.acquireTile(tile), {
+  await assert.rejects(h.host.acquireTile(acquisition(tile)), {
     kind: "resource",
     request: tile.request.uri,
     resource_kind: "tile",
@@ -467,7 +517,7 @@ test("canonical failures retain their precise request and affected resource", as
   h.assembly.prepare = () => {
     throw { kind: "output-unavailable", detail: "the output cannot be allocated" };
   };
-  await assert.rejects(h.host.acquireTile(tile), {
+  await assert.rejects(h.host.acquireTile(acquisition(tile)), {
     kind: "resource",
     request: tile.request.uri,
     resource_kind: "tile",
@@ -515,7 +565,7 @@ test("cancellation rejects late readable bytes before painting", async () => {
         complete = resolve;
       }),
   });
-  const rejected = assert.rejects(h.host.acquireTile(tile), { kind: "cancelled" });
+  const rejected = assert.rejects(h.host.acquireTile(acquisition(tile)), { kind: "cancelled" });
   h.controller.abort();
   complete({ kind: "response", response: { bytes: new Uint8Array([1]), final_uri: null } });
   await rejected;
@@ -594,31 +644,76 @@ test("settlement waits for native decoding after promptly rejecting the cancelle
   assert.deepEqual(h.painted, []);
 });
 
-test("settlement cancels a permission interaction and suppresses a late image", async () => {
-  let image, signal;
-  const h = setup({
-    fetchResource: async () => {
-      throw { kind: "network-failure", transport: "direct" };
-    },
-    loadDisplayImage: (_url, owned) => {
-      signal = owned;
-      return new Promise((resolve) => {
-        image = resolve;
-      });
-    },
-    choosePartial: (_missing, owned) =>
-      new Promise((_, reject) =>
-        owned.addEventListener("abort", () => reject(owned.reason), { once: true }),
-      ),
-  });
-  const painting = assert.rejects(h.host.acquireTile(tile), { kind: "cancelled" });
-  const choosing = assert.rejects(h.host.choosePartial({ missing: [] }), {
-    kind: "cancelled",
-  });
+test("settlement cancels a pending retry approval without requiring a host response", async () => {
+  const h = setup({ approveRetry: () => new Promise(() => {}) });
+  const acquiring = assert.rejects(
+    h.host.acquireTile({ tile, attempt: 4, requires_approval: true }),
+    { kind: "cancelled" },
+  );
   await tick();
-  const cleanup = h.host.settle();
-  assert.equal(signal.aborted, true);
-  image({ naturalWidth: 256, naturalHeight: 256 });
-  await Promise.all([painting, choosing, cleanup]);
   assert.deepEqual(h.painted, []);
+  await Promise.all([acquiring, h.host.settle()]);
+  assert.deepEqual(h.painted, []);
+});
+
+const image = (sizes) => ({ format: "test", levels: sizes.map((size) => ({ label: "", size })) });
+const square = (width) => ({ width, height: width });
+
+test("image choice compares actual levels, skips deferred entries, and preserves ties", async () => {
+  const host = setup().host;
+  const deferred = { kind: "image-request", uri: "https://images.test/info.json" };
+  const wide = {
+    kind: "image",
+    ...image([
+      { width: 1000, height: 1 },
+      { width: 1, height: 1000 },
+    ]),
+    size: square(1000),
+  };
+  const bigger = { kind: "image", ...image([square(100)]) };
+  assert.equal(await host.chooseImage({ entries: [deferred, wide, bigger] }), 2);
+  assert.equal(await host.chooseImage({ entries: [deferred, deferred] }), 0);
+  assert.equal(await host.chooseImage({ entries: [bigger, bigger] }), 1);
+  assert.equal(
+    await host.chooseImage({ entries: [deferred, { kind: "image", ...image([undefined]) }] }),
+    1,
+  );
+});
+
+test("resolution choice fits device limits and preserves fallback behavior", async () => {
+  const host = setup().host;
+  for (const [sizes, expected] of [
+    [[square(1), square(256), square(512)], 1],
+    [[square(512), square(1024)], 0],
+    [[undefined, undefined], 1],
+    [[square(0), square(256)], 1],
+    [[square(256), square(256)], 1],
+    [
+      [
+        { width: 300, height: 300 },
+        { width: 301, height: 1 },
+      ],
+      0,
+    ],
+  ])
+    assert.equal(await host.chooseLevel(image(sizes)), expected);
+  const areaHost = setup({
+    selectionLimits: { maxWidth: 1000, maxHeight: 1000, maxArea: 100 },
+  }).host;
+  assert.equal(await areaHost.chooseLevel(image([square(10), square(20)])), 0);
+  const maximum = setup({ selectionLimits: MAXIMUM_SELECTION_LIMITS }).host;
+  assert.equal(await maximum.chooseLevel(image([square(256), square(32768)])), 1);
+});
+
+test("invalid resolution limits fail before fetching and cancelled choices reject", async () => {
+  for (const key of ["maxWidth", "maxHeight", "maxArea"]) {
+    assert.throws(
+      () => setup({ selectionLimits: { maxWidth: 300, maxHeight: 300, maxArea: 90000, [key]: 0 } }),
+      { kind: "invalid-options" },
+    );
+  }
+  const h = setup();
+  h.controller.abort();
+  await assert.rejects(h.host.chooseImage({ entries: [] }), { kind: "cancelled" });
+  await assert.rejects(h.host.chooseLevel(image([square(1)])), { kind: "cancelled" });
 });

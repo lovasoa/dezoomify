@@ -352,7 +352,7 @@ fn navigate(
         .find(|r| recognizes(**r))
         .ok_or_else(|| invalid("no supported literal Lime declaration"))?;
     if let Some(request) = scripts(document, resources).find(|r| !visited(&r.uri)) {
-        return Ok(ParsedResource::FollowWith(request, decode));
+        return Ok(ParsedResource::FollowIntermediate(request, decode));
     }
     let (declaration, text, document_base) = configuration(document, resources)
         .ok_or_else(|| invalid("no supported literal Lime declaration"))?;
@@ -384,7 +384,7 @@ fn navigate(
             let second_base = secondary_path
                 .map(|path| resolve_relative(&document_base, &directory(&path)))
                 .unwrap_or_else(|| base.clone());
-            let entries = [(name, base.clone()), (secondary, second_base)]
+            let entries = [(name, base), (secondary, second_base)]
                 .into_iter()
                 .map(|(name, base)| {
                     Ok(DeferredResource {

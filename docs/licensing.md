@@ -37,3 +37,12 @@ copyright notice and record provenance in the owning fixture README.
 - Per-file notices narrower than the root license win for that file.
 - Fixture reviews retain source URLs, issue references, grants, and notices in
   the owning README; fixtures with unclear provenance do not enter the corpus.
+
+## Dependency notices
+
+The native HTML parser uses unmodified MPL-2.0 dependencies. Retain their source
+and license notices when distributing the app. Locked source versions:
+[cssparser](https://docs.rs/crate/cssparser/0.37.0/source/),
+[cssparser-macros](https://docs.rs/crate/cssparser-macros/0.7.1/source/),
+[dtoa-short](https://docs.rs/crate/dtoa-short/0.3.5/source/), and
+[selectors](https://docs.rs/crate/selectors/0.38.0/source/).

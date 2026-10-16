@@ -1,11 +1,15 @@
 // Real-webapp E2E (Chromium): open the actual website served on loopback,
 // paste a fixture-server zoomable image URL, let the shared async WASM function
 // discover and download the tiles, then save real bytes and verify the PNG.
-const { test, expect } = require("@playwright/test");
+const { test, expect, chromium } = require("@playwright/test");
 const fs = require("node:fs");
 const path = require("node:path");
 const assert = require("node:assert/strict");
-const { replayUrl } = require("../../../../test/fixture-files.mjs");
+// Match the in-process fixture server's native ESM loading of these helpers.
+let replayUrl;
+test.beforeAll(async () => {
+  ({ replayUrl } = await import("../../../../test/fixture-files.mjs"));
+});
 const {
   assertSavedPyramid,
   decodePngPixels,
@@ -15,6 +19,62 @@ const {
 
 const ADDR = process.env.DEZOOMIFY_E2E_ADDR;
 const { formats } = require("../../../../test/support/formats.cjs");
+const {
+  relayFixtureRequest,
+  startPublicFixtureSource,
+} = require("../../../../test/support/public-relay.mjs");
+
+test("website saves a no-CORS ZIF URL through real public-data relay policies", async () => {
+  const source = await startPublicFixtureSource();
+  const resource = "/fixtures/zif/approximate-direct/image.zif";
+  const publicUrl = source.publicOrigin + resource;
+  let browser;
+  try {
+    const fullFile = await fetch(source.origin + resource);
+    assert.equal(fullFile.status, 400, "the source refuses unbounded full-file GETs");
+    assert.equal(fullFile.headers.get("access-control-allow-origin"), null);
+    await fullFile.arrayBuffer();
+    browser = await chromium.launch({ args: [
+      `--host-resolver-rules=MAP source.test 127.0.0.1:${source.port}`,
+      "--no-proxy-server",
+    ] });
+    const page = await browser.newPage({ acceptDownloads: true });
+    const relayed = [];
+    const directFailures = [];
+    page.on("requestfailed", (request) => {
+      if (request.url() === publicUrl) directFailures.push(request.failure().errorText);
+    });
+    await page.route("**/api/proxy", (route) => relayFixtureRequest(route, source, ADDR, relayed));
+    await page.goto(`${ADDR}/beta/`);
+    await page.locator("#dz-url-input").fill(publicUrl);
+    await page.getByRole("button", { name: /find image/i }).click();
+    await expect(page.locator(".dz-completed-section, .dz-error-section, .dz-retry-section"))
+      .toBeVisible({ timeout: 60000 });
+    const diagnostics = await page.locator("#dz-job-diagnostics").textContent();
+    await expect(page.locator(".dz-completed-section"), JSON.stringify({
+      relayed, diagnostics: diagnostics.split("\nTimeline")[0],
+    }))
+      .toBeVisible({ timeout: 1000 });
+    const pending = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Save image" }).click();
+    assertSavedPyramid(fs.readFileSync(await (await pending).path()), 2);
+
+    assert.ok(directFailures.length > 0, "the browser cannot read the separate source without CORS");
+    assert.ok(source.requests.some(({ origin, range }) => origin === ADDR && range === "bytes=0-15"),
+      "direct requests really reach the separate source before relay fallback");
+    assert.ok(relayed.every(({ target, status, range }) => target === publicUrl &&
+      (range === undefined ? status === 400 : status === 206 && /^bytes=\d+-\d+$/.test(range))),
+      "only exact byte ranges succeed; discovery's unbounded guesses are refused");
+    assert.ok(relayed.some(({ range }) => range === "bytes=0-15"), "relay reads container metadata");
+    assert.ok(relayed.some(({ range }) => range && Number(range.match(/\d+/)[0]) >= 9 * 1024 * 1024),
+      "relay reaches the metadata index beyond the full-file metadata limit");
+    assert.equal(relayed.filter(({ jpeg }) => jpeg).length, 4,
+      "all four encoded tile ranges pass through the real relay");
+  } finally {
+    await browser?.close();
+    await source.close();
+  }
+});
 
 for (const fixture of formats) {
   test(`website saves ${fixture.name} pixels`, async ({ page }) => {
@@ -75,8 +135,17 @@ test("webapp discovers, downloads, assembles, and saves a real DZI pyramid", asy
   await expect(page.locator(".dz-completed-section")).toBeVisible({ timeout: 60000 });
   await expect(page.locator(".dz-completed-section")).toContainText(/512/);
   const report = await page.locator("#dz-job-diagnostics").textContent();
-  assert.match(report, /presented_phase: completed/);
-  assert.match(report, /first_tile.url: .*pyramid_files/);
+  assert.match(report, /^Outcome: .*completed/);
+  assert.ok(report.includes(`canonical: ${url}`));
+  assert.match(report, /first_tile: url=.*pyramid_files/);
+  await page.locator(".dz-details > summary").click();
+  const layout = await page.locator("#dz-job-diagnostics").evaluate((element) => ({
+    whiteSpace: getComputedStyle(element).whiteSpace,
+    horizontallyScrollable: element.scrollWidth > element.clientWidth,
+  }));
+  assert.equal(layout.whiteSpace, "pre");
+  assert.ok(layout.horizontallyScrollable, "wide diagnostics scroll without wrapping");
+  await page.locator(".dz-details > summary").click();
   // Tiles paint live during acquisition, so the assembled
   // picture stays visible next to the save button on the clean path too.
   await expect(canvas).toBeVisible();
@@ -357,9 +426,8 @@ test("webapp follows a deferred IIIF manifest request to the info.json and tiles
 
 // One DZI pyramid whose maximum level (40000x1000) exceeds the browser
 // canvas side limit while the level below (20000x500) fits: automatic
-// selection takes the smaller level, the notice names both resolutions while
-// tiles are still in flight, and "Try maximum" retries the declared maximum,
-// which reports the large-canvas error with the desktop-app action. The
+// selection takes the smaller level, and one notice opens the desktop handoff
+// while tiles are in flight or after completion. The
 // fixture is served entirely from this test: metadata inline, tiles as one
 // held 1x1 PNG, so the only real pipeline runs unmodified.
 const TINY_PNG = Buffer.from(
@@ -368,15 +436,18 @@ const TINY_PNG = Buffer.from(
 );
 const RESOLUTION_DZI =
   '<Image xmlns="http://schemas.microsoft.com/deepzoom/2008" TileSize="10000" Overlap="0" Format="jpg">' +
-  '<Size Width="40000" Height="10000"/></Image>';
+  '<Size Width="40000" Height="1000"/></Image>';
 
-test("resolution notice during fetching offers Try maximum and reports the large canvas", async ({ page }) => {
+test("lower resolution opens a desktop handoff with the exact URL and keyboard navigation", async ({ page, context }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  let releaseTiles;
+  const tilesReady = new Promise((resolve) => { releaseTiles = resolve; });
   await page.route(
     (url) => url.host === "fixtures.test",
     async (route) => {
       if (route.request().url().includes("_files/")) {
         // Hold tile responses so the notice is observable mid-fetch.
-        await new Promise((resolve) => setTimeout(resolve, 700));
+        await tilesReady;
         await route.fulfill({ status: 200, contentType: "image/png", body: TINY_PNG });
         return;
       }
@@ -397,20 +468,47 @@ test("resolution notice during fetching offers Try maximum and reports the large
   const notice = page.locator("#dz-resolution-notice");
   await expect(notice).toBeVisible({ timeout: 30000 });
   await expect(page.locator(".dz-completed-section")).toHaveCount(0);
-  await expect(page.locator("#dz-resolution-message")).toContainText(/maximal resolution/i);
-  const sizes = await page.locator("#dz-resolution-sizes").textContent();
+  await expect(notice.getByRole("button")).toHaveCount(1);
+  const sizes = await page.locator("#dz-resolution-message").textContent();
   assert.match(sizes ?? "", /20000×500/, "selected resolution");
   assert.match(sizes ?? "", /40000×1000/, "maximum resolution");
 
-  // "Try maximum" retries the declared maximum resolution.
-  await page.locator("#dz-btn-try-maximum").click();
-  await expect(page.locator(".dz-error-section")).toBeVisible({ timeout: 30000 });
-  await expect(page.locator("#dz-error-message")).toContainText(/too large/i);
+  const action = page.locator("#dz-btn-download-desktop");
+  await action.click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("link", { name: "Download desktop app" })).toHaveAttribute(
+    "href", "https://github.com/lovasoa/dezoomify/releases/latest",
+  );
+  const source = dialog.getByRole("textbox");
+  await expect(source).toHaveValue("https://fixtures.test/resolution/big.dzi");
+  await expect(source).toHaveAttribute("readonly", "");
+  const close = dialog.getByRole("button", { name: "Close dialog" });
+  await expect(close).toBeFocused();
+  await page.keyboard.press("Shift+Tab");
+  const copy = dialog.getByRole("button", { name: "Copy URL" });
+  await expect(copy).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(close).toBeFocused();
+  await copy.click();
+  await expect(dialog.getByRole("status")).toContainText("URL copied");
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
+    "https://fixtures.test/resolution/big.dzi",
+  );
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(action).toBeFocused();
+  releaseTiles();
+  await expect(page.locator(".dz-completed-section")).toBeVisible({ timeout: 60000 });
+  await action.click();
+  await expect(source).toHaveValue("https://fixtures.test/resolution/big.dzi");
+  await close.click();
+  await expect(page.getByRole("button", { name: "Save image" })).toBeVisible();
 });
 
 // website/proxy-fallback flow contract: a non-readable metadata URL takes
-// the automatic direct-then-proxy request order, exactly one metadata-only
-// proxy request relays it, tiles go over direct egress (never proxied), and
+// the automatic direct-then-proxy request order. Exactly one metadata
+// request needs the relay; this source's tiles are directly readable and
 // the assembled canvas saves origin-clean.
 test("webapp proxy fallback matches the website/proxy-fallback flow contract", async ({ page }) => {
   const golden = JSON.parse(
@@ -441,8 +539,8 @@ test("webapp proxy fallback matches the website/proxy-fallback flow contract", a
     proxyTargets.push(body.targetUrl);
     await relayToFixture(route, body.targetUrl);
   });
-  // Tiles are never proxied by policy; this interception stands in for
-  // direct tile egress, preserving readable bytes for assembly.
+  // This source grants readable tile egress, so its tile requests succeed
+  // directly and never need the relay.
   await page.route(
     (url) => url.host === "fixtures.test" && url.pathname.includes("pyramid_files"),
     async (route) => relayToFixture(route, route.request().url()),
@@ -466,16 +564,15 @@ test("webapp proxy fallback matches the website/proxy-fallback flow contract", a
   assert.equal(golden.proxyScope, "metadata-only", "website/proxy-fallback proxyScope");
   assert.ok(
     proxyTargets.every((targetUrl) => !targetUrl.includes("pyramid_files")),
-    "metadata-only scope: tiles are never proxied",
+    "this source's directly readable tiles do not need the relay",
   );
   // The save exported real bytes, so the canvas is origin-clean.
   assert.equal(golden.originClean, true, "website/proxy-fallback originClean");
 });
 
-// post-cutover/taint transcript: the same direct-then-metadata-only-proxy
-// order, but tiles arrive as ordinary image display (readable fetches
-// blocked), which keeps the picture visible on a tainted canvas and finishes
-// display-only with the "visible" transport.
+// This source's public metadata needs the relay, while its private-origin
+// tiles cannot use it. Failed readable tile requests can still fall back to
+// ordinary image display and finish with the "visible" transport.
 test("post-cutover proxy fallback with ordinary tiles keeps the visible transport", async ({ page }) => {
   const golden = JSON.parse(
     fs.readFileSync(
@@ -484,12 +581,21 @@ test("post-cutover proxy fallback with ordinary tiles keeps the visible transpor
     ),
   );
   const METADATA_URL = "https://fixtures.test/cli/pyramid.dzi";
+  const privateTileOrigin = new URL(ADDR);
+  privateTileOrigin.protocol = "https:";
+  privateTileOrigin.port = String(Number(privateTileOrigin.port) === 65535 ? 65534 : Number(privateTileOrigin.port) + 1);
   const transcript = [];
+  const tileTraffic = [];
+  page.on("requestfailed", (request) => {
+    if (new URL(request.url()).origin === privateTileOrigin.origin)
+      tileTraffic.push({ type: request.resourceType(), error: request.failure().errorText });
+  });
   const relayToFixture = async (route, targetUrl) => {
     const response = await route.fetch({
       url: replayUrl(ADDR, targetUrl),
       method: "GET",
     });
+    assert.equal(response.status(), 200, `fixture image ${targetUrl}`);
     await route.fulfill({ response });
   };
   await page.route((url) => url.href === METADATA_URL, (route) => {
@@ -498,16 +604,20 @@ test("post-cutover proxy fallback with ordinary tiles keeps the visible transpor
   });
   await page.route("**/api/proxy", async (route) => {
     const body = route.request().postDataJSON();
+    assert.equal(body.targetUrl, METADATA_URL, "private-origin tiles never enter the public relay");
     transcript.push("proxy-metadata-only");
-    await relayToFixture(route, body.targetUrl);
+    const response = await route.fetch({ url: replayUrl(ADDR, body.targetUrl), method: "GET" });
+    await route.fulfill({ response, body: (await response.text()).replace(
+      /<Image\b/, `<Image Url="${privateTileOrigin.origin}/pyramid_files/"`,
+    ) });
   });
   // Readable tile fetches fail (missing CORS grant) while plain <img> loads
   // for the same URLs succeed as ordinary image display.
   await page.route(
-    (url) => url.host === "fixtures.test" && url.pathname.includes("pyramid_files"),
+    (url) => url.origin === privateTileOrigin.origin && url.pathname.startsWith("/pyramid_files/"),
     async (route) => {
       if (route.request().resourceType() === "image") {
-        await relayToFixture(route, route.request().url());
+        await relayToFixture(route, `https://fixtures.test/cli${new URL(route.request().url()).pathname}`);
       } else {
         await route.abort();
       }
@@ -517,7 +627,13 @@ test("post-cutover proxy fallback with ordinary tiles keeps the visible transpor
   await page.locator("#dz-url-input").fill(METADATA_URL);
   await page.getByRole("button", { name: /find image/i }).click();
 
-  await expect(page.locator(".dz-notice-section")).toBeVisible({ timeout: 60000 });
+  await expect(page.locator(".dz-notice-section, .dz-error-section, .dz-retry-section"))
+    .toBeVisible({ timeout: 60000 });
+  const diagnostics = await page.locator("#dz-job-diagnostics").textContent();
+  await expect(page.locator(".dz-notice-section"), JSON.stringify({
+    tileTraffic, diagnostics: diagnostics.split("\nTimeline")[0],
+  }))
+    .toBeVisible({ timeout: 1000 });
   await expect(page.getByRole("heading", { name: /Showing preview/i })).toBeVisible();
   await expect(page.locator(".dz-error-section")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Save image" })).toHaveCount(0);

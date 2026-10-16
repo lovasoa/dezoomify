@@ -54,13 +54,10 @@ fn host_thrown_objects_deserialize_into_the_same_enum() {
                 .into(),
         }
     );
-    // Aggregates carry their derived verdict and largest hint; the settled
-    // evidence lives in the job's `missing[]` collection and the diagnostics
-    // report, never one nested error per failed attempt.
+    // Exhaustion preserves attempt counts and the original structured cause.
     let thrown = serde_json::json!({
-        "kind": "no-usable-tiles",
-        "transient": true,
-        "retry_after_ms": 3_000,
+        "kind": "tile-failed", "tile": 2, "attempts": 4,
+        "cause": { "kind": "http-error", "status": 429, "retry_after_ms": 3_000, "transport": "native" },
     });
     let error: Error = serde_json::from_value(thrown).expect("deserializes");
     assert!(error.retryable(), "a transient aggregate invites retry");
@@ -70,6 +67,11 @@ fn host_thrown_objects_deserialize_into_the_same_enum() {
         serde_json::from_value(serde_json::to_value(&error).expect("serializes"))
             .expect("round trip");
     assert_eq!(round_tripped, error);
+    let limit = serde_json::json!({
+        "kind": "limit-exceeded", "limit": { "reason": { "codec-side": "avif" }, "dimensions": { "width": 70000, "height": 1 } },
+    });
+    let error: Error = serde_json::from_value(limit.clone()).expect("codec limit deserializes");
+    assert_eq!(serde_json::to_value(error).unwrap(), limit);
 }
 
 #[test]
@@ -81,7 +83,9 @@ fn the_kind_tag_is_the_single_stable_identifier() {
         (
             Error::LimitExceeded {
                 limit: dezoomify::model::LimitContext {
-                    reason: dezoomify::model::LimitReason::JpegSide,
+                    reason: dezoomify::model::LimitReason::CodecSide(
+                        dezoomify::model::OutputFormat::Jpeg,
+                    ),
                     dimensions: None,
                     bytes_required: None,
                     bytes_available: None,

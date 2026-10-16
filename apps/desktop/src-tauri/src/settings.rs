@@ -121,7 +121,14 @@ fn parse_output_format(value: Option<&serde_json::Value>) -> Result<OutputPrefer
         .map(str::to_ascii_lowercase)
         .ok_or_else(|| "output_format must be a string".to_string())?;
     serde_json::from_value(serde_json::Value::String(format)).map_err(|_| {
-        "output_format must be auto, png, jpeg, tiff, zif, webp, or iiif-dir".to_string()
+        format!(
+            "output_format must be auto or {}",
+            dezoomify::model::OUTPUT_CODECS
+                .iter()
+                .map(|codec| codec.format.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
     })
 }
 
@@ -390,7 +397,6 @@ mod tests {
         assert_eq!(options.timeout, Duration::from_secs(30));
         assert_eq!(options.connect_timeout, Duration::from_secs(6));
         assert_eq!(options.max_idle_per_host, 32);
-        assert!(options.keep_partial);
     }
 
     #[test]
@@ -411,6 +417,13 @@ mod tests {
             OutputPreference::Webp
         );
         assert!(parse_settings(&json!({"output_format": "exe"})).is_err());
+        let settings =
+            parse_settings(&json!({"output_format": "avif", "compression": 100})).unwrap();
+        assert_eq!(
+            settings.output_format.format(),
+            Some(dezoomify::model::OutputFormat::Avif)
+        );
+        assert_eq!(job_options_for(&settings).compression, 100);
     }
 
     #[test]

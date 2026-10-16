@@ -11,7 +11,9 @@ export function applyProcessing(recipe: ProcessingRecipe, bytes: Uint8Array): Ui
 export type ProcessingRecipe = "none" | "google-arts-decrypt";
 
 /**
- * A direct resource read, including its redirected base address.
+ * A direct resource read, including its redirected base address. For a ranged
+ * request, bytes cover exactly the requested interval; the Host validates this
+ * contract before returning a successful response.
  */
 export interface ResourceResponse {
     bytes: Uint8Array;
@@ -140,6 +142,39 @@ export interface TileRole {
 }
 
 /**
+ * How an output owns its encoded image or pyramid.
+ */
+export type OutputLayout = "streaming" | "buffered" | "pyramid" | "directory";
+
+/**
+ * Native output capabilities, also exported as generated data for presentation.
+ */
+export interface OutputCodec {
+    format: OutputFormat;
+    name: string;
+    extensions: string[];
+    max_side?: number;
+    control: OutputControl;
+    layout: OutputLayout;
+    hint: string;
+    /**
+     * Quality samples and estimated bytes/pixel, interpolated between samples.
+     */
+    size_coefficients: [number, number][];
+}
+
+/**
+ * One acquisition attempt. The core owns retries; Hosts await approval for
+ * optional attempts before performing I/O. Attempt zero is the initial request.
+ */
+export interface TileAcquisition {
+    tile: Tile;
+    attempt: number;
+    requires_approval: boolean;
+    previous_failure: Error | undefined;
+}
+
+/**
  * One discovery input. An omitted kind is a user-supplied source for
  * products that have no browser observations.
  */
@@ -158,6 +193,9 @@ export type CatalogEntry = ({ kind: "image" } & Image) | ({ kind: "image-request
  * One portable resource description. URI text is preserved exactly after
  * the core's approved normalization; secret headers are never carried here
  * (hosts attach scoped authorization out-of-band).
+ * A finite single `Range: bytes=start-end` asks the Host for exactly that
+ * inclusive interval. Hosts validate partial response headers and body length
+ * before returning bytes, and include the range in any resource cache key.
  */
 export interface ResourceRequest {
     uri: string;
@@ -166,20 +204,12 @@ export interface ResourceRequest {
 }
 
 /**
- * One tile settled as missing, with its full structured detail.
- */
-export interface MissingTile {
-    tile: number;
-    failures: Error[];
-}
-
-/**
  * One typed failure. Grouped by domain: transport and fetch, discovery,
  * job and planning, tiles, output, control, internals, and the composable
  * [`Error::Resource`] context wrapper that preserves the exact URI and
  * resource kind of any underlying failure.
  */
-export type Error = ({ kind: "http-error" } & { status: number; retry_after_ms?: number; preview?: string; transport: ErrorTransport } & Failure) | ({ kind: "rate-limited" } & { retry_after_ms?: number; transport: ErrorTransport } & Failure) | ({ kind: "timeout" } & { transport: ErrorTransport } & Failure) | ({ kind: "network-failure" } & { transport: ErrorTransport } & Failure) | ({ kind: "policy-denied" } & { blocked_reason: BlockedReason; transport: ErrorTransport } & Failure) | ({ kind: "bad-url" } & Failure) | ({ kind: "bad-redirect" } & Failure) | { kind: "redirect-limit"; max: number } | { kind: "size-limit"; max_bytes: number } | { kind: "cancelled" } | { kind: "proxy-budget-exceeded" } | ({ kind: "proxy-error" } & { transport: ErrorTransport } & Failure) | ({ kind: "no-image-found" } & Failure) | ({ kind: "malformed-metadata" } & Failure) | { kind: "unknown-format"; format: string } | { kind: "empty-resource" } | ({ kind: "resource-limit" } & Failure) | { kind: "deferred-limit"; max: number } | ({ kind: "discovery-failed" } & { cause?: Error } & Failure) | ({ kind: "invalid-input" } & Failure) | ({ kind: "invalid-options" } & Failure) | ({ kind: "invalid-state" } & Failure) | { kind: "duplicate" } | { kind: "stale" } | { kind: "plan-empty" } | ({ kind: "plan-invalid" } & Failure) | { kind: "no-usable-tiles"; transient: boolean; retry_after_ms?: number } | { kind: "partial-discarded"; transient: boolean; retry_after_ms?: number } | ({ kind: "decode-failed" } & Failure) | ({ kind: "processing-failed" } & Failure) | { kind: "limit-exceeded"; limit: LimitContext } | ({ kind: "encode-failed" } & Failure) | ({ kind: "write-failed" } & Failure) | { kind: "output-exists" } | ({ kind: "destination-denied" } & Failure) | ({ kind: "unsupported-extension" } & Failure) | ({ kind: "output-unavailable" } & Failure) | { kind: "output-no-parent" } | ({ kind: "launch-failed" } & Failure) | { kind: "output-denied" } | { kind: "output-not-found" } | { kind: "invoke-failed" } | ({ kind: "start-failed" } & Failure) | ({ kind: "choice-failed" } & Failure) | { kind: "invalid-url" } | ({ kind: "invalid-settings" } & Failure) | ({ kind: "registration-failed" } & Failure) | ({ kind: "internal" } & Failure) | { kind: "shell-lock" } | ({ kind: "binding-invalid-value" } & Failure) | { kind: "interaction-expired" } | { kind: "auth-forbidden-header" } | { kind: "resource"; request: string; resource_kind: ResourceKind; source: Error };
+export type Error = ({ kind: "http-error" } & { status: number; retry_after_ms?: number; preview?: string; transport: ErrorTransport } & Failure) | ({ kind: "rate-limited" } & { retry_after_ms?: number; transport: ErrorTransport } & Failure) | ({ kind: "timeout" } & { transport: ErrorTransport } & Failure) | ({ kind: "network-failure" } & { transport: ErrorTransport } & Failure) | ({ kind: "policy-denied" } & { blocked_reason: BlockedReason; transport: ErrorTransport } & Failure) | ({ kind: "bad-url" } & Failure) | ({ kind: "bad-redirect" } & Failure) | { kind: "redirect-limit"; max: number } | { kind: "size-limit"; max_bytes: number } | { kind: "cancelled" } | { kind: "proxy-budget-exceeded" } | ({ kind: "proxy-error" } & { transport: ErrorTransport } & Failure) | ({ kind: "no-image-found" } & Failure) | ({ kind: "malformed-metadata" } & Failure) | { kind: "unknown-format"; format: string } | { kind: "empty-resource" } | ({ kind: "resource-limit" } & Failure) | { kind: "deferred-limit"; max: number } | ({ kind: "discovery-failed" } & { cause?: Error } & Failure) | ({ kind: "invalid-input" } & Failure) | ({ kind: "invalid-options" } & Failure) | ({ kind: "invalid-state" } & Failure) | { kind: "duplicate" } | { kind: "stale" } | { kind: "plan-empty" } | ({ kind: "plan-invalid" } & Failure) | { kind: "tile-failed"; tile: number; attempts: number; cause: Error } | ({ kind: "decode-failed" } & Failure) | ({ kind: "processing-failed" } & Failure) | { kind: "limit-exceeded"; limit: LimitContext } | ({ kind: "encode-failed" } & Failure) | ({ kind: "write-failed" } & Failure) | { kind: "output-exists" } | ({ kind: "destination-denied" } & Failure) | ({ kind: "unsupported-extension" } & Failure) | ({ kind: "output-unavailable" } & Failure) | { kind: "output-no-parent" } | ({ kind: "launch-failed" } & Failure) | { kind: "output-denied" } | { kind: "output-not-found" } | { kind: "invoke-failed" } | ({ kind: "start-failed" } & Failure) | ({ kind: "choice-failed" } & Failure) | { kind: "invalid-url" } | ({ kind: "invalid-settings" } & Failure) | ({ kind: "registration-failed" } & Failure) | ({ kind: "internal" } & Failure) | { kind: "shell-lock" } | ({ kind: "binding-invalid-value" } & Failure) | { kind: "interaction-expired" } | { kind: "auth-forbidden-header" } | { kind: "resource"; request: string; resource_kind: ResourceKind; source: Error };
 
 /**
  * Output preflight after geometry probes and before ordinary acquisitions.
@@ -199,24 +229,36 @@ export interface OutputPlan {
 }
 
 /**
- * Output summary: geometry, completeness, and the honest disposition.
+ * Output summary after every required tile has been acquired.
  */
 export interface Output {
     canvas: Size | undefined;
     format: OutputFormat;
-    missing: number[];
     disposition: OutputDisposition;
+}
+
+/**
+ * Presentation data derived from the codec registry, including automatic output.
+ */
+export interface OutputOption {
+    format: OutputPreference;
+    name: string;
+    label_key?: string;
+    hint: string;
+    max_side?: number;
+    description_max_side?: number;
+    compression_supported: boolean;
+    compression_warning_above?: number;
+    /**
+     * Estimated bytes/pixel for each integer compression value from 0 to 100.
+     */
+    compression_estimates: number[];
 }
 
 /**
  * Purpose of a resource request (metadata vs tile vs probe).
  */
 export type RequestPurpose = "metadata" | "tile" | "probe";
-
-/**
- * Saved encoding preference, distinct from the concrete published format.
- */
-export type OutputPreference = "auto" | "png" | "jpeg" | "tiff" | "zif" | "webp" | "iiif-dir";
 
 /**
  * Selected elements in document order, with decoded attributes and textContent.
@@ -243,9 +285,9 @@ export interface LimitContext {
 }
 
 /**
- * The requested output encoding.
+ * The meaning of the existing compression setting for a codec.
  */
-export type OutputFormat = "png" | "jpeg" | "tiff" | "zif" | "webp" | "iiif-dir";
+export type OutputControl = { kind: "quality"; minimum: number; warning_below: number } | { kind: "effort" } | { kind: "none" };
 
 /**
  * The shared failure context, defined once instead of per variant:
@@ -261,7 +303,7 @@ export interface Failure {
  * The source of discovery evidence. Products report facts; core discovery
  * decides when a supplied document or observed resource is relevant.
  */
-export type DiscoveryInputKind = "source" | "observed-document" | "observed-resource";
+export type DiscoveryInputKind = "source" | "observed-document" | "observed-resource" | "observed-metadata";
 
 /**
  * Unit progress for the active phase (totals stay unknown until the plan
@@ -270,6 +312,10 @@ export type DiscoveryInputKind = "source" | "observed-document" | "observed-reso
 export interface Progress {
     phase: ProgressPhase;
     source_format: string | undefined;
+    /**
+     * Format-designated reusable URL for the selected image's catalog, if known.
+     */
+    source_url?: string;
     title: string | undefined;
     selected: Size | undefined;
     maximum: Size | undefined;
@@ -301,7 +347,7 @@ export interface DiagnosticReport {
  * [`LimitContext`]; `message` prose is presentation only and is never a
  * data channel between languages.
  */
-export type LimitReason = "memory" | "jpeg-side" | "webp-side";
+export type LimitReason = "memory" | { "codec-side": OutputFormat };
 
 export interface DiagnosticFailureGroup {
     key: string;
@@ -322,7 +368,6 @@ export interface FinishRequest {
     canvas: Size | undefined;
     format: OutputFormat;
     title: string | undefined;
-    missing: number[];
     reused_tiles: ReusedTile[];
 }
 
@@ -332,15 +377,15 @@ export interface Header {
 }
 
 export interface Host {
+    observe(interaction: Interaction,): Promise<JobInput[]>;
     fetch(request: ResourceRequest,interaction: Interaction,): Promise<ResourceRead>;
     parseHtml(query: HtmlQuery,): Promise<HtmlDocument>;
     probe(tile: Tile,): Promise<ProbeOutcome>;
     beginOutput(plan: OutputPlan,): Promise<void>;
-    acquireTile(tile: Tile,): Promise<void>;
+    acquireTile(request: TileAcquisition,): Promise<void>;
     finish(request: FinishRequest,): Promise<Output>;
     chooseImage(catalog: Catalog,): Promise<number>;
     chooseLevel(image: Image,): Promise<number>;
-    choosePartial(missing: MissingTiles,): Promise<RecoveryChoice>;
     checkpoint(gate: Gate,): Promise<void>;
     sleep(delay_ms: number,): Promise<void>;
     report(progress: Progress): void;
@@ -361,14 +406,12 @@ export interface Level {
     tileSize?: Size;
 }
 
-export interface MissingTiles {
-    missing: MissingTile[];
-}
-
 export interface Options {
     format?: string | undefined;
-    selection?: SelectionPolicy;
-    partial?: PartialPolicy;
+    /**
+     * Issue approval-required attempts after the automatic retry allowance.
+     */
+    interactive_retries?: boolean;
     output?: OutputFormat;
     max_concurrent?: number;
     max_tiles?: number;
@@ -401,19 +444,19 @@ export type Gate = "cancellation" | "acquisition";
 
 export type Interaction = "forbidden" | "allowed";
 
-export type PartialPolicy = "prompt" | "keep" | "discard";
+export type OutputFormat = "png" | "jpeg" | "tiff" | "webp" | "avif" | "zif" | "iiif-dir";
+
+export type OutputPreference = "auto" | "png" | "jpeg" | "tiff" | "webp" | "avif" | "zif" | "iiif-dir";
 
 export type ProbeOutcome = { status: "missing" } | { status: "available"; width: number; height: number };
 
 export type ProgressPhase = "discovery" | "planning" | "acquisition" | "output";
 
-export type RecoveryChoice = "keep" | "retry" | "discard";
-
 export type ResourceKind = "metadata" | "tile" | "probe" | "output";
 
 export type ResourceRead = { kind: "response"; response: ResourceResponse } | { kind: "needs-access"; origin: string };
 
-export type SelectionPolicy = { kind: "interactive" } | { kind: "fitting"; max_width: number; max_height: number; max_area: number } | { kind: "automatic"; image_index: number; largest: boolean; max_width: number | undefined; max_height: number | undefined; zoom_level: number | undefined };
+export type RetryChoice = "retry" | "cancel";
 
 
 /**

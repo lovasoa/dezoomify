@@ -57,7 +57,6 @@ const app = createBrowserApplication({
   product: "extension",
   version: api.runtime.getManifest().version,
   wasm: () => wasm,
-  partial: "prompt",
   openSource: () => {
     if (sourceTabId !== null) void api.tabs.update(sourceTabId, { active: true });
   },
@@ -90,6 +89,7 @@ const app = createBrowserApplication({
     });
     let downloadId: number | undefined;
     let fetchResource: ReturnType<typeof createResourceFetcher> | undefined;
+    let observe: ReturnType<ReturnType<typeof createSourceAccess>["observations"]> | undefined;
     return {
       async inputs() {
         if (!source) {
@@ -113,6 +113,25 @@ const app = createBrowserApplication({
           installTestAccess();
         }
         const scan = await source.scan(context.signal);
+        observe = source.observations({
+          hasPermission: (origin) => permissionApi.contains({ origins: [`${origin}/*`] }),
+          ensurePermission: (origin, signal) => permissions.ensure(origin, signal),
+          scanned(snapshot) {
+            context.diagnostics.record("debug", "frame-scan", {
+              document_url: snapshot.documentUrl,
+              candidates: snapshot.inputs.length,
+              overflow: snapshot.overflow,
+              ...snapshot.memory,
+            });
+          },
+          failed(frame, error) {
+            context.diagnostics.record("warn", "frame-scan-failed", {
+              frame_id: frame.frameId,
+              document_url: frame.documentUrl,
+              error,
+            });
+          },
+        });
         context.signal.throwIfAborted();
         context.view.sourceUrl = source.documentUrl;
         context.activity.state.url = source.documentUrl;
@@ -124,6 +143,7 @@ const app = createBrowserApplication({
             document_url: scan.documentUrl,
             candidates: scan.inputs.length,
             overflow: scan.overflow,
+            memory: scan.memory,
           },
         });
         for (const [index, input] of scan.inputs.entries())
@@ -159,6 +179,7 @@ const app = createBrowserApplication({
         if (!fetchResource) return Promise.reject(new Error("The source has not been scanned."));
         return fetchResource(request, signal, interaction);
       },
+      observe: (interaction, signal) => observe?.(interaction, signal) ?? Promise.resolve([]),
       loadDisplayImage: (url, signal) => loadTileImage(url, { signal }),
       canvas: () => document.createElement("canvas"),
       async save(blob, width, height, signal, title) {
@@ -213,6 +234,34 @@ function installTestAccess() {
     .catch(() => {});
 }
 
+function testScenarioPath(scenario: unknown): string {
+  if (scenario === "recursive-iframe") return "/recursive-iframe";
+  if (typeof scenario === "string" && scenario.startsWith("memory-openseadragon-"))
+    return "/memory-openseadragon.html";
+  if (scenario === "cookie-session") return "/protected/artwork.dzi";
+  if (scenario === "retry") return "/fixtures/failures/retry-approval/retry.dzi";
+  if (typeof scenario === "string" && scenario.startsWith("fixtures/")) return `/${scenario}/`;
+  return "/extension-inputs/";
+}
+
+async function testSourceAccess(bound: NonNullable<typeof source>, scenario: unknown) {
+  const scan = await bound.scan();
+  const expected = testScenarioPath(scenario);
+  const input = scan.inputs.find((candidate) => candidate.url.includes(expected));
+  if (!input) throw new Error(`direct scan did not find ${expected}`);
+  const url =
+    scenario === "cookie-session"
+      ? new URL("/__source-access-proof", bound.documentUrl).href
+      : input.url;
+  const result = await bound.fetch({ uri: url, headers: [] }, new AbortController().signal);
+  return {
+    ok: true,
+    documentUrl: scan.documentUrl,
+    candidates: scan.inputs.length,
+    bytes: result.bytes.byteLength,
+  };
+}
+
 api.runtime.onMessage.addListener((message: unknown) => {
   if (!message || typeof message !== "object" || !("type" in message)) return;
   const value = message as Record<string, unknown>;
@@ -223,28 +272,7 @@ api.runtime.onMessage.addListener((message: unknown) => {
   if (!TESTING || !source) return;
   const bound = source;
   if (value.type === "dezoomify-test-source-access")
-    return (async () => {
-      const scan = await bound.scan();
-      const expected =
-        value.scenario === "cookie-session"
-          ? "/protected/artwork.dzi"
-          : typeof value.scenario === "string" && value.scenario.startsWith("fixtures/")
-            ? `/${value.scenario}/`
-            : "/extension-inputs/";
-      const input = scan.inputs.find((candidate) => candidate.url.includes(expected));
-      if (!input) throw new Error(`direct scan did not find ${expected}`);
-      const url =
-        value.scenario === "cookie-session"
-          ? new URL("/__source-access-proof", bound.documentUrl).href
-          : input.url;
-      const result = await bound.fetch({ uri: url, headers: [] }, new AbortController().signal);
-      return {
-        ok: true,
-        documentUrl: scan.documentUrl,
-        candidates: scan.inputs.length,
-        bytes: result.bytes.byteLength,
-      };
-    })().catch((error: unknown) => ({
+    return testSourceAccess(bound, value.scenario).catch((error: unknown) => ({
       ok: false,
       error: error instanceof Error ? error.message : String(error),
     }));
@@ -269,7 +297,7 @@ api.permissions.onRemoved.addListener((removed) => {
     testGrantedOrigins.delete(origin.replace(/\/\*$/, ""));
 });
 window.addEventListener("beforeunload", () => {
-  app.dispose();
+  void app.dispose();
   syncIndicator(false, false);
   source?.dispose();
 });

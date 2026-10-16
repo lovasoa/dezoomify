@@ -3,11 +3,11 @@ import type {
   DesktopOutput,
   DiagnosticReport,
   Error as JobError,
-  MissingTiles,
   Progress,
-  RecoveryChoice,
+  RetryChoice,
   SavedOutput,
   SavedOutputState,
+  TileAcquisition,
 } from "@dezoomify/wasm-bindings";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -37,21 +37,13 @@ async function withVerdict<T>(error: T, api: DesktopIpc): Promise<T> {
   return error;
 }
 
-/** `withVerdict` across every retained failure of a partial decision. */
-async function withVerdictMissing(missing: MissingTiles, api: DesktopIpc): Promise<MissingTiles> {
-  await Promise.all(
-    missing.missing.flatMap((tile) => tile.failures.map((failure) => withVerdict(failure, api))),
-  );
-  return missing;
-}
-
 export interface NativeInvocation {
   id: string;
   finished: Promise<DesktopOutput>;
   cancel(): Promise<void>;
   pause(): Promise<void>;
   resume(): Promise<void>;
-  answer(question: number, choice: RecoveryChoice): Promise<void>;
+  answer(question: number, choice: RetryChoice): Promise<void>;
   openOutput(reveal: boolean): Promise<void>;
   dispose(): Promise<void>;
 }
@@ -60,7 +52,7 @@ export async function invokeNative(
   request: { inputUrl: string; settings: DesktopSettings },
   callbacks: {
     progress(value: Progress): void;
-    partial(question: number, value: MissingTiles): void;
+    retry(question: number, value: TileAcquisition): void;
   },
   api: DesktopIpc = ipc,
 ): Promise<NativeInvocation> {
@@ -78,11 +70,7 @@ export async function invokeNative(
     for (const stop of unlisten.splice(0)) stop();
   };
   try {
-    for (const channel of [
-      "dezoomify://registered",
-      "dezoomify://progress",
-      "dezoomify://partial",
-    ]) {
+    for (const channel of ["dezoomify://registered", "dezoomify://progress", "dezoomify://retry"]) {
       const stop = await api.listen(channel, ({ payload }) => {
         if (
           retired ||
@@ -97,17 +85,12 @@ export async function invokeNative(
         if (channel === "dezoomify://progress" && "progress" in payload)
           callbacks.progress(payload.progress as Progress);
         if (
-          channel === "dezoomify://partial" &&
+          channel === "dezoomify://retry" &&
           "question" in payload &&
           typeof payload.question === "number" &&
-          "missing" in payload
+          "request" in payload
         ) {
-          // The verdict rides along as plain data before the shared UI gates
-          // its retry action on the hint.
-          const question = payload.question;
-          void withVerdictMissing(payload.missing as MissingTiles, api).then((missing) => {
-            if (!retired) callbacks.partial(question, missing);
-          });
+          callbacks.retry(payload.question, payload.request as TileAcquisition);
         }
       });
       if (typeof stop === "function") unlisten.push(stop as () => void);
@@ -147,7 +130,7 @@ export async function invokeNative(
     cancel: () => call("cancel_job"),
     pause: () => call("pause_job"),
     resume: () => call("resume_job"),
-    answer: (question, answer) => call("answer_partial", { question, answer }),
+    answer: (question, answer) => call("answer_retry", { question, answer }),
     openOutput: (reveal) => call("open_saved_output", { reveal }),
     async dispose() {
       if (retired) return;

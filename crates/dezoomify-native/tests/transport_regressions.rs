@@ -74,6 +74,174 @@ fn generated_requests_keep_headers_and_redirect_results_for_every_purpose() {
     assert_eq!(requests.load(Ordering::SeqCst), 6);
 }
 
+#[test]
+fn duplicate_ranges_are_rejected_before_header_normalization() {
+    use dezoomify::model::{Header, RequestPurpose, ResourceRequest};
+    let transport = transport();
+    // Either URI would fail with a network error if acquisition were attempted.
+    for uri in [
+        "http://127.0.0.1:9/container.zif",
+        "/missing-dezoomify-range-fixture/container.zif",
+    ] {
+        for name in ["Range", "rAnGe"] {
+            let request = ResourceRequest {
+                uri: uri.into(),
+                purpose: RequestPurpose::Metadata,
+                headers: vec![
+                    Header {
+                        name: "Range".into(),
+                        value: "bytes=0-3".into(),
+                    },
+                    Header {
+                        name: name.into(),
+                        value: "bytes=4-7".into(),
+                    },
+                ],
+            };
+            assert!(matches!(
+                transport.block_on(transport.fetch_resource(&request, None, &limits())),
+                Err(Error::BadUrl(_))
+            ));
+        }
+        let headers = BTreeMap::from([
+            ("Range".into(), "bytes=0-3".into()),
+            ("rAnGe".into(), "bytes=4-7".into()),
+        ]);
+        assert!(matches!(
+            transport.fetch(uri, &headers, None, &limits()),
+            Err(Error::BadUrl(_))
+        ));
+    }
+}
+
+#[test]
+fn finite_ranges_require_exact_partial_responses_after_redirects() {
+    let cases = [
+        ("valid", 206, "bytes 4-7/10", "4567"),
+        ("ignored", 200, "", "0123456789"),
+        ("missing", 206, "", "4567"),
+        ("wrong", 206, "bytes 0-3/10", "0123"),
+        ("unknown-total", 206, "bytes 4-7/*", "4567"),
+        ("bad-total", 206, "bytes 4-7/7", "4567"),
+        ("short", 206, "bytes 4-7/10", "456"),
+        ("long", 206, "bytes 4-7/10", "45678"),
+        (
+            "duplicate",
+            206,
+            "bytes 4-7/10\r\nContent-Range: bytes 0-3/10",
+            "4567",
+        ),
+        ("refused", 416, "", "range refused"),
+    ];
+    let server = NodeServer::raw("127.0.0.1", move |request| {
+        assert!(request.head.to_lowercase().contains("range: bytes=4-7"));
+        // The raw server closes these sockets; advertise that so the pool
+        // cannot reuse one before its FIN arrives during an early rejection.
+        if request.path == "/redirect" {
+            return response(
+                "HTTP/1.1 302 Found",
+                &[("connection", "close"), ("location", "/valid")],
+                b"",
+            )
+            .into();
+        }
+        if request.path == "/chunked-short" || request.path == "/chunked-long" {
+            let chunk = if request.path == "/chunked-short" {
+                "3\r\n456"
+            } else {
+                "5\r\n45678"
+            };
+            return format!("HTTP/1.1 206 Partial Content\r\nConnection: close\r\nContent-Range: bytes 4-7/10\r\nTransfer-Encoding: chunked\r\n\r\n{chunk}\r\n0\r\n\r\n").into_bytes().into();
+        }
+        let (_, status, range, body) = cases
+            .iter()
+            .find(|(path, ..)| request.path == format!("/{path}"))
+            .expect("known case");
+        let mut headers = vec![("connection", "close")];
+        if !range.is_empty() {
+            headers.push(("content-range", *range));
+        }
+        response(&format!("HTTP/1.1 {status}"), &headers, body.as_bytes()).into()
+    });
+    let transport = transport();
+    let headers = BTreeMap::from([("Range".into(), "bytes=4-7".into())]);
+    let fetch = |path| {
+        transport.fetch(
+            &format!("{}/{path}", server.origin),
+            &headers,
+            None,
+            &limits(),
+        )
+    };
+    let valid = fetch("redirect").unwrap();
+    assert_eq!(valid.status, 206);
+    assert_eq!(valid.body, b"4567");
+    for path in cases
+        .iter()
+        .filter(|case| !["valid", "refused"].contains(&case.0))
+        .map(|case| case.0)
+        .chain(["chunked-short", "chunked-long"])
+    {
+        let error = fetch(path).unwrap_err();
+        assert!(matches!(error, Error::BadUrl(_)), "{path}: {error}");
+    }
+    let refusal = fetch("refused").unwrap();
+    assert_eq!(refusal.status, 416);
+    let user = UserHeaders::new(BTreeMap::from([("Range".into(), "bytes=0-1".into())]), None);
+    assert!(matches!(
+        transport.fetch(
+            &format!("{}/valid", server.origin),
+            &headers,
+            Some(&user),
+            &limits()
+        ),
+        Err(Error::BadUrl(_))
+    ));
+    server.join().unwrap();
+}
+
+#[test]
+fn local_ranges_seek_without_reading_the_whole_container() {
+    let work = dezoomify_fixture_server::temp_dir("local-ranges");
+    let path = work.join("container.bin");
+    std::fs::write(&path, b"0123456789").unwrap();
+    let transport = transport();
+    let mut small = limits();
+    small.max_bytes = 4;
+    for uri in [
+        path.to_str().unwrap().to_owned(),
+        format!("file://{}", path.display()),
+    ] {
+        let headers = BTreeMap::from([("Range".into(), "bytes=4-7".into())]);
+        let outcome = transport.fetch(&uri, &headers, None, &small).unwrap();
+        assert_eq!(outcome.status, 206);
+        assert_eq!(outcome.body, b"4567");
+        for value in [
+            "bytes=8-11",
+            "bytes=-3",
+            "bytes=3-",
+            "bytes=4-3",
+            "bytes=0-1,4-5",
+            "bytes=+0-1",
+            "bytes=0-18446744073709551615",
+        ] {
+            let headers = BTreeMap::from([("Range".into(), value.into())]);
+            assert!(
+                matches!(
+                    transport.fetch(&uri, &headers, None, &small),
+                    Err(Error::BadUrl(_))
+                ),
+                "{value}"
+            );
+        }
+        assert!(matches!(
+            transport.fetch(&uri, &BTreeMap::new(), None, &small),
+            Err(Error::SizeLimit { .. })
+        ));
+    }
+    std::fs::remove_dir_all(work).unwrap();
+}
+
 fn response(status_line: &str, headers: &[(&str, &str)], body: &[u8]) -> Vec<u8> {
     let mut out = Vec::new();
     out.extend_from_slice(status_line.as_bytes());

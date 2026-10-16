@@ -11,8 +11,7 @@ export interface ViewCallbacks {
   onOpenSource?(): void;
   onReset?(): void;
   onRetrySameUrl?(): void;
-  /** Restart the job at the maximum known resolution (browser products). */
-  onTryMaximum?(): void;
+  onRetryChoice?(choice: RetryChoice): void;
   onSave?(): void;
   onOpenOutput?(): Promise<void>;
   onRevealOutput?(): Promise<void>;
@@ -20,6 +19,7 @@ export interface ViewCallbacks {
   onOpenHistory?(entry: HistoryEntry): Promise<void>;
   onOpenExternalLink?(url: string): void;
   onCopyDiagnostics?(text: string): void | Promise<void>;
+  onCopyText?(text: string): Promise<void>;
   onSaveDiagnostics?(report: DiagnosticReport): void | Promise<void>;
   onLoadDiagnostics?(): Promise<DiagnosticReport>;
   onClearHistory?(): void;
@@ -31,6 +31,7 @@ export interface ViewCallbacks {
  * Product-local view data alongside the generated progress, output, and errors.
  */
 export interface ViewContext {
+  product?: "website" | "extension" | "desktop";
   diagnosticReport?: DiagnosticReport;
   currentProgress?: {
     active?: number;
@@ -43,6 +44,10 @@ export interface ViewContext {
   jobActivity?: JobActivity;
   initialUrl?: string;
   sourceUrl?: string;
+  /** Core-discovered URL to paste into the desktop app, rather than the scanned page. */
+  desktopSourceUrl?: string;
+  /** Browser products offer the desktop app for larger images. */
+  offerDesktopApp?: boolean;
   history?: HistoryRow[];
   historyNow?: number;
 }
@@ -61,3 +66,5 @@ export interface PlatformHints {
   userAgent?: string;
   platform?: string;
 }
+
+import type { RetryChoice } from "@dezoomify/wasm-bindings";

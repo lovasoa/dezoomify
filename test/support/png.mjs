@@ -72,38 +72,44 @@ export function decodePngPixels(bytes) {
     const filter = raw[y * stride];
     const row = raw.subarray(y * stride + 1, (y + 1) * stride);
     const out = pixels.subarray(y * width * bpp, (y + 1) * width * bpp);
-    for (let x = 0; x < row.length; x += 1) {
-      const a = x >= bpp ? out[x - bpp] : 0;
-      const b = y > 0 ? pixels[(y - 1) * width * bpp + x] : 0;
-      const c = x >= bpp && y > 0 ? pixels[(y - 1) * width * bpp + x - bpp] : 0;
-      let value = row[x];
-      switch (filter) {
-        case 0:
-          break;
-        case 1:
-          value += a;
-          break;
-        case 2:
-          value += b;
-          break;
-        case 3:
-          value += (a + b) >> 1;
-          break;
-        case 4: {
-          const p = a + b - c;
-          const pa = Math.abs(p - a);
-          const pb = Math.abs(p - b);
-          const pc = Math.abs(p - c);
-          value += pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
-          break;
-        }
-        default:
-          assert.fail(`unknown PNG row filter ${filter}`);
-      }
-      out[x] = value & 0xff;
-    }
+    const previous = y > 0 ? pixels.subarray((y - 1) * width * bpp, y * width * bpp) : undefined;
+    unfilterPngRow(filter, row, out, previous, bpp);
   }
   return { pixels, bpp, width, height };
+}
+
+function unfilterPngRow(filter, row, out, previous, bpp) {
+  for (let x = 0; x < row.length; x += 1) {
+    const left = x >= bpp ? out[x - bpp] : 0;
+    const above = previous?.[x] ?? 0;
+    const corner = x >= bpp ? (previous?.[x - bpp] ?? 0) : 0;
+    out[x] = (row[x] + pngPredictor(filter, left, above, corner)) & 0xff;
+  }
+}
+
+function pngPredictor(filter, a, b, c) {
+  switch (filter) {
+    case 0:
+      return 0;
+    case 1:
+      return a;
+    case 2:
+      return b;
+    case 3:
+      return (a + b) >> 1;
+    case 4:
+      return paethPredictor(a, b, c);
+    default:
+      assert.fail(`unknown PNG row filter ${filter}`);
+  }
+}
+
+function paethPredictor(a, b, c) {
+  const p = a + b - c;
+  const pa = Math.abs(p - a),
+    pb = Math.abs(p - b),
+    pc = Math.abs(p - c);
+  return pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
 }
 
 /** RGBA quadruple at one pixel (opaque for RGB sources). */

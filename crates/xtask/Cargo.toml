@@ -9,9 +9,12 @@ name = "xtask"
 path = "src/main.rs"
 
 [dependencies]
+dezoomify = { path = "../dezoomify" }
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
+base64.workspace = true
+minisign-verify = "0.3.0"
 toml.workspace = true
 # Fixture tooling shares the fixture server's route schema, content-type
 # mapping, and route-id derivation so the two cannot drift.
@@ -22,6 +25,5 @@ libc = "0.2"
 
 [dev-dependencies]
 
-# 6.1 (unblocked for cargo 1.98): pedantic cleanups pending.
-[lints.clippy]
-pedantic = "allow"
+[lints]
+workspace = true

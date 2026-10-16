@@ -126,7 +126,7 @@ fn follow_mediabank(resource: DiscoveryResource<'_>) -> Result<ParsedResource, D
             query.append_pair(&name, &value);
         }
     }
-    Ok(ParsedResource::FollowWith(
+    Ok(ParsedResource::FollowIntermediate(
         Request::new(api.to_string()),
         follow_media,
     ))

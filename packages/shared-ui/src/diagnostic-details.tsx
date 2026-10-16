@@ -19,12 +19,13 @@ export function diagnosticIssueUrl(report: DiagnosticReport, error?: JobError): 
   } catch {
     /* Invalid input still deserves a report. */
   }
-  const product = ["website", "extension", "desktop"].includes(String(report.context.product))
-    ? String(report.context.product)
-    : "website";
+  const product =
+    report.context.product === "extension" || report.context.product === "desktop"
+      ? report.context.product
+      : "website";
   const facts = error ? diagnosticFields(error) : (report.outcome?.fields ?? {});
   const message = error
-    ? plainMessageFor(error, host)
+    ? plainMessageFor(error, host, product)
     : String(
         facts.message ??
           facts["error.message"] ??
@@ -58,6 +59,17 @@ export function diagnosticIssueUrl(report: DiagnosticReport, error?: JobError): 
   const fence = "`".repeat(
     Math.max(3, ...Array.from(details.matchAll(/`+/g), (match) => match[0].length + 1)),
   );
+  const labels = issueLabels(facts, product);
+  const params = new URLSearchParams({
+    title: `${host} : ${product} report`,
+    labels: [...labels].join(","),
+    body: "",
+  });
+  fitIssueBody(params, intro, details, fence, input);
+  return `https://github.com/lovasoa/dezoomify/issues/new?${params}`;
+}
+
+function issueLabels(facts: Record<string, unknown>, product: string): Set<string> {
   const labels = new Set(["unconfirmed", product]);
   for (const [key, kind] of Object.entries(facts)) {
     if (!/(?:^|\.)kind$/.test(key)) continue;
@@ -98,11 +110,16 @@ export function diagnosticIssueUrl(report: DiagnosticReport, error?: JobError): 
         break;
     }
   }
-  const params = new URLSearchParams({
-    title: `${host} : ${product} report`,
-    labels: [...labels].join(","),
-    body: "",
-  });
+  return labels;
+}
+
+function fitIssueBody(
+  params: URLSearchParams,
+  intro: string,
+  details: string,
+  fence: string,
+  input: string,
+): void {
   const bodyFor = (length: number) =>
     `${intro}${fence}text\n${details.slice(0, length)}${length < details.length ? "\n[Truncated; copy or save the complete diagnostics from Dezoomify.]" : ""}\n${fence}\n`;
   let low = 0;
@@ -127,7 +144,6 @@ export function diagnosticIssueUrl(report: DiagnosticReport, error?: JobError): 
       }
     }
   }
-  return `https://github.com/lovasoa/dezoomify/issues/new?${params}`;
 }
 
 export function DiagnosticDetails({

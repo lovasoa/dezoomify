@@ -18,8 +18,20 @@ const eventChannels = [
   .sort();
 const config = JSON.parse(read("apps/desktop/src-tauri/tauri.conf.json"));
 const metadata = JSON.parse(read("apps/desktop/src-tauri/dezoomify.json"));
+const { codecs } = JSON.parse(read("generated/output-codecs.json"));
+metadata.outputFormats = codecs.map((codec) => codec.format);
+metadata.encoders = codecs
+  .filter((codec) => codec.layout !== "directory")
+  .map((codec) => codec.format);
 metadata.commands = commands;
 metadata.eventChannels = eventChannels;
+metadata.updater = {
+  allowlist: config.plugins.updater.endpoints,
+  channel: "latest",
+  enabled: config.plugins.updater.endpoints.length > 0 && Boolean(config.plugins.updater.pubkey),
+  httpsOnly: true,
+  requiresUserConfirm: true,
+};
 
 const capabilities = {
   $schema: "../gen/schemas/desktop-schema.json",

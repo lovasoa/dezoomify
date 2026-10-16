@@ -2,7 +2,7 @@
 
 import type { Error as JobError } from "@dezoomify/wasm-bindings";
 import { hostFromUrl } from "../../shared-ui/src/view-helpers.ts";
-import { outputError } from "./failure.ts";
+import { outputError, unknownDetail } from "./failure.ts";
 
 function canvasFailure(
   kind: "plan-invalid" | "output-unavailable",
@@ -33,8 +33,11 @@ export function canvasAllocationFailure(
   width: number,
   height: number,
   sourceUrl: string,
+  cause?: unknown,
 ): JobError {
-  return canvasFailure("output-unavailable", width, height, sourceUrl, "allocation failed");
+  const stage =
+    cause === undefined ? "allocation failed" : `allocation failed: ${unknownDetail(cause)}`;
+  return canvasFailure("output-unavailable", width, height, sourceUrl, stage);
 }
 
 /** The browser gave no 2D context for the output canvas at this size. */
