@@ -99,6 +99,7 @@ export function collectCandidates(): {
   ok: true;
   documentUrl: string;
   inputs: JobInput[];
+  images?: string[];
   overflow: number;
 } {
   const MAX_URL_LENGTH = 2048;
@@ -106,6 +107,7 @@ export function collectCandidates(): {
   const MAX_DOM_BYTES = 8 * 1024 * 1024;
   const documentUrl = String(globalThis.location?.href ?? "");
   const inputs: JobInput[] = [];
+  const images = new Set<string>();
   const seen = new Set<string>();
   let overflow = 0;
   function readableSourceContents(contents: unknown): string | undefined {
@@ -124,9 +126,7 @@ export function collectCandidates(): {
     } catch {
       return;
     }
-    const key = kind === "observed-image" ? `image:${value}` : value;
-    if ((parsed.protocol !== "http:" && parsed.protocol !== "https:") || seen.has(key)) return;
-    seen.add(key);
+    if ((parsed.protocol !== "http:" && parsed.protocol !== "https:") || seen.has(value)) return;
     seen.add(value);
     if (inputs.length >= MAX_CANDIDATES) {
       overflow += 1;
@@ -158,31 +158,39 @@ export function collectCandidates(): {
   collectLoadedImages();
   // A standalone image's favicon and other browser requests are unrelated to
   // the artwork. Its wrapper and loaded image already supply all evidence.
-  if (imageDocument()) return { ok: true, documentUrl, inputs, overflow };
+  if (imageDocument()) return { ok: true, documentUrl, inputs, overflow, ...imageSnapshot() };
 
   try {
     for (const entry of globalThis.performance?.getEntriesByType?.("resource") ?? []) {
-      append(
-        typeof entry === "string" ? entry : entry?.name,
-        (entry as PerformanceResourceTiming).initiatorType === "img"
-          ? "observed-image"
-          : "observed-resource",
-      );
+      append(typeof entry === "string" ? entry : entry?.name, "observed-resource");
+      if ((entry as PerformanceResourceTiming).initiatorType === "img") imageUrl(entry.name);
     }
   } catch {}
-  return { ok: true, documentUrl, inputs, overflow };
+  return { ok: true, documentUrl, inputs, overflow, ...imageSnapshot() };
 
   function collectLoadedImages() {
     try {
       for (const image of globalThis.document?.images ?? []) {
         if (image.complete && image.naturalWidth > 0 && image.naturalHeight > 0)
-          append(image.currentSrc || image.src, "observed-image");
+          imageUrl(image.currentSrc || image.src);
       }
     } catch {}
   }
 
   function imageDocument() {
     return globalThis.document?.contentType?.startsWith("image/") ?? false;
+  }
+
+  function imageUrl(value: string) {
+    if (images.size >= 64 || value.length > MAX_URL_LENGTH) return;
+    try {
+      const url = new URL(value);
+      if (url.protocol === "https:" || url.protocol === "http:") images.add(value);
+    } catch {}
+  }
+
+  function imageSnapshot() {
+    return images.size > 0 ? { images: [...images] } : {};
   }
 }
 

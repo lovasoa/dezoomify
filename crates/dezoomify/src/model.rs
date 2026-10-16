@@ -484,9 +484,6 @@ pub enum DiscoveryInputKind {
     Source,
     ObservedDocument,
     ObservedResource,
-    /// An image loaded by the source document; eligible for the large-image
-    /// fallback only after ordinary format discovery has exhausted its sources.
-    ObservedImage,
     /// Complete metadata reconstructed from a loaded viewer; never fetched.
     ObservedMetadata,
 }

@@ -2,7 +2,6 @@ import type {
   Error as JobError,
   Output,
   Progress,
-  Size,
   TileAcquisition,
 } from "@dezoomify/wasm-bindings";
 import type { I18nKey } from "./i18n.ts";
@@ -35,7 +34,6 @@ export interface Presentation {
   output?: Output;
   retryApproval?: TileAcquisition;
   resolution?: ResolutionChoice;
-  loadedImage?: Size;
 }
 
 const headlines: Record<PresentationStatus, I18nKey> = {
@@ -87,7 +85,6 @@ export function presentProgress(progress: Progress, opts?: { paused?: boolean })
         ? { current: progress.completed, total: progress.total ?? null }
         : null,
     paused: opts?.paused === true && progress.phase !== "output",
-    ...(progress.source_format === "loaded-image" && selected ? { loadedImage: selected } : {}),
     ...(preparation
       ? {
           detailKey: "view.job.preparation" as const,
@@ -113,12 +110,7 @@ export function presentOutput(output: Output, progress: Progress | undefined): P
   return {
     ...presented,
     progress: progress ? { current: progress.completed, total: progress.total ?? null } : null,
-    ...(progress
-      ? {
-          resolution: presentProgress(progress).resolution,
-          loadedImage: presentProgress(progress).loadedImage,
-        }
-      : {}),
+    ...(progress ? { resolution: presentProgress(progress).resolution } : {}),
     output,
   };
 }

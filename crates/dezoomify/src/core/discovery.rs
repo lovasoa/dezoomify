@@ -1592,11 +1592,6 @@ fn tier_candidates(roots: &mut Vec<Root>, specs: &[FormatSpec]) -> Vec<Candidate
     for (evidence, depth, order, input) in roots.drain(..ready) {
         let metadata_only = input.kind == DiscoveryInputKind::ObservedMetadata;
         let mut formats = specs.to_vec();
-        // A loaded raster can still carry a known tile-service URL. Preserve
-        // those routes, but leave unrelated image bytes for the final fallback.
-        if input.kind == DiscoveryInputKind::ObservedImage {
-            formats.retain(|spec| spec.url_kind(&input.url).is_some());
-        }
         formats.sort_by_key(|spec| {
             let kind = spec.url_kind(&input.url);
             (kind.is_none(), kind)

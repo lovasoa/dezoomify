@@ -68,7 +68,6 @@ function validCandidate(value: unknown): value is CandidateInput {
     value.kind !== "source" &&
     value.kind !== "observed-document" &&
     value.kind !== "observed-resource" &&
-    value.kind !== "observed-image" &&
     value.kind !== "observed-metadata"
   )
     return false;
@@ -90,7 +89,19 @@ function validSnapshot(value: unknown, expectedUrl: string): value is CandidateS
     value.overflow >= 0 &&
     Array.isArray(value.inputs) &&
     value.inputs.length <= MAX_CANDIDATES &&
-    value.inputs.every(validCandidate)
+    value.inputs.every(validCandidate) &&
+    validImages(value.images)
+  );
+}
+
+function validImages(value: unknown): boolean {
+  return (
+    value === undefined ||
+    (Array.isArray(value) &&
+      value.length <= 64 &&
+      value.every(
+        (url) => typeof url === "string" && url.length <= MAX_URL_LENGTH && isPublicHttpUrl(url),
+      ))
   );
 }
 

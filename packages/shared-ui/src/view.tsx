@@ -906,10 +906,21 @@ function SharedView({
         />
       ) : null}
       {phase === "cancelled" ? <CancelledView callbacks={callbacks} /> : null}
-      {presentation.loadedImage ? (
-        <p className="dz-completed-guidance" id="dz-loaded-image">
-          {t("view.loadedImage", { ...presentation.loadedImage })}
-        </p>
+      {ctx?.loadedImage ? (
+        <div>
+          <p className="dz-completed-guidance" id="dz-loaded-image">
+            {t("view.loadedImage", {
+              width: ctx.loadedImage.width,
+              height: ctx.loadedImage.height,
+            })}
+          </p>
+          <img
+            src={ctx.loadedImage.url}
+            alt=""
+            id="dz-loaded-image-preview"
+            style={{ maxWidth: "100%", maxHeight: "70vh", objectFit: "contain" }}
+          />
+        </div>
       ) : null}
       {options?.after}
       {phase !== "idle" ? diagnostics : null}

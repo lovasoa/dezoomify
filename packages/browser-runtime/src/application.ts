@@ -61,6 +61,7 @@ export interface BrowserApplicationContext {
 export interface BrowserCapabilities
   extends Pick<BrowserHostDependencies, "fetchResource" | "loadDisplayImage" | "observe"> {
   inputs(url: string): Promise<JobInput[]>;
+  recoverDiscovery?(error: JobError): Promise<Output | undefined>;
   canvas(): HTMLCanvasElement;
   showCanvas?(canvas: HTMLCanvasElement): void;
   save(
@@ -117,6 +118,7 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
       capabilities: undefined as BrowserCapabilities | undefined,
       progress: undefined as Progress | undefined,
       output: undefined as Output | undefined,
+      recovery: undefined as Promise<Output | undefined> | undefined,
       failure: undefined as JobError | undefined,
       retryApproval: undefined as
         | { request: TileAcquisition; answer(choice: RetryChoice): void }
@@ -160,7 +162,9 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
     current = undefined;
     a.controller.abort();
     a.activity.stopHeartbeat();
-    retiring = Promise.all([retiring, a.host?.settle()]).then(() => {});
+    retiring = Promise.all([retiring, a.host?.settle(), a.recovery?.catch(() => {})]).then(
+      () => {},
+    );
     a.capabilities?.dispose?.();
     a.diagnostics.finish("retired");
     return retiring;
@@ -230,6 +234,16 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
 
   async function failInvocation(a: ReturnType<typeof invocation>, error: unknown): Promise<void> {
     if (current !== a) return;
+    try {
+      const output = await recoverInvocation(a, error);
+      if (output) {
+        completeInvocation(a, output);
+        return;
+      }
+    } catch (cause) {
+      error = cause;
+    }
+    if (current !== a) return;
     const outcome = a.controller.signal.aborted ? "cancelled" : "failed";
     history.update(a.historyEntry, { status: outcome });
     if (outcome === "failed") {
@@ -238,6 +252,13 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
       );
     }
     a.diagnostics.finish(outcome, error);
+  }
+
+  function recoverInvocation(a: ReturnType<typeof invocation>, error: unknown) {
+    if (a.controller.signal.aborted || a.progress?.phase !== "discovery" || !isJobError(error))
+      return undefined;
+    a.recovery = a.capabilities?.recoverDiscovery?.(error);
+    return a.recovery;
   }
 
   async function settleInvocation(a: ReturnType<typeof invocation>): Promise<void> {

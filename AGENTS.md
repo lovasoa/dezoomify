@@ -1,6 +1,9 @@
 Dezoomify's website, extension, desktop app, and CLI share one Rust algorithm
 with injected `Host` capabilities.
 
+Use experienced engineering judgment. Keep product-specific features in their
+product when that is simpler; share code when it improves the design.
+
 ## Where to look
 
 - [Architecture](docs/architecture.md): ownership and dependency boundaries.

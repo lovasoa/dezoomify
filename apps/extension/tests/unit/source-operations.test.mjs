@@ -137,16 +137,16 @@ test("loaded image evidence uses currentSrc and retains off-DOM image requests",
     ],
   };
   try {
-    const { inputs } = collectCandidates();
+    const { inputs, images } = collectCandidates();
     assert.deepEqual(
       inputs.map(({ url, kind }) => [url, kind]),
       [
         [globalThis.location.href, "source"],
-        [globalThis.location.href, "observed-image"],
-        ["https://gallery.example/canvas-image", "observed-image"],
+        ["https://gallery.example/canvas-image", "observed-resource"],
         ["https://gallery.example/tracker.js", "observed-resource"],
       ],
     );
+    assert.deepEqual(images, [globalThis.location.href, "https://gallery.example/canvas-image"]);
   } finally {
     Object.assign(globalThis, previous);
   }
@@ -169,12 +169,13 @@ test("standalone image tabs keep their wrapper and image without probing browser
     getEntriesByType: () => assert.fail("image tabs need no resource inventory"),
   };
   try {
-    const { inputs } = collectCandidates();
+    const { inputs, images } = collectCandidates();
     assert.equal(inputs[0].contents, globalThis.document.documentElement.outerHTML);
     assert.deepEqual(
       inputs.map((input) => input.kind),
-      ["source", "observed-image"],
+      ["source"],
     );
+    assert.deepEqual(images, [url]);
   } finally {
     Object.assign(globalThis, previous);
   }

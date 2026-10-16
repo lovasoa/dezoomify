@@ -714,14 +714,15 @@ for (const [browser, run] of [
   }, async () => {
     const work = mkdtempSync(path.join(tmpdir(), "dezoomify-loaded-image-"));
     try {
-      const pixels = decodePngPixels(
-        await run(fixtureServer.base, work, {
-          scenario: "loaded-image",
-          async afterSave(page) {
-            assert.match(await page.locator("#dz-loaded-image").innerText(), /1800 × 1200/);
-          },
-        }),
-      );
+      const bytes = await run(fixtureServer.base, work, {
+        scenario: "loaded-image",
+        async afterSave(page) {
+          assert.match(await page.locator("#dz-loaded-image").innerText(), /1800 × 1200/);
+          await page.locator("#dz-loaded-image-preview").waitFor({ state: "visible" });
+        },
+      });
+      assert.deepEqual(bytes, readFileSync(path.join(fixtureWork, "static", "loaded-image.png")));
+      const pixels = decodePngPixels(bytes);
       assert.deepEqual([pixels.width, pixels.height], [1800, 1200]);
       assert.deepEqual(pixelAt(pixels, 900, 600), [27, 98, 154, 255]);
     } finally {
