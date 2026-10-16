@@ -33,7 +33,9 @@ fn release_plan_at(base: &Path, numbered: bool) -> Result<PathBuf, String> {
     let (version, exactly_tagged) = app_version()?;
     validate_version(&version)?;
     if numbered && !exactly_tagged {
-        return Err(format!("numbered release requires tag v{version} at HEAD"));
+        return Err(format!(
+            "numbered release requires annotated tag v{version} at HEAD"
+        ));
     }
     let targets = load_targets()?;
     let caps = load_capabilities()?;
@@ -66,7 +68,7 @@ fn release_plan_at(base: &Path, numbered: bool) -> Result<PathBuf, String> {
     if plan_path.exists() {
         let existing =
             std::fs::read_to_string(&plan_path).map_err(|e| format!("read existing plan: {e}"))?;
-        if existing != json {
+        if existing != json + "\n" {
             return Err(format!(
                 "plan {} already exists with different content; bump the version or remove target/release-dist/{version}",
                 plan_path.display()
@@ -129,12 +131,13 @@ mod tests {
         let version = app_version().unwrap().0;
         let base = temp_root("plan");
         let first = std::fs::read_to_string(release_plan_at(&base, false).unwrap()).unwrap();
+        // Repeating the same freeze is idempotent, including its final newline.
+        assert_eq!(
+            first,
+            std::fs::read_to_string(release_plan_at(&base, false).unwrap()).unwrap()
+        );
         let notes = std::fs::read_to_string(base.join(&version).join("notes.md")).unwrap();
         assert!(notes.starts_with(&format!("# dezoomify v{version}\n\n")));
-        std::fs::remove_dir_all(&base).unwrap();
-        std::fs::create_dir_all(&base).unwrap();
-        let second = std::fs::read_to_string(release_plan_at(&base, false).unwrap()).unwrap();
-        assert_eq!(first, second);
         let _ = std::fs::remove_dir_all(&base);
     }
 
