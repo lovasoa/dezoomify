@@ -1,27 +1,6 @@
 name: store-submit
-# Update the EXISTING store listings (release/config.toml [extension.*]).
-# Never create a new store item: the extension IDs are public and come from
-# release/config.toml (Chromium id + Firefox/AMO guid).
-# Default is dry-run: package the store payload and upload it as a workflow
-# artifact. Pass upload=true to push to the existing listing (Chromium: draft
-# upload; Firefox/AMO: listed-channel version upload, which auto-submits for
-# review), and publish=true to publish that Chromium upload. Release calls use
-# the immutable GitHub Release ZIP rather than rebuilding the extension.
-# Draft upload and publish fail closed with a clear message when any required
-# secret is missing.
-# Chromium secrets (OAuth only, no IDs): CHROME_WS_CLIENT_ID,
-# CHROME_WS_CLIENT_SECRET, CHROME_WS_REFRESH_TOKEN (one-time owner authorize).
-# Uploads use the /upload/ media endpoint; publish uses the items endpoint.
-# Firefox/AMO secrets (AMO API keys from the developer hub):
-# AMO_JWT_ISSUER, AMO_JWT_SECRET. Auth is a short-lived HS256 JWT per
-# https://addons-server.readthedocs.io/en/latest/topics/api/auth.html.
-# Optional override secret: CHROME_WS_EXTENSION_ID (emergency only; must match
-# release/config.toml unless deliberately overridden).
+
 on:
-  # Automatic dry-run on every main push touching the extension: package,
-  # validate, and keep the zip as an artifact. (inputs.upload defaults to
-  # false on push, so pushes never touch the store. Manual dispatch with
-  # upload=true lights up once these workflows reach the default branch.)
   push:
     branches: [main]
     paths:
@@ -31,6 +10,7 @@ on:
       - pnpm-workspace.yaml
       - .github/actions/setup-pnpm/action.yml
       - release/config.toml
+      - scripts/store-release.mjs
       - .github/workflows/store-submit.yml
   workflow_dispatch:
     inputs:
@@ -39,13 +19,12 @@ on:
         type: choice
         options: [chromium, firefox]
         default: chromium
-      upload:
-        description: "Upload draft to the EXISTING listing (needs secrets)"
-        required: false
-        type: boolean
-        default: false
-      publish:
-        description: "Publish the Chromium package uploaded by this run (requires upload=true)"
+      release_tag:
+        description: "Published GitHub release tag (required for submission)"
+        required: true
+        type: string
+      submit:
+        description: "Submit the released ZIP to the existing listing; bypass nightly limits"
         required: false
         type: boolean
         default: false
@@ -54,288 +33,90 @@ on:
       browser:
         required: true
         type: string
-      commit:
+      release_plan:
+        description: Frozen release metadata from the nightly coordinator
         required: true
         type: string
-      release_tag:
-        required: true
-        type: string
+
 permissions:
-  actions: read
   contents: read
-concurrency:
-  group: store-submit-${{ inputs.browser || 'chromium' }}-${{ github.ref }}
-  cancel-in-progress: false
+
 jobs:
-  submit:
+  dry-run:
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && !inputs.submit)
     runs-on: ubuntu-latest
-    environment: store-submit
-    timeout-minutes: 30
-    env:
-      # workflow_dispatch and workflow_call supply inputs.browser; push runs
-      # have no inputs.
-      BROWSER: ${{ inputs.browser || 'chromium' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.commit || github.sha }}
           fetch-depth: 0
       - uses: ./.github/actions/setup-pnpm
-        if: inputs.commit == ''
         with:
           install: true
       - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # pinned
-        if: inputs.commit == ''
         with:
-          toolchain: 1.98.1 # must match rust-toolchain.toml
+          toolchain: 1.98.1
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        if: inputs.commit == ''
-      - id: bindgen
-        uses: ./.github/actions/setup-wasm-bindgen
-        if: inputs.commit == ''
-      - name: Build wasm glue (generated, never committed)
-        if: inputs.commit == ''
+      - uses: ./.github/actions/setup-wasm-bindgen
+      - name: Build wasm glue
         run: |
-          set -euo pipefail
           cargo build -p dezoomify-wasm --profile wasm-release --target wasm32-unknown-unknown
           wasm-bindgen --remove-name-section --target web --out-dir wasm --out-name dezoomify-wasm target/wasm32-unknown-unknown/wasm-release/dezoomify_wasm.wasm
-          test -f wasm/dezoomify-wasm.js && test -f wasm/dezoomify-wasm_bg.wasm
-      - name: Resolve extension ID from release config
+      - name: Package store payload without submitting
         env:
-          CHROME_WS_EXTENSION_ID_OVERRIDE: ${{ secrets.CHROME_WS_EXTENSION_ID }}
+          BROWSER: ${{ inputs.browser || 'chromium' }}
         run: |
-          set -euo pipefail
-          cfg_id=$(python3 -c 'import tomllib; print(tomllib.load(open("release/config.toml","rb"))["extension"]["chromium"]["id"])')
-          case "$cfg_id" in
-            [a-z]*)
-              if [ "${#cfg_id}" -ne 32 ] || printf '%s' "$cfg_id" | grep -q '[^a-z]'; then
-                echo "bad extension ID in release/config.toml: $cfg_id"; exit 1;
-              fi ;;
-            *) echo "bad extension ID in release/config.toml: $cfg_id"; exit 1 ;;
-          esac
-          if [ -n "${CHROME_WS_EXTENSION_ID_OVERRIDE:-}" ]; then
-            echo "warn: CHROME_WS_EXTENSION_ID secret overrides release/config.toml ($cfg_id)"
-            echo "EXTENSION_ID=$CHROME_WS_EXTENSION_ID_OVERRIDE" >> "$GITHUB_ENV"
-          else
-            echo "EXTENSION_ID=$cfg_id" >> "$GITHUB_ENV"
-          fi
-          echo "target listing: $cfg_id (update in place, no new item)"
-      - name: Package store payload
-        if: inputs.commit == ''
-        run: |
-          set -euo pipefail
-          browser="${BROWSER:-chromium}"
-          version="$(cargo xtask release version)"
-          export DEZOOMIFY_VERSION="$version"
-          echo "DEZOOMIFY_VERSION=$version" >> "$GITHUB_ENV"
+          export DEZOOMIFY_VERSION="$(cargo xtask release version)"
           cargo xtask build extension
-          cp "target/extension/dezoomify-$browser.zip" "dezoomify-extension-$browser-$version.zip"
-          unzip -t "dezoomify-extension-$browser-$version.zip"
-          echo "package: ok (dezoomify-extension-$browser-$version.zip)"
-      - name: Upload artifact (dry-run record)
-        if: inputs.commit == ''
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+          cp "target/extension/dezoomify-$BROWSER.zip" "dezoomify-extension-$BROWSER-$DEZOOMIFY_VERSION.zip"
+          unzip -t "dezoomify-extension-$BROWSER-$DEZOOMIFY_VERSION.zip"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: dezoomify-extension
           path: dezoomify-extension-*.zip
           retention-days: 30
-      - name: Use released package for store mutation
-        if: inputs.commit != '' || inputs.upload == true || inputs.publish == true
+
+  freeze-manual:
+    if: github.event_name == 'workflow_dispatch' && inputs.submit
+    runs-on: ubuntu-latest
+    outputs:
+      plan: ${{ steps.freeze.outputs.plan }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-pnpm
+      - id: freeze
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.release_tag }}
-        run: |
-          set -euo pipefail
-          test "${{ inputs.publish }}" != "true" || test "${{ inputs.upload }}" = "true"
-          if [ -n "$RELEASE_TAG" ]; then
-            release_tag="$RELEASE_TAG"
-            version="${release_tag#rolling-v}"
-            version="${version#v}"
-          else
-            version="$DEZOOMIFY_VERSION"
-            release_tag="rolling-v$version"
-            git rev-parse "v$version^{commit}" >/dev/null 2>&1 && release_tag="v$version"
-          fi
-          asset="dezoomify-$BROWSER-v$version.zip"
-          package="dezoomify-extension-$BROWSER-$version.zip"
-          verify_dir="$(mktemp -d)"
-          trap 'rm -rf "$verify_dir"' EXIT
-          gh release download "$release_tag" --dir "$verify_dir" --pattern "$asset"
-          released_package="$verify_dir/$asset"
-          unzip -t "$released_package"
-          cp "$released_package" "$package"
-          echo "store package: GitHub release $release_tag/$asset"
-      - name: Draft upload to Chrome Web Store
-        if: inputs.browser == 'chromium' && (inputs.commit != '' || inputs.upload == true)
+        run: node scripts/store-release.mjs freeze
+
+  submit:
+    needs: freeze-manual
+    # Reusable runs deliberately have a skipped manual-freeze prerequisite.
+    if: always() && !cancelled() && (inputs.release_plan != '' || needs.freeze-manual.result == 'success')
+    runs-on: ubuntu-latest
+    environment: store-submit
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      deployments: write
+    concurrency:
+      # Shared by scheduled and manual submissions, regardless of branch/ref.
+      group: store-submit-${{ inputs.browser }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-pnpm
+      - name: Submit immutable release and record outcome
         env:
+          GH_TOKEN: ${{ github.token }}
+          BROWSER: ${{ inputs.browser }}
+          RELEASE_PLAN: ${{ inputs.release_plan || needs.freeze-manual.outputs.plan }}
+          AUTOMATIC: ${{ inputs.release_plan != '' }}
+          CHROME_WS_PUBLISHER_ID: ${{ vars.CHROME_WS_PUBLISHER_ID }}
           CHROME_WS_CLIENT_ID: ${{ secrets.CHROME_WS_CLIENT_ID }}
           CHROME_WS_CLIENT_SECRET: ${{ secrets.CHROME_WS_CLIENT_SECRET }}
           CHROME_WS_REFRESH_TOKEN: ${{ secrets.CHROME_WS_REFRESH_TOKEN }}
-        run: |
-          set -euo pipefail
-          for v in CHROME_WS_CLIENT_ID CHROME_WS_CLIENT_SECRET CHROME_WS_REFRESH_TOKEN; do
-            [ -n "${!v:-}" ] || { echo "missing secret $v (add it in repo settings, then re-run)"; exit 1; }
-          done
-          [ -n "${EXTENSION_ID:-}" ] || { echo "extension ID did not resolve from release/config.toml"; exit 1; }
-          zip=$(ls dezoomify-extension-chromium-*.zip)
-          token_resp=$(curl -sS --proto '=https' --max-time 30 -w '\n%{http_code}' -X POST https://oauth2.googleapis.com/token \
-            -d "client_id=${CHROME_WS_CLIENT_ID}" \
-            -d "client_secret=${CHROME_WS_CLIENT_SECRET}" \
-            -d "refresh_token=${CHROME_WS_REFRESH_TOKEN}" \
-            -d "grant_type=refresh_token") \
-            || { echo "token endpoint unreachable"; exit 1; }
-          http_code=$(printf '%s' "$token_resp" | tail -n1)
-          token=$(printf '%s' "$token_resp" | head -n -1 \
-            | python3 -c 'import json,sys; print(json.load(sys.stdin).get("access_token",""))' 2>/dev/null || true)
-          if [ -z "$token" ]; then
-            err=$(printf '%s' "$token_resp" | head -n -1 \
-              | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("error_description", d.get("error","unknown")))' 2>/dev/null \
-              || echo "unparseable response")
-            echo "token refresh failed: HTTP $http_code: $err"
-            echo "hint: re-run apps/extension/scripts/chrome-webstore-publish.sh authorize with the listing-owner account and update the CHROME_WS_REFRESH_TOKEN secret, then re-run"
-            exit 1
-          fi
-          put_resp=$(curl -sS --proto '=https' --max-time 120 -w '\n%{http_code}' \
-            -H "Authorization: Bearer ${token}" -H "x-goog-api-version: 2" -X PUT -T "$zip" \
-            "https://www.googleapis.com/upload/chromewebstore/v1.1/items/${EXTENSION_ID}") \
-            || { echo "upload endpoint unreachable"; exit 1; }
-          put_code=$(printf '%s' "$put_resp" | tail -n1)
-          put_body=$(printf '%s' "$put_resp" | head -n -1)
-          put_out=$(printf '%s' "$put_body" \
-            | python3 -c 'import json,sys; d=json.load(sys.stdin); print("upload:", d.get("uploadState","unknown")); [print("itemError:", e.get("error_code","?"), "-", e.get("error_detail","")) for e in d.get("itemError", [])]; print(d.get("uploadState",""))') \
-            || { echo "upload failed: HTTP $put_code: $(printf '%s' "$put_body" | head -c 300)"; exit 1; }
-          printf '%s\n' "$put_out" | head -n -1
-          echo "http: $put_code"
-          [ "$(printf '%s' "$put_out" | tail -n1)" = "SUCCESS" ] || { echo "upload not accepted (see itemError above)"; exit 1; }
-      - name: Publish uploaded draft
-        if: inputs.browser == 'chromium' && (inputs.commit != '' || inputs.publish == true)
-        env:
-          CHROME_WS_CLIENT_ID: ${{ secrets.CHROME_WS_CLIENT_ID }}
-          CHROME_WS_CLIENT_SECRET: ${{ secrets.CHROME_WS_CLIENT_SECRET }}
-          CHROME_WS_REFRESH_TOKEN: ${{ secrets.CHROME_WS_REFRESH_TOKEN }}
-        run: |
-          set -euo pipefail
-          for v in CHROME_WS_CLIENT_ID CHROME_WS_CLIENT_SECRET CHROME_WS_REFRESH_TOKEN; do
-            [ -n "${!v:-}" ] || { echo "missing secret $v (add it in repo settings, then re-run)"; exit 1; }
-          done
-          token_resp=$(curl -sS --proto '=https' --max-time 30 -w '\n%{http_code}' -X POST https://oauth2.googleapis.com/token \
-            -d "client_id=${CHROME_WS_CLIENT_ID}" \
-            -d "client_secret=${CHROME_WS_CLIENT_SECRET}" \
-            -d "refresh_token=${CHROME_WS_REFRESH_TOKEN}" \
-            -d "grant_type=refresh_token") \
-            || { echo "token endpoint unreachable"; exit 1; }
-          http_code=$(printf '%s' "$token_resp" | tail -n1)
-          token=$(printf '%s' "$token_resp" | head -n -1 \
-            | python3 -c 'import json,sys; print(json.load(sys.stdin).get("access_token",""))' 2>/dev/null || true)
-          if [ -z "$token" ]; then
-            err=$(printf '%s' "$token_resp" | head -n -1 \
-              | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("error_description", d.get("error","unknown")))' 2>/dev/null \
-              || echo "unparseable response")
-            echo "token refresh failed: HTTP $http_code: $err"
-            echo "hint: re-run apps/extension/scripts/chrome-webstore-publish.sh authorize with the listing-owner account and update the CHROME_WS_REFRESH_TOKEN secret, then re-run"
-            exit 1
-          fi
-          pub_resp=$(curl -sS --proto '=https' --max-time 120 -w '\n%{http_code}' \
-            -H "Authorization: Bearer ${token}" -H "x-goog-api-version: 2" -X POST \
-            "https://www.googleapis.com/chromewebstore/v1.1/items/${EXTENSION_ID}/publish?deployPercentage=100") \
-            || { echo "publish endpoint unreachable"; exit 1; }
-          pub_code=$(printf '%s' "$pub_resp" | tail -n1)
-          pub_body=$(printf '%s' "$pub_resp" | head -n -1)
-          pub_out=$(printf '%s' "$pub_body" \
-            | python3 -c '
-          import json, sys
-          d = json.load(sys.stdin)
-          status = d.get("status")
-          if status is not None:
-              print("publish:", status)
-          else:
-              error = d.get("error", {})
-              print("publish error:", error.get("message", "unknown"))
-              reasons = sorted({item.get("reason", "unknown") for item in error.get("errors", [])})
-              if reasons:
-                  print("reasons:", ", ".join(reasons))
-          accepted = 200 <= int(sys.argv[1]) < 300 and status == ["OK"]
-          already_queued = status == ["ITEM_PENDING_REVIEW"]
-          print("OK" if accepted or already_queued else "NOT-OK")
-          ' "$pub_code") \
-            || { echo "publish failed: HTTP $pub_code: $(printf '%s' "$pub_body" | head -c 500)"; exit 1; }
-          printf '%s\n' "$pub_out" | head -n -1
-          echo "http: $pub_code"
-          [ "$(printf '%s' "$pub_out" | tail -n1)" = "OK" ] || { echo "publish not accepted (see response above)"; exit 1; }
-      - name: Upload listed version to AMO (existing listing)
-        if: inputs.browser == 'firefox' && (inputs.commit != '' || inputs.upload == true)
-        env:
           AMO_JWT_ISSUER: ${{ secrets.AMO_JWT_ISSUER }}
           AMO_JWT_SECRET: ${{ secrets.AMO_JWT_SECRET }}
-        run: |
-          set -euo pipefail
-          for v in AMO_JWT_ISSUER AMO_JWT_SECRET; do
-            [ -n "${!v:-}" ] || { echo "missing secret $v (add it in repo settings, then re-run)"; exit 1; }
-          done
-          guid=$(python3 -c 'import tomllib; print(tomllib.load(open("release/config.toml","rb"))["extension"]["firefox"]["id"])')
-          case "$guid" in
-            \{*\}) : ;;
-            *) echo "bad AMO guid in release/config.toml: $guid"; exit 1 ;;
-          esac
-          zip=$(ls dezoomify-extension-firefox-*.zip)
-          enc=$(python3 -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1], safe=""))' "$guid")
-          amo_token() {
-            AMO_JWT_ISSUER="$AMO_JWT_ISSUER" AMO_JWT_SECRET="$AMO_JWT_SECRET" python3 -c 'import base64,hashlib,hmac,json,os,time,uuid; header=base64.urlsafe_b64encode(json.dumps({"alg":"HS256","typ":"JWT"}).encode()).rstrip(b"="); now=int(time.time()); payload=base64.urlsafe_b64encode(json.dumps({"iss":os.environ["AMO_JWT_ISSUER"],"jti":str(uuid.uuid4()),"iat":now,"exp":now+300}).encode()).rstrip(b"="); sig=base64.urlsafe_b64encode(hmac.new(os.environ["AMO_JWT_SECRET"].encode(),header+b"."+payload,hashlib.sha256).digest()).rstrip(b"="); print((header+b"."+payload+b"."+sig).decode())'
-          }
-          auth=$(amo_token)
-          upload_resp=$(curl -sS --proto '=https' --max-time 300 -w '\n%{http_code}' \
-            -H "Authorization: JWT ${auth}" \
-            -F "upload=@${zip}" -F "channel=listed" \
-            -X POST "https://addons.mozilla.org/api/v5/addons/upload/") \
-            || { echo "AMO upload endpoint unreachable"; exit 1; }
-          upload_code=$(printf '%s' "$upload_resp" | tail -n1)
-          upload_body=$(printf '%s' "$upload_resp" | head -n -1)
-          echo "upload http: $upload_code"
-          case "$upload_code" in
-            200|201|202) : ;;
-            *) echo "AMO upload failed: $(printf '%s' "$upload_body" | head -c 500)"; exit 1 ;;
-          esac
-          upload_uuid=$(printf '%s' "$upload_body" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("uuid", ""))')
-          upload_url=$(printf '%s' "$upload_body" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("url", ""))')
-          [ -n "$upload_uuid" ] || { echo "AMO upload response lacks uuid"; exit 1; }
-          case "$upload_url" in
-            https://addons.mozilla.org/api/v5/addons/upload/*/) : ;;
-            *) echo "AMO upload response has an invalid status URL"; exit 1 ;;
-          esac
-          processed=no
-          for _attempt in $(seq 1 60); do
-            auth=$(amo_token)
-            detail_resp=$(curl -sS --proto '=https' --max-time 30 -w '\n%{http_code}' \
-              -H "Authorization: JWT ${auth}" "$upload_url") \
-              || { echo "AMO validation endpoint unreachable"; exit 1; }
-            detail_code=$(printf '%s' "$detail_resp" | tail -n1)
-            detail_body=$(printf '%s' "$detail_resp" | head -n -1)
-            [ "$detail_code" = "200" ] || { echo "AMO validation failed: HTTP $detail_code"; exit 1; }
-            processed=$(printf '%s' "$detail_body" | python3 -c 'import json,sys; print("yes" if json.load(sys.stdin).get("processed") else "no")')
-            [ "$processed" = "yes" ] && break
-            sleep 5
-          done
-          [ "$processed" = "yes" ] || { echo "AMO validation timed out"; exit 1; }
-          valid=$(printf '%s' "$detail_body" | python3 -c 'import json,sys; print("yes" if json.load(sys.stdin).get("valid") else "no")')
-          if [ "$valid" != "yes" ]; then
-            printf '%s' "$detail_body" | python3 -c 'import json,sys; print("AMO validation errors:", json.dumps(json.load(sys.stdin).get("validation", {}))[:1000])'
-            exit 1
-          fi
-          version=$(printf '%s' "$detail_body" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("version", "?"))')
-          payload=$(python3 -c 'import json,sys; print(json.dumps({"version": {"upload": sys.argv[1]}}))' "$upload_uuid")
-          auth=$(amo_token)
-          submit_resp=$(curl -sS --proto '=https' --max-time 300 -w '\n%{http_code}' \
-            -H "Authorization: JWT ${auth}" -H "Content-Type: application/json" \
-            --data "$payload" -X PUT "https://addons.mozilla.org/api/v5/addons/addon/${enc}/") \
-            || { echo "AMO submission endpoint unreachable"; exit 1; }
-          submit_code=$(printf '%s' "$submit_resp" | tail -n1)
-          submit_body=$(printf '%s' "$submit_resp" | head -n -1)
-          echo "submit http: $submit_code"
-          case "$submit_code" in
-            200|201|202) : ;;
-            409) echo "version ${version} already exists on the listing; bump the version and re-run"; exit 1 ;;
-            *) echo "AMO submission failed: $(printf '%s' "$submit_body" | head -c 500)"; exit 1 ;;
-          esac
-          echo "version: $version"
-          echo "status: submitted for review (listed channel)"
+        run: node scripts/store-release.mjs submit
