@@ -210,21 +210,3 @@ jobs:
           v="${{ needs.prepare.outputs.version }}"
           cargo xtask release verify --plan "target/release-dist/$v/plan.json" --artifacts "target/release-dist/$v"
           cargo xtask release publish --plan "target/release-dist/$v/plan.json" --artifacts "target/release-dist/$v"
-
-  submit-chromium:
-    needs: [prepare, publish]
-    uses: ./.github/workflows/store-submit.yml
-    with:
-      browser: chromium
-      commit: ${{ needs.prepare.outputs.commit }}
-      release_tag: ${{ needs.prepare.outputs.release_tag }}
-    secrets: inherit
-
-  submit-firefox:
-    needs: [prepare, publish]
-    uses: ./.github/workflows/store-submit.yml
-    with:
-      browser: firefox
-      commit: ${{ needs.prepare.outputs.commit }}
-      release_tag: ${{ needs.prepare.outputs.release_tag }}
-    secrets: inherit
