@@ -38,6 +38,16 @@ export const it = {
   "view.modal.closeTitle": "Chiudi",
   // Desktop-app guidance modal.
   "view.desktop.title": "Applicazione desktop Dezoomify",
+  "view.desktop.downloadLoading": "Ricerca dei programmi di installazione…",
+  "view.desktop.downloadFailed": "Impossibile caricare i programmi di installazione. Riprova.",
+  "view.desktop.downloadRetry": "Riprova",
+  "view.desktop.downloadChoose":
+    "Scarica un programma di installazione. Controlla il sistema e il processore prima di installarlo.",
+  "view.desktop.downloadWindows": "Programma di installazione Windows · x64 (MSI)",
+  "view.desktop.downloadMacos": "Programma di installazione macOS · Apple Silicon (DMG)",
+  "view.desktop.downloadLinux": "Programma di installazione Linux · x64 (DEB)",
+  "view.desktop.downloadInstall":
+    "Scarica il programma di installazione qui sopra per il tuo sistema, poi installalo.",
   "view.desktop.subtitle":
     "Applicazione nativa ad alte prestazioni per opere museali gigapixel e scansioni locali",
   "view.desktop.installer": "L’{installer} non firmato per {platform} è disponibile su",

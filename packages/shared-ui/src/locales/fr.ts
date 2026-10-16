@@ -38,6 +38,16 @@ export const fr = {
   "view.modal.closeTitle": "Fermer",
   // Desktop-app guidance modal.
   "view.desktop.title": "Application de bureau Dezoomify",
+  "view.desktop.downloadLoading": "Recherche des programmes d’installation…",
+  "view.desktop.downloadFailed": "Impossible de charger les programmes d’installation. Réessayez.",
+  "view.desktop.downloadRetry": "Réessayer",
+  "view.desktop.downloadChoose":
+    "Téléchargez un programme d’installation. Vérifiez le système et le processeur avant de l’installer.",
+  "view.desktop.downloadWindows": "Programme d’installation Windows · x64 (MSI)",
+  "view.desktop.downloadMacos": "Programme d’installation macOS · Apple Silicon (DMG)",
+  "view.desktop.downloadLinux": "Programme d’installation Linux · x64 (DEB)",
+  "view.desktop.downloadInstall":
+    "Téléchargez le programme d’installation ci-dessus pour votre système, puis installez-le.",
   "view.desktop.subtitle":
     "Application native haute performance pour les œuvres muséales gigapixels et les numérisations locales",
   "view.desktop.installer": "L’{installer} non signé pour {platform} est disponible sur",

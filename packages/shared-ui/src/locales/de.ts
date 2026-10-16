@@ -39,6 +39,17 @@ export const de = {
   "view.modal.closeTitle": "Schließen",
   // Desktop-app guidance modal.
   "view.desktop.title": "Dezoomify Desktop-App",
+  "view.desktop.downloadLoading": "Installationsprogramme werden gesucht…",
+  "view.desktop.downloadFailed":
+    "Die Installationsprogramme konnten nicht geladen werden. Versuche es erneut.",
+  "view.desktop.downloadRetry": "Erneut versuchen",
+  "view.desktop.downloadChoose":
+    "Lade ein Installationsprogramm herunter. Prüfe vorher System und Prozessor.",
+  "view.desktop.downloadWindows": "Windows-Installationsprogramm · x64 (MSI)",
+  "view.desktop.downloadMacos": "macOS-Installationsprogramm · Apple Silicon (DMG)",
+  "view.desktop.downloadLinux": "Linux-Installationsprogramm · x64 (DEB)",
+  "view.desktop.downloadInstall":
+    "Lade oben das Installationsprogramm für dein System herunter und installiere es.",
   "view.desktop.subtitle":
     "Leistungsstarke native Anwendung für gigapixelgroße Museumsbilder und lokale Scans",
   "view.desktop.installer": "Das unsignierte {installer} für {platform} ist verfügbar auf",

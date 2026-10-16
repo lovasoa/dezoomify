@@ -31,6 +31,7 @@ export interface ViewCallbacks {
  * Product-local view data alongside the generated progress, output, and errors.
  */
 export interface ViewContext {
+  desktopDownloads?: DesktopDownloads;
   product?: "website" | "extension" | "desktop";
   diagnosticReport?: DiagnosticReport;
   currentProgress?: {
@@ -65,6 +66,17 @@ export type ViewPhase = Presentation["phase"];
 export interface PlatformHints {
   userAgent?: string;
   platform?: string;
+}
+
+/** Product-owned release discovery; shared UI only renders the available choices. */
+export interface DesktopDownloads {
+  load(): Promise<DesktopInstaller[]>;
+}
+
+export interface DesktopInstaller {
+  kind: "windows" | "macos" | "linux";
+  url: string;
+  preferred: boolean;
 }
 
 import type { RetryChoice } from "@dezoomify/wasm-bindings";
