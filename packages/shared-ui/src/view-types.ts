@@ -1,4 +1,3 @@
-import type { Size } from "@dezoomify/wasm-bindings";
 import type { ReactElement, ReactNode } from "react";
 import type { JobActivity } from "./activity.ts";
 import type { DiagnosticReport } from "./diagnostics.ts";
@@ -45,7 +44,6 @@ export interface ViewContext {
   jobActivity?: JobActivity;
   initialUrl?: string;
   sourceUrl?: string;
-  loadedImage?: Size & { url: string };
   /** Core-discovered URL to paste into the desktop app, rather than the scanned page. */
   desktopSourceUrl?: string;
   /** Browser products offer the desktop app for larger images. */

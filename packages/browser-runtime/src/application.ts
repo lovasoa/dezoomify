@@ -1,5 +1,6 @@
 import {
   AccessRequestView,
+  type Completion,
   createHistory,
   type DiagnosticRecorder,
   type HistoryEntry,
@@ -19,7 +20,6 @@ import type {
   ErrorTransport,
   Error as JobError,
   JobInput,
-  Output,
   Progress,
   RetryChoice,
   TileAcquisition,
@@ -61,7 +61,7 @@ export interface BrowserApplicationContext {
 export interface BrowserCapabilities
   extends Pick<BrowserHostDependencies, "fetchResource" | "loadDisplayImage" | "observe"> {
   inputs(url: string): Promise<JobInput[]>;
-  recoverDiscovery?(error: JobError): Promise<Output | undefined>;
+  recoverDiscovery?(error: JobError): Promise<Completion | undefined>;
   canvas(): HTMLCanvasElement;
   showCanvas?(canvas: HTMLCanvasElement): void;
   save(
@@ -88,7 +88,7 @@ export interface BrowserApplicationOptions {
   onStart?(url: string): void;
   onReset?(): void;
   onStatus?(presentation: Presentation, url: string): void;
-  onComplete?(output: Output): void;
+  onComplete?(output: Completion): void;
   openSource?(): void;
 }
 
@@ -117,8 +117,8 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
       host: undefined as BrowserHost | undefined,
       capabilities: undefined as BrowserCapabilities | undefined,
       progress: undefined as Progress | undefined,
-      output: undefined as Output | undefined,
-      recovery: undefined as Promise<Output | undefined> | undefined,
+      output: undefined as Completion | undefined,
+      recovery: undefined as Promise<Completion | undefined> | undefined,
       failure: undefined as JobError | undefined,
       retryApproval: undefined as
         | { request: TileAcquisition; answer(choice: RetryChoice): void }
@@ -223,7 +223,7 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
     }
   }
 
-  function completeInvocation(a: ReturnType<typeof invocation>, output: Output): void {
+  function completeInvocation(a: ReturnType<typeof invocation>, output: Completion): void {
     a.controller.signal.throwIfAborted();
     if (current !== a) return;
     a.output = output;

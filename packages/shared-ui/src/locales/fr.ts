@@ -151,7 +151,6 @@ export const fr = {
     "Aucune URL source réutilisable n’est disponible pour cette tâche. Ouvrez la page d’origine et cherchez l’URL de l’image zoomable ou du manifeste à coller dans l’application.",
   // Completion section.
   "view.done.ready": "Votre image est prête.",
-  "view.loadedImage": "Image déjà chargée sur cette page : {width} × {height}",
   "view.done.readyTitle": "Prêt à enregistrer",
   "view.done.saveNow": "Enregistrer l’image maintenant",
   "view.done.another": "Dezoomifier une autre image",

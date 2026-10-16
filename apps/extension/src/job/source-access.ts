@@ -12,6 +12,7 @@ import {
 import type { Interaction, Error as JobError, ResourceRequest } from "@dezoomify/wasm-bindings";
 import type { PublicPath, WxtBrowser } from "wxt/browser";
 import { transportError } from "../runtime/fetch.ts";
+import { findLoadedImage } from "./loaded-image.ts";
 import {
   cancelSourceFetch,
   collectCandidates,
@@ -89,19 +90,23 @@ function validSnapshot(value: unknown, expectedUrl: string): value is CandidateS
     value.overflow >= 0 &&
     Array.isArray(value.inputs) &&
     value.inputs.length <= MAX_CANDIDATES &&
-    value.inputs.every(validCandidate) &&
-    validImages(value.images)
+    value.inputs.every(validCandidate)
   );
 }
 
-function validImages(value: unknown): boolean {
+function validImage(value: unknown): boolean {
   return (
     value === undefined ||
-    (Array.isArray(value) &&
-      value.length <= 64 &&
-      value.every(
-        (url) => typeof url === "string" && url.length <= MAX_URL_LENGTH && isPublicHttpUrl(url),
-      ))
+    (isRecord(value) &&
+      typeof value.url === "string" &&
+      ((value.url.length <= MAX_URL_LENGTH && isPublicHttpUrl(value.url)) ||
+        (value.url.length <= MAX_DOM_BYTES && /^data:image\/[^;,]+;base64,/.test(value.url))) &&
+      typeof value.width === "number" &&
+      Number.isSafeInteger(value.width) &&
+      value.width > 0 &&
+      typeof value.height === "number" &&
+      Number.isSafeInteger(value.height) &&
+      value.height > 0)
   );
 }
 
@@ -405,7 +410,7 @@ export function createSourceAccess(
     combined.addEventListener("abort", abort, { once: true });
     try {
       if (combined.aborted) {
-        abort();
+        void abort();
         return await aborted;
       }
       const operation = run(combined, () => {
@@ -735,6 +740,11 @@ export function createSourceAccess(
 
   return {
     scan,
+    async loadedImage(signal: AbortSignal) {
+      const reply = await inject({ func: findLoadedImage, args: [] }, signal);
+      if (!validImage(reply.image)) throw transportError("bad-url", "invalid loaded image result");
+      return reply.image;
+    },
     observations,
     fetch,
     hasOrigin(origin: string) {

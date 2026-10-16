@@ -151,7 +151,6 @@ export const de = {
     "Für diesen Auftrag ist keine wiederverwendbare Quell-URL verfügbar. Öffnen Sie die ursprüngliche Seite und suchen Sie die URL des zoombaren Bildes oder Manifests zum Einfügen in die App.",
   // Completion section.
   "view.done.ready": "Ihr Bild ist bereit.",
-  "view.loadedImage": "Bereits auf dieser Seite geladenes Bild: {width} × {height}",
   "view.done.readyTitle": "Bereit zum Speichern",
   "view.done.saveNow": "Bild jetzt speichern",
   "view.done.another": "Weiteres Bild dezoomifizieren",

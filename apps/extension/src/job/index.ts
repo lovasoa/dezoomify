@@ -10,8 +10,7 @@ import {
 import type { ResourceRead } from "@dezoomify/wasm-bindings";
 import { browser as api } from "wxt/browser";
 import { createExtensionFetcher } from "../runtime/fetch.ts";
-import { saveExtensionBlob } from "./download.ts";
-import { createLoadedImageFallback } from "./loaded-image.ts";
+import { saveExtensionBlob, saveExtensionUrl } from "./download.ts";
 import { createSourceAccess } from "./source-access.ts";
 import { createResourceFetcher } from "./transport.ts";
 
@@ -91,38 +90,6 @@ const app = createBrowserApplication({
     let downloadId: number | undefined;
     let fetchResource: ReturnType<typeof createResourceFetcher> | undefined;
     let observe: ReturnType<ReturnType<typeof createSourceAccess>["observations"]> | undefined;
-    const loadedImage = createLoadedImageFallback(context, readResource, save);
-    async function readResource(...args: Parameters<NonNullable<typeof fetchResource>>) {
-      if (!fetchResource) throw new Error("The source has not been scanned.");
-      const read = await fetchResource(...args);
-      loadedImage.record(args[0], read);
-      return read;
-    }
-    async function save(
-      blob: Blob,
-      width: number,
-      height: number,
-      signal: AbortSignal,
-      title?: string,
-    ) {
-      const format =
-        blob.type === "image/jpeg" ? "jpeg" : blob.type === "image/webp" ? "webp" : "png";
-      downloadId = await saveExtensionBlob(
-        api.downloads,
-        blob,
-        suggestedNameFor(width, height, format, title),
-        signal,
-      );
-      signal.throwIfAborted();
-      context.view.outputKey = String(downloadId);
-      context.diagnostics.record("info", "save-confirmed", {
-        download_id: downloadId,
-        width,
-        height,
-        bytes: blob.size,
-      });
-      return "browser-save-initiated" as const;
-    }
     return {
       async inputs() {
         if (!source) {
@@ -146,12 +113,10 @@ const app = createBrowserApplication({
           installTestAccess();
         }
         const scan = await source.scan(context.signal);
-        loadedImage.observe(scan);
         observe = source.observations({
           hasPermission: (origin) => permissionApi.contains({ origins: [`${origin}/*`] }),
           ensurePermission: (origin, signal) => permissions.ensure(origin, signal),
           scanned(snapshot) {
-            loadedImage.observe(snapshot);
             context.diagnostics.record("debug", "frame-scan", {
               document_url: snapshot.documentUrl,
               candidates: snapshot.inputs.length,
@@ -210,13 +175,44 @@ const app = createBrowserApplication({
           throw { kind: "no-image-found", detail: "no image references were found on this page" };
         return scan.inputs;
       },
-      fetchResource: readResource,
-      recoverDiscovery: loadedImage.recover,
-      dispose: loadedImage.dispose,
+      fetchResource: (request, signal, interaction) => {
+        if (!fetchResource) return Promise.reject(new Error("The source has not been scanned."));
+        return fetchResource(request, signal, interaction);
+      },
+      async recoverDiscovery(error) {
+        if (!["discovery-failed", "malformed-metadata", "no-image-found"].includes(error.kind))
+          return undefined;
+        const image = await source?.loadedImage(context.signal);
+        if (!image) return undefined;
+        context.diagnostics.record("warn", "discovery-fallback", error);
+        context.diagnostics.record("info", "loaded-image", image);
+        downloadId = await saveExtensionUrl(api.downloads, image.url, undefined, context.signal);
+        context.view.outputKey = String(downloadId);
+        return {
+          canvas: { width: image.width, height: image.height },
+          disposition: "browser-save-initiated",
+        };
+      },
       observe: (interaction, signal) => observe?.(interaction, signal) ?? Promise.resolve([]),
       loadDisplayImage: (url, signal) => loadTileImage(url, { signal }),
       canvas: () => document.createElement("canvas"),
-      save,
+      async save(blob, width, height, signal, title) {
+        downloadId = await saveExtensionBlob(
+          api.downloads,
+          blob,
+          suggestedNameFor(width, height, "png", title),
+          signal,
+        );
+        signal.throwIfAborted();
+        context.view.outputKey = String(downloadId);
+        context.diagnostics.record("info", "save-confirmed", {
+          download_id: downloadId,
+          width,
+          height,
+          bytes: blob.size,
+        });
+        return "browser-save-initiated" as const;
+      },
       async openOutput() {
         if (downloadId !== undefined) await api.downloads.open(downloadId);
       },
@@ -253,7 +249,7 @@ function installTestAccess() {
 }
 
 function testScenarioPath(scenario: unknown): string {
-  if (scenario === "loaded-image") return "/loaded-image";
+  if (typeof scenario === "string" && scenario.startsWith("loaded-image")) return "/loaded-image";
   if (scenario === "recursive-iframe") return "/recursive-iframe";
   if (typeof scenario === "string" && scenario.startsWith("memory-openseadragon-"))
     return "/memory-openseadragon.html";

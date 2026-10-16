@@ -105,53 +105,6 @@ test("candidate snapshot reads one document; frame traversal belongs to source a
   }
 });
 
-test("loaded image evidence uses currentSrc and retains off-DOM image requests", () => {
-  const previous = {
-    document: globalThis.document,
-    location: globalThis.location,
-    performance: globalThis.performance,
-  };
-  globalThis.location = { href: "https://gallery.example/full.jpg" };
-  globalThis.document = {
-    images: [
-      {
-        complete: true,
-        naturalWidth: 3000,
-        naturalHeight: 4000,
-        currentSrc: globalThis.location.href,
-        src: "https://gallery.example/thumb.jpg",
-      },
-      {
-        complete: false,
-        naturalWidth: 0,
-        naturalHeight: 0,
-        src: "https://gallery.example/pending.jpg",
-      },
-    ],
-  };
-  globalThis.performance = {
-    getEntriesByType: () => [
-      { name: globalThis.location.href, initiatorType: "img" },
-      { name: "https://gallery.example/canvas-image", initiatorType: "img" },
-      { name: "https://gallery.example/tracker.js", initiatorType: "script" },
-    ],
-  };
-  try {
-    const { inputs, images } = collectCandidates();
-    assert.deepEqual(
-      inputs.map(({ url, kind }) => [url, kind]),
-      [
-        [globalThis.location.href, "source"],
-        ["https://gallery.example/canvas-image", "observed-resource"],
-        ["https://gallery.example/tracker.js", "observed-resource"],
-      ],
-    );
-    assert.deepEqual(images, [globalThis.location.href, "https://gallery.example/canvas-image"]);
-  } finally {
-    Object.assign(globalThis, previous);
-  }
-});
-
 test("standalone image tabs keep their wrapper and image without probing browser favicons", () => {
   const previous = {
     document: globalThis.document,
@@ -169,13 +122,12 @@ test("standalone image tabs keep their wrapper and image without probing browser
     getEntriesByType: () => assert.fail("image tabs need no resource inventory"),
   };
   try {
-    const { inputs, images } = collectCandidates();
+    const { inputs } = collectCandidates();
     assert.equal(inputs[0].contents, globalThis.document.documentElement.outerHTML);
     assert.deepEqual(
       inputs.map((input) => input.kind),
       ["source"],
     );
-    assert.deepEqual(images, [url]);
   } finally {
     Object.assign(globalThis, previous);
   }

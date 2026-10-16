@@ -142,7 +142,7 @@ test("recovery can complete discovery but never replaces an acquisition failure"
     let recoveries = 0;
     const h = harness(false, undefined, async () => {
       recoveries++;
-      return output;
+      return { canvas: output.canvas, disposition: "browser-save-initiated" };
     });
     let run;
     act(() => {

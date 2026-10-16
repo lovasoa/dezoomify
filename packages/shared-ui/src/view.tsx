@@ -697,7 +697,7 @@ function CompletedView({
 function completionSummary(presentation: Presentation, saved: boolean): string {
   const output = presentation.output;
   const canvas = output?.canvas;
-  if (saved)
+  if (saved || !output?.format)
     return canvas
       ? t("desktop.done.size", { width: canvas.width, height: canvas.height })
       : t("desktop.done.saved");
@@ -906,22 +906,6 @@ function SharedView({
         />
       ) : null}
       {phase === "cancelled" ? <CancelledView callbacks={callbacks} /> : null}
-      {ctx?.loadedImage ? (
-        <div>
-          <p className="dz-completed-guidance" id="dz-loaded-image">
-            {t("view.loadedImage", {
-              width: ctx.loadedImage.width,
-              height: ctx.loadedImage.height,
-            })}
-          </p>
-          <img
-            src={ctx.loadedImage.url}
-            alt=""
-            id="dz-loaded-image-preview"
-            style={{ maxWidth: "100%", maxHeight: "70vh", objectFit: "contain" }}
-          />
-        </div>
-      ) : null}
       {options?.after}
       {phase !== "idle" ? diagnostics : null}
     </div>

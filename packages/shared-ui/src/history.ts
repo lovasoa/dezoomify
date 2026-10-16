@@ -8,12 +8,12 @@
 
 import type {
   Error as JobError,
-  Output,
   Progress,
   SavedOutput,
   SavedOutputState,
 } from "@dezoomify/wasm-bindings";
 import { causeOf, isJobError, unknownDetail } from "./failure.ts";
+import type { Completion } from "./presentation.ts";
 
 export const HISTORY_MAX = 20;
 
@@ -354,7 +354,11 @@ export function createHistory(
           : {}),
       });
     },
-    complete(entry: HistoryEntry | null, output: Output, savedOutput?: SavedOutput | null): void {
+    complete(
+      entry: HistoryEntry | null,
+      output: Completion,
+      savedOutput?: SavedOutput | null,
+    ): void {
       update(entry, {
         status: output.disposition === "display-only" ? "preview" : "completed",
         ...(output.canvas ? { width: output.canvas.width, height: output.canvas.height } : {}),

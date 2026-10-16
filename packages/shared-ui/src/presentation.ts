@@ -6,6 +6,9 @@ import type {
 } from "@dezoomify/wasm-bindings";
 import type { I18nKey } from "./i18n.ts";
 
+/** Saving an existing file does not require selecting an output codec. */
+export type Completion = Omit<Output, "format"> & Partial<Pick<Output, "format">>;
+
 export interface ResolutionChoice {
   selected: { width: number; height: number };
   maximum: { width: number; height: number };
@@ -31,7 +34,7 @@ export interface Presentation {
   progress: { current: number; total: number | null; unit?: "pixels" } | null;
   paused: boolean;
   error?: JobError;
-  output?: Output;
+  output?: Completion;
   retryApproval?: TileAcquisition;
   resolution?: ResolutionChoice;
 }
@@ -104,7 +107,7 @@ export function presentProgress(progress: Progress, opts?: { paused?: boolean })
   };
 }
 
-export function presentOutput(output: Output, progress: Progress | undefined): Presentation {
+export function presentOutput(output: Completion, progress: Progress | undefined): Presentation {
   const displayOnly = output.disposition === "display-only";
   const presented = presentStatus(displayOnly ? "display-only" : "completed");
   return {
