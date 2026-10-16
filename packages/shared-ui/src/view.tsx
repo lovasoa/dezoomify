@@ -1120,7 +1120,7 @@ function DesktopDownloadLinks({ hints }: { hints?: PlatformHints }) {
     { platform: "linux", extension: "deb" },
   ] as const;
   return (
-    <ul className="dz-modal-list">
+    <ul className="dz-modal-list dz-desktop-downloads">
       {[...installers]
         .sort((a, b) => Number(b.platform === preferred) - Number(a.platform === preferred))
         .map(({ platform, extension }) => (
