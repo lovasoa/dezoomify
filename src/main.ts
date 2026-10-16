@@ -1,5 +1,4 @@
 import {
-  type ClientHints,
   createPreviewControls,
   createTileThrottle,
   createWebFetcher,
@@ -59,11 +58,16 @@ const wasm = import("@dezoomify/wasm-bindings").then(async (module) => {
   return module;
 });
 const root = document.getElementById("app");
+const platformHints = {
+  userAgent: navigator.userAgent,
+  platform: navigator.platform,
+};
 
 const app = root
   ? createBrowserApplication({
       root,
       product: "website",
+      platformHints,
       wasm: () => wasm,
       resetToIdle: true,
       history: { store: historyStore, key: HISTORY_KEY_WEBSITE },
@@ -138,12 +142,9 @@ if (app) {
   document
     .getElementById("dz-nav-btn-extension")
     ?.addEventListener("click", () => showExtensionGuidance(document));
-  document.getElementById("dz-nav-btn-desktop")?.addEventListener("click", () =>
-    showDesktopAppGuidance(document, {
-      userAgent: navigator.userAgent,
-      platform: (navigator as unknown as ClientHints & { platform?: string }).platform,
-    }),
-  );
+  document
+    .getElementById("dz-nav-btn-desktop")
+    ?.addEventListener("click", () => showDesktopAppGuidance(document, platformHints));
   const openHash = () => {
     const url = parseHash(location.hash);
     if (url && url !== app.currentUrl() && looksLikeUsableUrl(url)) app.submit(url);

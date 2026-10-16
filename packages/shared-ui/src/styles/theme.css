@@ -1897,6 +1897,11 @@ abbr[title] {
   margin-bottom: 0.5rem;
 }
 
+.dz-desktop-downloads {
+  list-style: none;
+  padding: 0;
+}
+
 .dz-modal-steps {
   display: flex;
   flex-direction: column;

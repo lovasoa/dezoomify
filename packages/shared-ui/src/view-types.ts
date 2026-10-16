@@ -31,6 +31,7 @@ export interface ViewCallbacks {
  * Product-local view data alongside the generated progress, output, and errors.
  */
 export interface ViewContext {
+  platformHints?: PlatformHints;
   product?: "website" | "extension" | "desktop";
   diagnosticReport?: DiagnosticReport;
   currentProgress?: {
