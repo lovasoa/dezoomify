@@ -15,9 +15,9 @@ a new test. Do not assert source-file contents or invent architectural tests.
 - `cargo xtask test desktop --e2e-window`: real desktop window; needs a display
   (headless Linux: `xvfb-run -a`) and stays outside `test all` and `ci local`.
 
-Finish code changes with `test all` and `ci local`. Live source-site checks
-(`cargo xtask test live --public`) are opt-in and advisory, never sole coverage.
-Setup and prerequisites: [Development](development.md).
+Choose validation by the risk and reach of the change. Live source-site checks
+are opt-in and advisory, never sole coverage. Setup and prerequisites:
+[Development](development.md); available checks: `cargo xtask --help`.
 
 ## Shared product matrix
 
