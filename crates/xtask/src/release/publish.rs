@@ -136,9 +136,9 @@ fn labeled_asset(path: &std::path::Path) -> std::ffi::OsString {
         .strip_suffix(".sig")
         .map_or((filename.as_ref(), ""), |name| (name, " (signature)"));
     let label = [
-        ("windows-x86_64.msi", "Windows installer: x64 (MSI)"),
-        ("linux-x86_64.deb", "Linux installer: x64 (DEB)"),
-        ("macos-aarch64.dmg", "macOS installer: Apple Silicon (DMG)"),
+        (".msi", "Windows installer: x64 (MSI)"),
+        (".deb", "Linux installer: x64 (DEB)"),
+        (".dmg", "macOS installer: Apple Silicon (DMG)"),
         ("macos-aarch64.app.tar.gz", "macOS updater: Apple Silicon"),
         ("dezoomify-cli-", "Command line: Linux x64 (tar.gz)"),
         ("dezoomify-chromium-", "Browser extension: Chromium (ZIP)"),
