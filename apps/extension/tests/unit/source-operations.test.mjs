@@ -105,6 +105,81 @@ test("candidate snapshot reads one document; frame traversal belongs to source a
   }
 });
 
+test("loaded image evidence uses currentSrc and retains off-DOM image requests", () => {
+  const previous = {
+    document: globalThis.document,
+    location: globalThis.location,
+    performance: globalThis.performance,
+  };
+  globalThis.location = { href: "https://gallery.example/full.jpg" };
+  globalThis.document = {
+    images: [
+      {
+        complete: true,
+        naturalWidth: 3000,
+        naturalHeight: 4000,
+        currentSrc: globalThis.location.href,
+        src: "https://gallery.example/thumb.jpg",
+      },
+      {
+        complete: false,
+        naturalWidth: 0,
+        naturalHeight: 0,
+        src: "https://gallery.example/pending.jpg",
+      },
+    ],
+  };
+  globalThis.performance = {
+    getEntriesByType: () => [
+      { name: globalThis.location.href, initiatorType: "img" },
+      { name: "https://gallery.example/canvas-image", initiatorType: "img" },
+      { name: "https://gallery.example/tracker.js", initiatorType: "script" },
+    ],
+  };
+  try {
+    const { inputs } = collectCandidates();
+    assert.deepEqual(
+      inputs.map(({ url, kind }) => [url, kind]),
+      [
+        [globalThis.location.href, "source"],
+        [globalThis.location.href, "observed-image"],
+        ["https://gallery.example/canvas-image", "observed-image"],
+        ["https://gallery.example/tracker.js", "observed-resource"],
+      ],
+    );
+  } finally {
+    Object.assign(globalThis, previous);
+  }
+});
+
+test("standalone image tabs keep their wrapper and image without probing browser favicons", () => {
+  const previous = {
+    document: globalThis.document,
+    location: globalThis.location,
+    performance: globalThis.performance,
+  };
+  const url = "https://gallery.example/full.jpg";
+  globalThis.location = { href: url };
+  globalThis.document = {
+    contentType: "image/jpeg",
+    documentElement: { outerHTML: `<html><img src="${url}"></html>` },
+    images: [{ complete: true, naturalWidth: 3000, naturalHeight: 4000, currentSrc: url }],
+  };
+  globalThis.performance = {
+    getEntriesByType: () => assert.fail("image tabs need no resource inventory"),
+  };
+  try {
+    const { inputs } = collectCandidates();
+    assert.equal(inputs[0].contents, globalThis.document.documentElement.outerHTML);
+    assert.deepEqual(
+      inputs.map((input) => input.kind),
+      ["source", "observed-image"],
+    );
+  } finally {
+    Object.assign(globalThis, previous);
+  }
+});
+
 test("metadata documents retain their URL without supplying the browser's rendered viewer", () => {
   const oldLocation = globalThis.location;
   const oldDocument = globalThis.document;

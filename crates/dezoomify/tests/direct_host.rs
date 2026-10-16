@@ -51,6 +51,119 @@ fn input() -> Vec<JobInput> {
         kind: None,
     }]
 }
+
+fn loaded_image_inputs(count: usize) -> Vec<JobInput> {
+    let mut inputs = vec![JobInput {
+        url: "https://page.test/".into(),
+        contents: Some("<html></html>".into()),
+        kind: None,
+    }];
+    inputs.extend((0..count).map(|index| JobInput {
+        url: format!("https://page.test/image-{index}.jpg"),
+        contents: Some("opaque raster bytes".into()),
+        kind: Some(DiscoveryInputKind::ObservedImage),
+    }));
+    inputs
+}
+
+fn available(width: u64, height: u64) -> ProbeOutcome {
+    ProbeOutcome::Available {
+        width: NonZeroU64::new(width).unwrap(),
+        height: NonZeroU64::new(height).unwrap(),
+    }
+}
+
+#[test]
+fn loaded_images_fall_back_to_the_largest_full_image_and_keep_discovery_diagnostics() {
+    let mut host = MemoryHost::default();
+    let mut inputs = loaded_image_inputs(5);
+    // HTTP image fetched by a viewer then embedded as a data URL (RSL).
+    let fetched = inputs.last_mut().unwrap();
+    fetched.kind = Some(DiscoveryInputKind::ObservedResource);
+    fetched.contents = None;
+    host.resources.insert(
+        fetched.url.clone(),
+        ResourceResponse {
+            bytes: b"\xff\xd8\xff opaque JPEG bytes".to_vec(),
+            final_uri: None,
+        },
+    );
+    host.probe_results.borrow_mut().extend([
+        ProbeOutcome::Missing,
+        available(5000, 400), // A wide banner is not a useful full image.
+        available(512, 512),  // A tile or thumbnail is too small.
+        available(1800, 1200),
+        available(3022, 5051), // RSL #1241 dimensions.
+    ]);
+    let output = futures::executor::block_on(dezoomify(inputs, Options::default(), &host)).unwrap();
+    assert_eq!(
+        output.canvas,
+        Some(Size {
+            width: 3022,
+            height: 5051
+        })
+    );
+    let tiles = host.acquired.borrow();
+    assert_eq!(tiles.len(), 1);
+    assert_eq!(tiles[0].request.uri, "https://page.test/image-4.jpg");
+    assert!(!host.warnings.borrow().is_empty());
+    assert_eq!(
+        host.progress
+            .borrow()
+            .last()
+            .unwrap()
+            .source_format
+            .as_deref(),
+        Some("loaded-image")
+    );
+}
+
+#[test]
+fn tiled_sources_and_their_download_failures_never_fall_back_to_loaded_images() {
+    for fail_download in [false, true] {
+        let host = MemoryHost::default();
+        let mut inputs = input();
+        inputs.extend(loaded_image_inputs(1).into_iter().skip(1));
+        host.probe_results
+            .borrow_mut()
+            .push_back(available(4000, 4000));
+        if fail_download {
+            fail(&host, 0, [failure(403)]);
+        }
+        let result = futures::executor::block_on(dezoomify(inputs, Options::default(), &host));
+        assert_eq!(result.is_err(), fail_download);
+        assert!(host.probes.borrow().is_empty());
+        assert!(
+            host.progress
+                .borrow()
+                .iter()
+                .all(|progress| progress.source_format.as_deref() != Some("loaded-image"))
+        );
+    }
+}
+
+#[test]
+fn small_images_and_explicit_formats_preserve_the_discovery_failure() {
+    for format in [None, Some("deepzoom".into())] {
+        let host = MemoryHost::default();
+        host.probe_results
+            .borrow_mut()
+            .push_back(available(512, 512));
+        let explicit = format.is_some();
+        let error = futures::executor::block_on(dezoomify(
+            loaded_image_inputs(1),
+            Options {
+                format,
+                ..Default::default()
+            },
+            &host,
+        ))
+        .unwrap_err();
+        assert!(matches!(error, Error::DiscoveryFailed { .. }));
+        assert_eq!(host.probes.borrow().len(), usize::from(!explicit));
+        assert!(host.outputs.borrow().is_empty());
+    }
+}
 fn options() -> Options {
     Options {
         format: Some("deepzoom".into()),

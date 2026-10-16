@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8"><title>Loaded image</title></head>
+  <body>
+    <img id="artwork" width="600" alt="Blue rectangle"
+      onload="document.documentElement.dataset.viewerReady = 'true'">
+    <script>
+      // RSL-style viewer: retain the HTTP resource behind an embedded data URL.
+      fetch('/loaded-image.png').then(response => response.blob()).then(blob => {
+        const reader = new FileReader();
+        reader.onload = () => document.getElementById('artwork').src = reader.result;
+        reader.readAsDataURL(blob);
+      });
+    </script>
+  </body>
+</html>

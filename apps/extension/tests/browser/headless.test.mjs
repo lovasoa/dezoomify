@@ -23,6 +23,7 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import webdriver from "selenium-webdriver";
 import firefox from "selenium-webdriver/firefox.js";
+import sharp from "sharp";
 import { formats } from "../../../../test/support/formats.cjs";
 import {
   assertSavedPyramid,
@@ -111,6 +112,11 @@ function stagePackage(
 async function startFixtureServer(workDir) {
   const staticDir = path.join(workDir, "static");
   cpSync(STATIC_DIR, staticDir, { recursive: true });
+  await sharp({
+    create: { width: 1800, height: 1200, channels: 3, background: { r: 27, g: 98, b: 154 } },
+  })
+    .png()
+    .toFile(path.join(staticDir, "loaded-image.png"));
   const library = readFileSync(
     new URL(import.meta.resolve("openseadragon/build/openseadragon/openseadragon.min.js")),
     "utf8",
@@ -698,6 +704,31 @@ test("packaged browser format matrices", { concurrency: 2 }, async (matrix) => {
     ),
   );
 });
+
+for (const [browser, run] of [
+  ["chromium", runChromiumJob],
+  ["firefox", runFirefoxJob],
+]) {
+  test(`${browser}: a loaded ordinary image is saved after tiled discovery fails`, {
+    timeout: 180000,
+  }, async () => {
+    const work = mkdtempSync(path.join(tmpdir(), "dezoomify-loaded-image-"));
+    try {
+      const pixels = decodePngPixels(
+        await run(fixtureServer.base, work, {
+          scenario: "loaded-image",
+          async afterSave(page) {
+            assert.match(await page.locator("#dz-loaded-image").innerText(), /1800 × 1200/);
+          },
+        }),
+      );
+      assert.deepEqual([pixels.width, pixels.height], [1800, 1200]);
+      assert.deepEqual(pixelAt(pixels, 900, 600), [27, 98, 154, 255]);
+    } finally {
+      rmSync(work, { recursive: true, force: true });
+    }
+  });
+}
 
 test("chromium: packaged extension runs the job-tab flow", { timeout: 180000 }, async () => {
   const work = mkdtempSync(path.join(tmpdir(), "dezoomify-e2e-chromium-"));

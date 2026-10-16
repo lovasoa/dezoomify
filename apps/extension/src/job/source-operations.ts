@@ -124,7 +124,9 @@ export function collectCandidates(): {
     } catch {
       return;
     }
-    if ((parsed.protocol !== "http:" && parsed.protocol !== "https:") || seen.has(value)) return;
+    const key = kind === "observed-image" ? `image:${value}` : value;
+    if ((parsed.protocol !== "http:" && parsed.protocol !== "https:") || seen.has(key)) return;
+    seen.add(key);
     seen.add(value);
     if (inputs.length >= MAX_CANDIDATES) {
       overflow += 1;
@@ -140,9 +142,12 @@ export function collectCandidates(): {
 
   try {
     const doc = globalThis.document;
-    // Only HTML DOM is source evidence; browser XML/JSON viewers need original bytes.
+    // Image documents have a browser-generated HTML wrapper. XML/JSON viewers
+    // still need their original bytes for ordinary format discovery.
     const html =
-      doc.contentType === "text/html" || doc.contentType === "application/xhtml+xml"
+      doc.contentType === "text/html" ||
+      doc.contentType === "application/xhtml+xml" ||
+      imageDocument()
         ? String(doc.documentElement?.outerHTML ?? "")
         : undefined;
     append(documentUrl, "source", html);
@@ -150,12 +155,35 @@ export function collectCandidates(): {
     append(documentUrl, "source");
   }
 
+  collectLoadedImages();
+  // A standalone image's favicon and other browser requests are unrelated to
+  // the artwork. Its wrapper and loaded image already supply all evidence.
+  if (imageDocument()) return { ok: true, documentUrl, inputs, overflow };
+
   try {
     for (const entry of globalThis.performance?.getEntriesByType?.("resource") ?? []) {
-      append(typeof entry === "string" ? entry : entry?.name, "observed-resource");
+      append(
+        typeof entry === "string" ? entry : entry?.name,
+        (entry as PerformanceResourceTiming).initiatorType === "img"
+          ? "observed-image"
+          : "observed-resource",
+      );
     }
   } catch {}
   return { ok: true, documentUrl, inputs, overflow };
+
+  function collectLoadedImages() {
+    try {
+      for (const image of globalThis.document?.images ?? []) {
+        if (image.complete && image.naturalWidth > 0 && image.naturalHeight > 0)
+          append(image.currentSrc || image.src, "observed-image");
+      }
+    } catch {}
+  }
+
+  function imageDocument() {
+    return globalThis.document?.contentType?.startsWith("image/") ?? false;
+  }
 }
 
 /**

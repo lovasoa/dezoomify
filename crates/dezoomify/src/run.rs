@@ -9,6 +9,8 @@ use core::discovery::{DiscoveryInput, DiscoveryLimits};
 use futures_util::{StreamExt, stream};
 use std::{cell::RefCell, collections::HashSet};
 
+mod loaded_image;
+
 /// Dezoom one input using the platform capabilities owned by `host`.
 /// Settlement runs before every return, including validation and cancellation.
 pub async fn dezoomify(
@@ -252,6 +254,8 @@ async fn discover(
     host: &impl Host,
     followed: &RefCell<HashSet<String>>,
 ) -> Result<DiscoveryCatalog, Error> {
+    let loaded_images = loaded_image::Evidence::default();
+    loaded_images.collect(&inputs);
     let registry = match options.format.as_deref() {
         None | Some("auto") => core::default_registry(),
         Some(format) => core::registry_for(format).ok_or_else(|| Error::UnknownFormat {
@@ -265,20 +269,40 @@ async fn discover(
                 concurrent: options.max_concurrent as usize,
                 ..Default::default()
             },
-            |request, interaction| fetch_metadata(request, interaction, options, host, followed),
+            |request, interaction| {
+                loaded_images.fetch(request, interaction, options, host, followed)
+            },
             |query| host.parse_html(query),
-            |interaction| async move {
-                host.checkpoint(Gate::Cancellation).await?;
-                Ok(host
-                    .observe(interaction)
-                    .await?
-                    .into_iter()
-                    .map(DiscoveryInput::from)
-                    .collect())
+            |interaction| {
+                let loaded_images = &loaded_images;
+                async move {
+                    host.checkpoint(Gate::Cancellation).await?;
+                    let inputs = host.observe(interaction).await?;
+                    loaded_images.collect(&inputs);
+                    Ok(inputs.into_iter().map(DiscoveryInput::from).collect())
+                }
             },
         )
-        .await
-        .map_err(discovery_failure)?;
+        .await;
+    let catalog = match catalog {
+        Ok(catalog) => catalog,
+        Err(error @ core::DiscoveryError::NoCandidateAccepted { .. })
+            if options
+                .format
+                .as_deref()
+                .is_none_or(|format| format == "auto") =>
+        {
+            let urls = loaded_images.into_urls();
+            let Some(catalog) = loaded_image::discover(urls, options, host).await? else {
+                return Err(discovery_failure(error));
+            };
+            // Keep the tiled-discovery failure in local diagnostics even when
+            // an ordinary loaded image gives the user a useful result.
+            host.warn(error.detail());
+            catalog
+        }
+        Err(error) => return Err(discovery_failure(error)),
+    };
     let mut seen = HashSet::new();
     for entry in catalog.entries() {
         let (warnings, levels) = match entry {

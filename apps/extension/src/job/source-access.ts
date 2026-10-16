@@ -68,6 +68,7 @@ function validCandidate(value: unknown): value is CandidateInput {
     value.kind !== "source" &&
     value.kind !== "observed-document" &&
     value.kind !== "observed-resource" &&
+    value.kind !== "observed-image" &&
     value.kind !== "observed-metadata"
   )
     return false;

@@ -52,6 +52,10 @@ The job tab starts automatically and confirms when saving finishes.
 Use the browser's normal **Save image as** when it already gives you the complete
 artwork. Use Dezoomify when zooming stays sharp and the viewer loads many pieces.
 
+If tiled discovery finds no source, the extension can display and save the largest
+large image already loaded on the page as a PNG. The **Image already loaded on this
+page** label shows its loaded dimensions; the site may offer a larger version.
+
 ## If something goes wrong
 
 If automatic retries are exhausted, **Retry once more** continues the existing

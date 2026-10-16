@@ -168,6 +168,7 @@ globalThis.__DEZOOMIFY_TEST_RUN__ = (async () => {
 })();
 
 function testTargetUrl(origin, scenario) {
+  if (scenario === "loaded-image") return `${origin}/loaded-image.html`;
   if (scenario.startsWith("fixtures/")) return `${origin}/${scenario}/viewer.html`;
   if (scenario === "recursive-iframe") return `${origin}/recursive-iframe.html`;
   if (scenario.startsWith("memory-openseadragon-"))

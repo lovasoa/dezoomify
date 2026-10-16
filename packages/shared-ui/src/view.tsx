@@ -906,6 +906,11 @@ function SharedView({
         />
       ) : null}
       {phase === "cancelled" ? <CancelledView callbacks={callbacks} /> : null}
+      {presentation.loadedImage ? (
+        <p className="dz-completed-guidance" id="dz-loaded-image">
+          {t("view.loadedImage", { ...presentation.loadedImage })}
+        </p>
+      ) : null}
       {options?.after}
       {phase !== "idle" ? diagnostics : null}
     </div>

@@ -235,6 +235,7 @@ function installTestAccess() {
 }
 
 function testScenarioPath(scenario: unknown): string {
+  if (scenario === "loaded-image") return "/loaded-image";
   if (scenario === "recursive-iframe") return "/recursive-iframe";
   if (typeof scenario === "string" && scenario.startsWith("memory-openseadragon-"))
     return "/memory-openseadragon.html";

@@ -151,6 +151,7 @@ export const it = {
     "Non è disponibile un URL sorgente riutilizzabile per questa operazione. Apri la pagina originale e cerca l’URL dell’immagine zoomabile o del manifesto da incollare nell’applicazione.",
   // Completion section.
   "view.done.ready": "La tua immagine è pronta.",
+  "view.loadedImage": "Immagine già caricata su questa pagina: {width} × {height}",
   "view.done.readyTitle": "Pronta da salvare",
   "view.done.saveNow": "Salva ora l’immagine",
   "view.done.another": "Dezoomifica un’altra immagine",

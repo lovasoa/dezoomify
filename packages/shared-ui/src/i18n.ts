@@ -238,6 +238,7 @@ const en = {
     "No reusable source URL is available for this job. Open the original page and find the zoomable image or manifest URL to paste into the app.",
   // Completion section.
   "view.done.ready": "Your image is ready.",
+  "view.loadedImage": "Image already loaded on this page: {width} × {height}",
   "view.done.readyTitle": "Ready to save",
   "view.done.saveNow": "Save image now",
   "view.done.another": "Dezoomify another image",
