@@ -25,11 +25,11 @@ See [Architecture](docs/architecture.md), [Development](docs/development.md),
 
 ## Documentation
 
-Keep Markdown short and durable, when useful: why reuse signed artifacts, not
-what upload functions do. Link to source/help instead of copying API details or
-inventories. One home per question; no change diaries. Code changes need not
-change docs. User guides: `docs/user/`;
-desktop help: `apps/desktop/desktop-app.md`; component setup: its README.
+Keep docs short and durable. Link to source/help for variable names,
+values, schedules, schemas and API details; do not copy them into prose.
+Explain rationale or pitfalls when useful; omit walkthroughs and speculative
+references. Code changes need not change docs. Guides: `docs/user/`;
+desktop: `apps/desktop/desktop-app.md`; setup: its README.
 Apply this to nested instructions too.
 
 ## Tests and reviews
