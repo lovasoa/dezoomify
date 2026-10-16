@@ -5,18 +5,18 @@ existing version. Source URLs must not enter monitoring.
 
 ## Release runbook
 
-Green `master` CI auto-publishes rolling releases. Numbered versions come from
+Green `main` CI auto-publishes rolling releases. Numbered versions come from
 annotated `vX.Y.Z` tags; subsequent first-parent commits increase the patch
 version. One revision/version covers every app and binding.
 
 The release plan freezes its revision and required targets from
 [`release/targets.toml`](../release/targets.toml). Builds run on matching hosts;
 verification and publication check the frozen plan and artifact digests.
-Publication also requires `origin/master` to match the plan.
+Publication also requires `origin/main` to match the plan.
 
 ### Preparing a release
 
-1. Pick a version above `cargo xtask release version`; tag annotated `vX.Y.Z` on `master`.
+1. Pick a version above `cargo xtask release version`; tag annotated `vX.Y.Z` on `main`.
 2. Push the tag and dispatch the `release` workflow with that tag as `ref`.
 3. The workflow requires green CI; versions are injected, not edited into manifests.
 
@@ -71,7 +71,9 @@ to the original Cloudflare Pages project, `dezoomify`; automatic Git deployment
 is disabled. [`build-site.mjs`](../scripts/build-site.mjs) assembles legacy files
 verbatim at `/`, the new app/help at `/beta`, and both proxy routes.
 
-`master` publishes production. Same-repository PRs targeting `master` publish a
+`main` publishes production. Set the Cloudflare Pages project's production branch
+to `main` so Wrangler classifies these uploads as production.
+Same-repository PRs targeting `main` publish a
 stable `pr-<number>.dezoomify.pages.dev` preview from the merge ref. Fork PRs get
 no credentialed preview. Previews are public with `noindex`; internal source and
 docs must not be served. Deployment probes check both apps, proxies, WASM, help,
@@ -81,7 +83,7 @@ and source-file exclusion.
 
 - Reinstall a previous immutable GitHub Release artifact, preserving output and
   settings. The desktop updater only installs newer versions; rollback is manual.
-- Stores require a higher version: revert on `master` and submit the resulting
+- Stores require a higher version: revert on `main` and submit the resulting
   release through `store-submit`, retaining the existing listing.
 - Verify recovery with packaged fixtures and record affected tags in the incident.
 

@@ -57,7 +57,7 @@ try {
   for (const format of formats)
     for (let repeat = 0; repeat < repeats; repeat++) {
       for (const index of repeat % 2 ? [1, 0] : [0, 1]) {
-        const name = index ? "current" : "master";
+        const name = index ? "current" : "main";
         const directory = `${work}/${name}-${format}-${repeat}`;
         await mkdir(directory);
         const output = `${directory}/out.${format}`;

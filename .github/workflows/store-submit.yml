@@ -18,12 +18,12 @@ name: store-submit
 # Optional override secret: CHROME_WS_EXTENSION_ID (emergency only; must match
 # release/config.toml unless deliberately overridden).
 on:
-  # Automatic dry-run on every ng push touching the extension: package,
+  # Automatic dry-run on every main push touching the extension: package,
   # validate, and keep the zip as an artifact. (inputs.upload defaults to
   # false on push, so pushes never touch the store. Manual dispatch with
   # upload=true lights up once these workflows reach the default branch.)
   push:
-    branches: [master]
+    branches: [main]
     paths:
       - apps/extension/**
       - package.json
