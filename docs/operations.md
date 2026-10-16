@@ -5,9 +5,12 @@ existing version. Source URLs must not enter monitoring.
 
 ## Release runbook
 
-Green `main` CI auto-publishes rolling releases. Numbered versions come from
-annotated `vX.Y.Z` tags; subsequent first-parent commits increase the patch
-version. One revision/version covers every app and binding.
+Green `main` CI auto-publishes rolling releases. Set major/minor manually in
+`[workspace.package].version` in `Cargo.toml`; the release patch is the complete
+`git rev-list --first-parent --count HEAD` count, ignoring Cargo's patch and
+existing tags. Complete Git history is required. One revision/version covers
+every app and binding; release plans reject versions above MSI's shared limits
+of `255.255.65535`.
 
 The release plan freezes its revision and required targets from
 [`release/targets.toml`](../release/targets.toml). Builds run on matching hosts;
@@ -16,9 +19,13 @@ Publication also requires `origin/main` to match the plan.
 
 ### Preparing a release
 
-1. Pick a version above `cargo xtask release version`; tag annotated `vX.Y.Z` on `main`.
+1. On the selected `main` commit, run `cargo xtask release version`; create an
+   annotated `vX.Y.Z` tag matching that exact calculated version. To change the
+   release series, first merge a workspace Cargo major/minor change.
 2. Push the tag and dispatch the `release` workflow with that tag as `ref`.
-3. The workflow requires green CI; versions are injected, not edited into manifests.
+3. The workflow requires green CI and a matching annotated tag. Versions are
+   injected from its frozen plan; a numbered tag promotes a version rather than
+   assigning a new one. Automatic releases use `rolling-vX.Y.Z` tags.
 
 ### Cutting a release
 
