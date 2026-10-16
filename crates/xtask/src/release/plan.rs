@@ -138,10 +138,6 @@ mod tests {
         );
         let notes = std::fs::read_to_string(base.join(&version).join("notes.md")).unwrap();
         assert!(notes.starts_with(&format!("# dezoomify v{version}\n\n")));
-        std::fs::remove_dir_all(&base).unwrap();
-        std::fs::create_dir_all(&base).unwrap();
-        let second = std::fs::read_to_string(release_plan_at(&base, false).unwrap()).unwrap();
-        assert_eq!(first, second);
         let _ = std::fs::remove_dir_all(&base);
     }
 

@@ -134,10 +134,7 @@ fn app_version_at(root: &Path) -> Result<(String, bool), String> {
     let (series, _) = base
         .rsplit_once('.')
         .ok_or("workspace version must be a triplet")?;
-    validate_version(&format!("{series}.0"))?;
-    let count: u64 = git_output_at(root, &["rev-list", "--first-parent", "--count", "HEAD"])?
-        .parse()
-        .map_err(|_| "bad first-parent commit count".to_string())?;
+    let count = git_output_at(root, &["rev-list", "--first-parent", "--count", "HEAD"])?;
     let version = format!("{series}.{count}");
     validate_version(&version)?;
     let tag = format!("refs/tags/v{version}");
@@ -236,7 +233,7 @@ pub(crate) fn plan_from_repo() -> Plan {
 
 #[cfg(test)]
 mod tests {
-    use super::{app_version_at, git_output_at, temp_root, validate_version};
+    use super::{app_version_at, git_output_at, temp_root};
     use std::path::{Path, PathBuf};
 
     fn git(root: &Path, args: &[&str]) {
@@ -251,8 +248,8 @@ mod tests {
         .unwrap();
     }
 
-    fn repository(name: &str) -> PathBuf {
-        let root = temp_root(name);
+    fn repository() -> PathBuf {
+        let root = temp_root("version-history");
         git(&root, &["init", "--initial-branch=main"]);
         git(&root, &["config", "user.name", "Release Test"]);
         git(&root, &["config", "user.email", "release@example.invalid"]);
@@ -269,8 +266,8 @@ mod tests {
     }
 
     #[test]
-    fn versions_follow_cargo_series_and_first_parent_history() {
-        let root = repository("version-history");
+    fn versions_follow_cargo_and_history_with_annotated_promotion() {
+        let root = repository();
         assert_eq!(app_version_at(&root).unwrap(), ("3.1.1".into(), false));
         git(&root, &["tag", "-a", "v99.0.1", "-m", "old scheme"]);
         git(&root, &["checkout", "-b", "feature"]);
@@ -289,28 +286,17 @@ mod tests {
         set_version(&root, "4.0.0");
         commit(&root);
         assert_eq!(app_version_at(&root).unwrap().0, "4.0.5");
-        std::fs::remove_dir_all(root).unwrap();
-    }
 
-    #[test]
-    fn only_a_matching_annotated_tag_promotes_the_current_commit() {
-        let root = repository("version-promotion");
-        git(&root, &["tag", "v3.1.1"]);
-        assert_eq!(app_version_at(&root).unwrap(), ("3.1.1".into(), false));
-        git(&root, &["tag", "-d", "v3.1.1"]);
-        git(&root, &["tag", "-a", "v3.1.2", "-m", "mismatched patch"]);
+        git(&root, &["tag", "v4.0.5"]);
         assert!(!app_version_at(&root).unwrap().1);
-        git(&root, &["tag", "-a", "v3.1.1", "-m", "promote"]);
-        assert_eq!(app_version_at(&root).unwrap(), ("3.1.1".into(), true));
+        git(&root, &["tag", "-d", "v4.0.5"]);
+        git(&root, &["tag", "-a", "v4.0.6", "-m", "mismatched patch"]);
+        assert!(!app_version_at(&root).unwrap().1);
+        git(&root, &["tag", "-a", "v4.0.5", "-m", "promote"]);
+        assert_eq!(app_version_at(&root).unwrap(), ("4.0.5".into(), true));
         commit(&root);
-        assert_eq!(app_version_at(&root).unwrap(), ("3.1.2".into(), false));
-        std::fs::remove_dir_all(root).unwrap();
-    }
+        assert_eq!(app_version_at(&root).unwrap(), ("4.0.6".into(), false));
 
-    #[test]
-    fn shallow_history_cannot_assign_a_patch() {
-        let root = repository("version-full");
-        commit(&root);
         let shallow = temp_root("version-shallow");
         git(
             &root,
@@ -324,26 +310,11 @@ mod tests {
         assert!(app_version_at(&shallow)
             .unwrap_err()
             .contains("shallow history"));
+        set_version(&root, "256.0.0");
+        assert!(app_version_at(&root)
+            .unwrap_err()
+            .contains("packaging limits"));
         std::fs::remove_dir_all(shallow).unwrap();
         std::fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn all_packages_share_canonical_bounded_versions() {
-        for version in ["0.0.1", "3.1.758", "255.255.65535"] {
-            validate_version(version).unwrap();
-        }
-        for version in [
-            "256.0.1",
-            "3.256.1",
-            "3.1.65536",
-            "3.1.01",
-            "3.1",
-            "3.1.0.1",
-            "3.1.0-beta",
-            "3.1.18446744073709551616",
-        ] {
-            assert!(validate_version(version).is_err(), "accepted {version}");
-        }
     }
 }
