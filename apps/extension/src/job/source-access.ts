@@ -12,7 +12,7 @@ import {
 import type { Interaction, Error as JobError, ResourceRequest } from "@dezoomify/wasm-bindings";
 import type { PublicPath, WxtBrowser } from "wxt/browser";
 import { transportError } from "../runtime/fetch.ts";
-import { findLoadedImage } from "./loaded-image.ts";
+import { findImageDownloadLink, findLoadedImage } from "./loaded-image.ts";
 import {
   cancelSourceFetch,
   collectCandidates,
@@ -744,6 +744,17 @@ export function createSourceAccess(
       const reply = await inject({ func: findLoadedImage, args: [] }, signal);
       if (!validImage(reply.image)) throw transportError("bad-url", "invalid loaded image result");
       return reply.image;
+    },
+    async imageDownloadLink(signal: AbortSignal) {
+      const reply = await inject({ func: findImageDownloadLink, args: [] }, signal);
+      if (
+        reply.url !== undefined &&
+        (typeof reply.url !== "string" ||
+          reply.url.length > MAX_URL_LENGTH ||
+          !isPublicHttpUrl(reply.url))
+      )
+        throw transportError("bad-url", "invalid image download link");
+      return reply.url;
     },
     observations,
     fetch,

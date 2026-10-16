@@ -6,7 +6,15 @@
       onload="document.documentElement.dataset.viewerReady = 'true'">
     <script>
       const artwork = document.getElementById('artwork');
-      if (!location.search) artwork.src = '/loaded-image.png';
+      if (location.search === '?link') {
+        artwork.remove();
+        const link = document.createElement('a');
+        link.href = '/loaded-image.png';
+        link.download = '';
+        link.textContent = 'Download image';
+        document.body.append(link);
+        document.documentElement.dataset.viewerReady = 'true';
+      } else if (!location.search) artwork.src = '/loaded-image.png';
       // RSL-style viewer: retain the HTTP resource behind an embedded data URL.
       else fetch('/loaded-image.png').then(response => response.blob()).then(blob => {
         const reader = new FileReader();

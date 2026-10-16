@@ -407,6 +407,42 @@ test("extension discovery failure offers a diagnostic issue draft and the hosted
   setLocale("en");
 });
 
+test("fallback saves stay successful while original discovery diagnostics remain reportable", () => {
+  const el = container();
+  const error = { kind: "discovery-failed", detail: "original parser evidence" };
+  const output = { disposition: "browser-save-initiated" };
+  const d = createDiagnosticRecorder({
+    id: "fallback",
+    now: () => 0,
+    context: { product: "extension", input: "https://museum.example/art" },
+  });
+  d.record("warn", "discovery-fallback", error);
+  d.finish("completed", output);
+  try {
+    for (const locale of SUPPORTED_LOCALES) {
+      setLocale(locale);
+      render(el, presentOutput(output), callbacks, {
+        discoveryFallback: error,
+        diagnosticReport: d.report(),
+      });
+      assert.equal(el.querySelector("[data-view-phase]").dataset.viewPhase, "completed");
+      assert.equal(el.querySelector(".dz-error-section"), null);
+      assert.ok(el.textContent.includes(t("view.done.fallback")));
+      assert.equal(el.querySelector("details").hasAttribute("open"), false);
+      const draft = new URL(
+        el.querySelector('a[href*="github.com/lovasoa/dezoomify/issues/new"]').href,
+      );
+      const body = draft.searchParams.get("body");
+      assert.match(body, /original parser evidence/);
+      assert.match(body, /saved an image/);
+      assert.doesNotMatch(body, /attempt failed/);
+      assert.match(draft.searchParams.get("labels"), /image discovery/);
+    }
+  } finally {
+    setLocale("en");
+  }
+});
+
 test("error layering: plain message prominent, parser diagnostics only in technical details", () => {
   const el = container();
   const details =

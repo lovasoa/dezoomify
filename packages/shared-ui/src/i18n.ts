@@ -252,6 +252,8 @@ const en = {
   "view.done.guidance":
     "Use the save button to download your image. Colors may shift slightly because browser downloads do not keep the original color profile. For formats that preserve color profiles, use the desktop app.",
   "view.done.summary": "{width} × {height} pixels ({mime})",
+  "view.done.fallback":
+    "Saved an image available on this page. If it isn’t the image you wanted, you can report it using the technical details below.",
   "view.display.guidance":
     "Your browser can display this image, but the source site does not allow it to create a downloadable file. Try the desktop app or browser extension to save it.",
   // Failure section.
