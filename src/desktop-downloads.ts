@@ -34,9 +34,7 @@ function isInstallerAsset(
   const { name, browser_download_url: url } = asset as Record<string, unknown>;
   return (
     typeof name === "string" &&
-    new RegExp(`^dezoomify-desktop-v\\d+\\.\\d+\\.\\d+-${suffix.replaceAll(".", "\\.")}$`).test(
-      name,
-    ) &&
+    /^dezoomify-desktop-v\d+\.\d+\.\d+-(.+)$/.exec(name)?.[1] === suffix &&
     typeof url === "string" &&
     url.startsWith(DOWNLOAD_PREFIX) &&
     url.endsWith(`/${name}`)

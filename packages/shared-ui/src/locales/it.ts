@@ -43,9 +43,9 @@ export const it = {
   "view.desktop.downloadRetry": "Riprova",
   "view.desktop.downloadChoose":
     "Scarica un programma di installazione. Controlla il sistema e il processore prima di installarlo.",
-  "view.desktop.downloadWindows": "Programma di installazione Windows · x64 (MSI)",
-  "view.desktop.downloadMacos": "Programma di installazione macOS · Apple Silicon (DMG)",
-  "view.desktop.downloadLinux": "Programma di installazione Linux · x64 (DEB)",
+  "view.desktop.download.windows": "Programma di installazione Windows · x64 (MSI)",
+  "view.desktop.download.macos": "Programma di installazione macOS · Apple Silicon (DMG)",
+  "view.desktop.download.linux": "Programma di installazione Linux · x64 (DEB)",
   "view.desktop.downloadInstall":
     "Scarica il programma di installazione qui sopra per il tuo sistema, poi installalo.",
   "view.desktop.subtitle":

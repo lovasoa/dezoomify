@@ -45,9 +45,9 @@ export const de = {
   "view.desktop.downloadRetry": "Erneut versuchen",
   "view.desktop.downloadChoose":
     "Lade ein Installationsprogramm herunter. Prüfe vorher System und Prozessor.",
-  "view.desktop.downloadWindows": "Windows-Installationsprogramm · x64 (MSI)",
-  "view.desktop.downloadMacos": "macOS-Installationsprogramm · Apple Silicon (DMG)",
-  "view.desktop.downloadLinux": "Linux-Installationsprogramm · x64 (DEB)",
+  "view.desktop.download.windows": "Windows-Installationsprogramm · x64 (MSI)",
+  "view.desktop.download.macos": "macOS-Installationsprogramm · Apple Silicon (DMG)",
+  "view.desktop.download.linux": "Linux-Installationsprogramm · x64 (DEB)",
   "view.desktop.downloadInstall":
     "Lade oben das Installationsprogramm für dein System herunter und installiere es.",
   "view.desktop.subtitle":

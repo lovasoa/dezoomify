@@ -133,9 +133,9 @@ const en = {
   "view.desktop.downloadRetry": "Try again",
   "view.desktop.downloadChoose":
     "Download an installer. Check its system and processor before installing.",
-  "view.desktop.downloadWindows": "Windows installer · x64 (MSI)",
-  "view.desktop.downloadMacos": "macOS installer · Apple Silicon (DMG)",
-  "view.desktop.downloadLinux": "Linux installer · x64 (DEB)",
+  "view.desktop.download.windows": "Windows installer · x64 (MSI)",
+  "view.desktop.download.macos": "macOS installer · Apple Silicon (DMG)",
+  "view.desktop.download.linux": "Linux installer · x64 (DEB)",
   "view.desktop.downloadInstall": "Download the installer above for your system, then install it.",
   "view.desktop.subtitle":
     "High-performance native application for gigapixel museum artworks and local scans",

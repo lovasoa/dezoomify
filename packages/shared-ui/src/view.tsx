@@ -1132,20 +1132,18 @@ function detectPlatform(hints?: PlatformHints): { name: string; installer: strin
 const RELEASES_URL = "https://github.com/lovasoa/dezoomify/releases/latest";
 
 function DesktopDownloadLinks({ downloads }: { downloads?: DesktopDownloads }) {
-  const [installers, setInstallers] = useState<DesktopInstaller[]>();
-  const [failed, setFailed] = useState(false);
+  const [result, setResult] = useState<DesktopInstaller[] | "loading" | "failed">("loading");
   const request = useRef(0);
   const load = useCallback(() => {
     if (!downloads) return;
     const current = ++request.current;
-    setFailed(false);
-    setInstallers(undefined);
+    setResult("loading");
     void downloads.load().then(
       (choices) => {
-        if (current === request.current) setInstallers(choices);
+        if (current === request.current) setResult(choices);
       },
       () => {
-        if (current === request.current) setFailed(true);
+        if (current === request.current) setResult("failed");
       },
     );
   }, [downloads]);
@@ -1161,7 +1159,7 @@ function DesktopDownloadLinks({ downloads }: { downloads?: DesktopDownloads }) {
         {t("view.desktop.handoffDownload")}
       </a>
     );
-  if (failed)
+  if (result === "failed")
     return (
       <div>
         <p role="alert">{t("view.desktop.downloadFailed")}</p>
@@ -1170,17 +1168,15 @@ function DesktopDownloadLinks({ downloads }: { downloads?: DesktopDownloads }) {
         </button>
       </div>
     );
-  if (!installers) return <p role="status">{t("view.desktop.downloadLoading")}</p>;
+  if (result === "loading") return <p role="status">{t("view.desktop.downloadLoading")}</p>;
   return (
     <div className="dz-desktop-downloads">
       <p>{t("view.desktop.downloadChoose")}</p>
       <ul className="dz-modal-list">
-        {installers.map((installer) => (
+        {result.map((installer) => (
           <li key={installer.kind}>
             <a href={installer.url} className={installer.preferred ? "dz-btn-tactile" : undefined}>
-              {t(
-                `view.desktop.download${installer.kind === "windows" ? "Windows" : installer.kind === "macos" ? "Macos" : "Linux"}`,
-              )}
+              {t(`view.desktop.download.${installer.kind}`)}
             </a>
           </li>
         ))}

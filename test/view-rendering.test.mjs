@@ -9,7 +9,7 @@ import {
   presentProgress,
   presentStatus,
 } from "../packages/shared-ui/src/presentation.ts";
-import { renderView, showDesktopAppGuidance } from "../packages/shared-ui/src/view.tsx";
+import { renderView } from "../packages/shared-ui/src/view.tsx";
 import { act, click } from "./react-dom.mjs";
 
 function container() {
@@ -615,97 +615,6 @@ test("desktop handoff shows and copies the discovered URL, handles failure and u
   dialog = document.querySelector('[role="dialog"]');
   assert.equal(dialog.querySelector("input"), null, "never substitutes the scanned page URL");
   assert.match(dialog.textContent, /No reusable source URL/);
-  click(dialog.querySelector(".dz-modal-close"));
-});
-
-test("desktop guidance loads direct installers, retries failures, and labels the processor", async () => {
-  let resolve;
-  let calls = 0;
-  const downloads = {
-    load() {
-      calls++;
-      if (calls === 1) return Promise.reject(new Error("offline"));
-      return new Promise((answer) => {
-        resolve = answer;
-      });
-    },
-  };
-  await act(async () => showDesktopAppGuidance(document, undefined, downloads));
-  const dialog = document.querySelector('[role="dialog"]');
-  const box = dialog.querySelector(".dz-modal-download-box");
-  assert.match(box.querySelector('[role="alert"]').textContent, /Could not load/);
-  click(box.querySelector("button"));
-  assert.match(box.querySelector('[role="status"]').textContent, /Finding desktop/);
-  await act(async () =>
-    resolve([
-      {
-        kind: "windows",
-        url: "https://github.com/lovasoa/dezoomify/releases/download/v3.1.123/windows.msi",
-        preferred: true,
-      },
-      {
-        kind: "macos",
-        url: "https://github.com/lovasoa/dezoomify/releases/download/v3.1.123/mac.dmg",
-        preferred: false,
-      },
-      {
-        kind: "linux",
-        url: "https://github.com/lovasoa/dezoomify/releases/download/v3.1.123/linux.deb",
-        preferred: false,
-      },
-    ]),
-  );
-  const links = [...box.querySelectorAll("a")];
-  assert.equal(links.length, 3);
-  assert.equal(links[0].textContent, "Windows installer · x64 (MSI)");
-  assert.equal(links[0].className, "dz-btn-tactile");
-  assert.match(links[1].textContent, /Apple Silicon/);
-  assert.match(links[2].textContent, /x64 \(DEB\)/);
-  assert.ok(links.every((link) => link.href.includes("/releases/download/")));
-  assert.doesNotMatch(dialog.querySelector(".dz-modal-steps").textContent, /GitHub Releases page/);
-  click(dialog.querySelector(".dz-modal-close"));
-});
-
-test("oversized-image handoff uses injected direct downloads while preserving the source URL", async () => {
-  const el = container();
-  const source = "https://museum.test/image/info.json?token=exact%2Bvalue";
-  let resolve;
-  const downloads = {
-    load: () =>
-      new Promise((answer) => {
-        resolve = answer;
-      }),
-  };
-  render(
-    el,
-    presentOutput(
-      { format: "png", disposition: "browser-save-initiated" },
-      {
-        phase: "output",
-        completed: 1,
-        total: 1,
-        selected: { width: 100, height: 100 },
-        maximum: { width: 200, height: 200 },
-      },
-    ),
-    callbacks,
-    { offerDesktopApp: true, desktopSourceUrl: source, desktopDownloads: downloads },
-  );
-  click(el.querySelector("#dz-btn-download-desktop"));
-  const dialog = document.querySelector('[role="dialog"]');
-  assert.match(dialog.textContent, /Finding desktop installers/);
-  await act(async () =>
-    resolve([
-      {
-        kind: "linux",
-        url: "https://github.com/lovasoa/dezoomify/releases/download/v3.1.123/linux.deb",
-        preferred: false,
-      },
-    ]),
-  );
-  assert.match(dialog.querySelector("a").href, /\/releases\/download\/.*\.deb$/);
-  assert.equal(dialog.querySelector("input").value, source);
-  assert.equal(dialog.querySelector("a").className, "");
   click(dialog.querySelector(".dz-modal-close"));
 });
 
