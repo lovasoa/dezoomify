@@ -10,6 +10,22 @@
 // type-strip it directly in tests.
 
 export const de = {
+  "page.brand": "Zoombare Bilder speichern",
+  "page.nav.label": "Hauptnavigation",
+  "page.nav.extension": "Browser-Erweiterung",
+  "page.nav.desktop": "Desktop-App",
+  "page.nav.help": "Hilfe",
+  "page.nav.donate": "Spenden",
+  "page.nav.donateTitle": "Zu den Hostingkosten beitragen",
+  "page.footer.source": "Quellcode (GPL)",
+  "page.footer.faq": "Häufige Fragen",
+  "page.footer.privacy": "Datenschutz",
+  "page.footer.terms": "Nutzungsbedingungen",
+  "page.preview.zoomOut": "Verkleinern",
+  "page.preview.zoomIn": "Vergrößern",
+  "page.preview.reset": "Zoom auf 100 Prozent zurücksetzen",
+  "page.preview.fit": "Einpassen",
+  "page.preview.fitLabel": "Bild in die Vorschau einpassen",
   "view.diagnostics.signedInNote":
     "Wenn Sie sich auf dieser Website anmelden müssen, können diese Details sensible Informationen enthalten. Prüfen Sie sie vor dem Teilen.",
   "view.diagnostics.save": "Diagnosebericht speichern",
@@ -18,7 +34,7 @@ export const de = {
   "view.diagnostics.loadFailed":
     "Der vollständige Bericht konnte nicht gelesen werden. Die verfügbaren Details stehen unten.",
   "view.retry.title": "Download angehalten",
-  "view.retry.summary": "{done} von {total} Kacheln wurden geladen.",
+  "view.retry.summary": "{done} von {total} Bildstücken wurden heruntergeladen.",
   "view.retry.explanation":
     "Die automatischen Versuche sind ausgeschöpft. Erneut versuchen oder abbrechen; es wurde keine Datei gespeichert.",
   "view.retry.retry": "Noch einmal versuchen",
@@ -43,52 +59,51 @@ export const de = {
   "view.desktop.download.macos": "macOS-Installationsprogramm · Apple Silicon (DMG)",
   "view.desktop.download.linux": "Linux-Installationsprogramm · x64 (DEB)",
   "view.desktop.step1":
-    "Lade oben das Installationsprogramm für dein System herunter und installiere es.",
-  "view.desktop.subtitle":
-    "Leistungsstarke native Anwendung für gigapixelgroße Museumsbilder und lokale Scans",
+    "Laden Sie oben das Installationsprogramm für Ihr System herunter und installieren Sie es.",
+  "view.desktop.subtitle": "Große Bilder direkt auf Ihrem Computer speichern",
   "view.desktop.whyTitle": "Warum die Desktop-App verwenden?",
-  "view.desktop.why1Title": "Bewältigt größere Kunstwerke:",
+  "view.desktop.why1Title": "Größere Bilder herunterladen:",
   "view.desktop.why1Body":
-    "Ein Browser-Tab kann nur eine begrenzte Bildmenge halten. Die Desktop-App setzt das Bild im Speicher zusammen, soweit Speicher verfügbar ist, und schreibt das fertige Ergebnis auf die Festplatte.",
-  "view.desktop.why2Title": "Speichert das fertige Bild:",
+    "Speichern Sie Bilder, die die Größenlimits Ihres Browsers überschreiten. Die App kann die Datei während des Downloads aufbauen, ohne das ganze Bild im Arbeitsspeicher zu halten. Sehr große Bilder können dennoch ein anderes Dateiformat oder eine kleinere Größe erfordern.",
+  "view.desktop.why2Title": "Die eigene Verbindung nutzen:",
   "view.desktop.why2Body":
-    "Jeder Auftrag wird in genau eine Ausgabedatei auf Ihrem Rechner gespeichert.",
-  "view.desktop.why3Title": "Wenn die Website nicht fertig wird:",
+    "Die App lädt Bildinformationen und jedes Bildstück über Ihre Internetverbindung direkt von der Quellwebsite. Das kann helfen, wenn eine Website den gemeinsam genutzten Server von Dezoomify blockiert.",
+  "view.desktop.why3Title": "Das Dateiformat wählen:",
   "view.desktop.why3Body":
-    "Die Website bricht den Auftrag mit einem Fehler ab und verweist für das vollständige Bild auf die Desktop-App.",
+    "Speichern Sie als JPEG, PNG, TIFF oder in anderen Formaten zum Betrachten, Bearbeiten oder Archivieren. Wählen Sie den Ordner für Ihre Bilder.",
   "view.desktop.howTitle": "So verwenden Sie sie",
   "view.desktop.step2":
-    "Starten Sie Dezoomify und fügen Sie die Adresse Ihres zoombaren Bildes oder Manifests ein.",
+    "Öffnen Sie Dezoomify und fügen Sie die Adresse der Seite oder des zoombaren Bildes ein.",
   "view.desktop.step3":
-    "Wählen Sie die gewünschte Auflösung und den Zielordner, um das vollständige zusammengesetzte Bild zu speichern.",
+    "Wählen Sie einen Ordner, ein Dateiformat und eine Bildgröße, und starten Sie den Download.",
   "view.desktop.cliTitle": "Automatisierung gesucht? Nutzen Sie Dezoomify CLI",
   "view.desktop.cliDesc":
-    "Das CLI ermöglicht kopfloses, skriptfähiges Speichern einzelner Aufträge, ideal für automatisierte Abläufe und Server ohne Anzeige.",
+    "Mit der Kommandozeilenversion können Sie Bilder per Skript herunterladen oder eine Liste von Adressen verarbeiten.",
   "view.desktop.cliLink": "CLI von GitHub Releases laden",
   // Browser-extension guidance modal.
   "view.ext.title": "Dezoomify Browser-Erweiterung",
   "view.ext.subtitle":
-    "Automatische Viewer-Erkennung für passwortgeschützte digitale Archive und komplexe Seiten",
+    "Zoombare Bilder von der geöffneten Seite speichern, auch auf Websites, auf denen Sie angemeldet sind",
   "view.ext.availableOn": "Verfügbar auf",
   "view.ext.chromeStore": "Chrome Web Store",
   "view.ext.firefoxStore": "Firefox Browser Add-ons",
   "view.ext.whyTitle": "Warum die Browser-Erweiterung verwenden?",
-  "view.ext.why1Title": "Angemeldete Seiten:",
+  "view.ext.why1Title": "Bestehende Anmeldung nutzen:",
   "view.ext.why1Body":
-    "Während Sie ein zoombares Bild betrachten, findet sie automatisch das Bild hinter dem Viewer, auch auf Seiten, auf denen Sie angemeldet sind, etwa Bibliotheksportale, Museumsabos und wissenschaftliche Archive.",
-  "view.ext.why2Title": "Einfach zu bedienen:",
+    "Laden Sie Bilder herunter, auf die Sie nach der Anmeldung bei einer Bibliothek, einem Museum oder Archiv zugreifen können. Benötigt die Erweiterung Zugriff auf eine andere Website, bittet sie um Ihre Erlaubnis.",
+  "view.ext.why2Title": "Die Suche nach der Bildadresse sparen:",
   "view.ext.why2Body":
-    "Drücken Sie die Dezoomify-Schaltfläche in der Symbolleiste und wählen Sie das zu speichernde Bild, oder senden Sie den Auftrag an die Desktop-App, wenn das Bild sehr groß ist.",
-  "view.ext.why3Title": "Privat:",
+    "Klicken Sie in der Browser-Symbolleiste auf Dezoomify, um das Bild im Bildbetrachter der Seite zu finden. Der Download startet in einem neuen Tab. Die Größenlimits des Browsers gelten weiterhin.",
+  "view.ext.why3Title": "Startet auf Ihren Wunsch:",
   "view.ext.why3Body":
-    "Sie betrachtet nur die Seite, auf die Sie gezeigt haben, und erst nachdem Sie die Schaltfläche gedrückt haben. Sie beobachtet Ihr Surfen nicht im Hintergrund.",
+    "Die Erweiterung prüft die Seite erst, wenn Sie auf ihre Schaltfläche klicken. Sie beobachtet Ihr Surfen nicht im Hintergrund.",
   "view.ext.howTitle": "So verwenden Sie sie in 3 Schritten",
   "view.ext.step1":
     "Installieren Sie die Erweiterung aus dem Chrome Web Store oder von Firefox Browser Add-ons.",
   "view.ext.step2":
-    "Öffnen Sie die Museums- oder Bibliotheksseite mit Ihrem Kunstwerk und melden Sie sich bei Bedarf an.",
+    "Öffnen Sie die Seite mit Ihrem Bild, melden Sie sich bei Bedarf an und zoomen Sie einmal hinein, damit das Bild geladen wird.",
   "view.ext.step3":
-    "Klicken Sie auf das Dezoomify-Symbol in der Symbolleiste, um das vollaufgelöste Bild automatisch zu erkennen und zu speichern!",
+    "Klicken Sie in der Browser-Symbolleiste auf Dezoomify. Erlauben Sie den Zugriff, falls Sie gefragt werden, und lassen Sie den Download-Tab bis zum Ende des Speicherns geöffnet.",
   // Access request (browser-session file access), shared access-request.tsx.
   "view.access.title": "Zugriff erlauben, um fortzufahren",
   "view.access.usesOrigin": "Dieses Bild verwendet Dateien von {origin}.",
@@ -102,14 +117,14 @@ export const de = {
   // Job step labels.
   "view.step.discovering": "Zoombares Bild wird gesucht…",
   "view.step.preflighting": "Bildgröße wird geprüft…",
-  "view.step.downloading": "Bildfragmente werden gespeichert…",
+  "view.step.downloading": "Bildstücke werden heruntergeladen…",
   "view.step.saving": "Endbild wird zusammengesetzt…",
-  "view.step.contactingDetail": "Bildhost wird kontaktiert…",
+  "view.step.contactingDetail": "Quellwebsite wird kontaktiert…",
   // Live job section.
   "view.job.techDetails": "Technische Details und Protokolle",
   "view.job.manyImages": "{count} Bilder",
   "view.job.paused": "Pausiert",
-  "view.job.retryingTiles": "{count} Fragmente werden erneut abgerufen…",
+  "view.job.retryingTiles": "{count} Bildstücke werden erneut heruntergeladen…",
   "view.job.waiting": "Warte auf {host}…",
   "view.job.sourceLabel": "Quelle",
   "view.job.pause": "Pause",
@@ -121,10 +136,10 @@ export const de = {
   "view.display.waysTitle": "Wege, dieses Kunstwerk zu speichern",
   "view.display.extTitle": "Anleitung zur Browser-Erweiterung",
   "view.display.extDesc":
-    "Für Seiten mit Anmeldung oder Sitzungs-Cookies. Erkennt Viewer auf aktiven Seiten automatisch.",
+    "Findet das Bild auf der geöffneten Seite, auch wenn Sie dort angemeldet sind.",
   "view.display.deskTitle": "Anleitung zur Desktop-App",
   "view.display.deskDescClean":
-    "Für ein sauberes Speichern in voller Größe, wenn der Browser das Bild nur zeigen kann.",
+    "Direkt von der Quellwebsite herunterladen, wenn Ihr Browser nur eine Vorschau anzeigen kann.",
   "view.display.startOver": "Von vorn beginnen",
   "view.resolution.title": "Bild mit geringerer Auflösung",
   "view.resolution.sizes": "Bildgröße: {selected} Pixel. Verfügbares Maximum: {maximum} Pixel.",
@@ -132,27 +147,32 @@ export const de = {
   "view.desktop.handoffTitle": "Dieses Bild in der Desktop-App herunterladen",
   "view.desktop.handoffInstall":
     "Wählen Sie das Installationsprogramm für Ihr Betriebssystem und öffnen Sie Dezoomify.",
-  "view.desktop.handoffPaste": "Fügen Sie diese URL in das URL-Feld der Desktop-App ein:",
-  "view.desktop.handoffCopy": "URL kopieren",
-  "view.desktop.handoffCopied": "URL kopiert. Fügen Sie sie in die Desktop-App ein.",
+  "view.desktop.handoffPaste": "Fügen Sie diese Adresse in die Desktop-App ein:",
+  "view.desktop.handoffCopy": "Adresse kopieren",
+  "view.desktop.handoffCopied": "Adresse kopiert. Fügen Sie sie in die Desktop-App ein.",
   "view.desktop.handoffCopyFailed":
-    "Kopieren fehlgeschlagen. Markieren Sie die URL oben und kopieren Sie sie manuell.",
+    "Kopieren fehlgeschlagen. Markieren Sie die Adresse oben und kopieren Sie sie manuell.",
   "view.desktop.handoffStart":
-    "Starten Sie den Download und wählen Sie die größte Auflösung. Wenn mehrere Bilder erscheinen, wählen Sie das gewünschte Bild.",
+    "Wählen Sie im Menü Größe die Option Volle Auflösung und starten Sie den Download.",
   "view.desktop.handoffAccess":
-    "Die Desktop-App übernimmt die Anmeldung Ihres Browsers nicht. Die URL muss von der App aus zugänglich sein.",
+    "Die Desktop-App kann Ihre Anmeldung im Browser nicht nutzen. Versuchen Sie für Bilder, die eine Anmeldung erfordern, die Browser-Erweiterung.",
   "view.desktop.handoffUnavailable":
-    "Für diesen Auftrag ist keine wiederverwendbare Quell-URL verfügbar. Öffnen Sie die ursprüngliche Seite und suchen Sie die URL des zoombaren Bildes oder Manifests zum Einfügen in die App.",
+    "Für diesen Download gibt es keine Bildadresse zum Kopieren. Kopieren Sie die Adresse der ursprünglichen Seite und versuchen Sie es damit in der Desktop-App.",
   // Completion section.
   "view.done.ready": "Ihr Bild ist bereit.",
   "view.done.readyTitle": "Bereit zum Speichern",
   "view.done.saveNow": "Bild jetzt speichern",
   "view.done.another": "Weiteres Bild dezoomifizieren",
+  "view.done.guidance":
+    "Laden Sie Ihr Bild mit der Speichern-Schaltfläche herunter. Farben können leicht abweichen, da Browser-Downloads das ursprüngliche Farbprofil nicht erhalten. Nutzen Sie die Desktop-App für Formate, die Farbprofile bewahren.",
+  "view.done.summary": "{width} × {height} Pixel ({mime})",
+  "view.display.guidance":
+    "Ihr Browser kann dieses Bild anzeigen, aber die Quellwebsite erlaubt ihm nicht, eine herunterladbare Datei zu erstellen. Versuchen Sie es zum Speichern mit der Desktop-App oder Browser-Erweiterung.",
   // Failure section.
   "view.fail.title": "Bild konnte nicht dezoomifiziert werden",
   "view.fail.deskDescLimits":
-    "Für Bilder, die die Speichergrenzen des Browsers sprengen, soweit Speicher verfügbar ist. Wird nativ auf Ihrem Rechner verarbeitet.",
-  "view.fail.helpTitle": "Hilfe und Adresssuche",
+    "Größere Bilder speichern oder die eigene Verbindung nutzen, wenn eine Website unseren Server blockiert.",
+  "view.fail.helpTitle": "Hilfe bei der Bildsuche",
   "view.fail.helpDesc":
     "So finden Sie die Bildadresse auf Museums- und Archivseiten, und was Sie versuchen können, wenn nichts gefunden wird.",
   "view.fail.reportBug": "Fehler auf GitHub melden",
@@ -160,20 +180,20 @@ export const de = {
     "Erstellen Sie einen GitHub-Bericht mit den Diagnosedaten dieses Versuchs.",
   "view.fail.retry": "Erneut versuchen",
   "view.fail.canvasAllocation":
-    "Dieses Bild ist zu groß für diesen Browser-Tab. Die Desktop-App kann es in voller Größe speichern.",
+    "Dieses Bild ist zu groß für diesen Browser-Tab. Versuchen Sie es mit der Desktop-App, um ein größeres Bild zu speichern.",
   "view.fail.canvasContext":
-    "Dieser Browser-Tab konnte die Bildfläche in dieser Größe nicht erstellen. Die Desktop-App kann es in voller Größe speichern.",
+    "Ihr Browser konnte ein Bild dieser Größe nicht vorbereiten. Versuchen Sie es mit der Desktop-App oder schließen Sie andere Tabs und versuchen Sie es erneut.",
   // Cancelled section.
   "view.cancel.title": "Speichern abgebrochen",
   "view.cancel.message": "Das Speichern des Bildes wurde gestoppt.",
   // Job section and share chrome.
-  "view.job.countsFull": "{current} von {total} Fragmenten",
+  "view.job.countsFull": "{current} von {total} Bildstücken",
   "view.job.pixelCounts": "{current} von {total}",
   "view.job.pixels": "{count} px",
   "view.job.megapixels": "{count} Mpx",
   "view.job.gigapixels": "{count} Gpx",
   "view.job.preparation": "{percent}% der Pixel vorbereitet. Das Bild wird fertig gespeichert.",
-  "view.job.countsActive": "{current} von {total} Fragmenten · {active} in Arbeit",
+  "view.job.countsActive": "{current} von {total} Bildstücken · {active} in Arbeit",
   // Recent pictures, including unsuccessful attempts.
   "view.history.title": "Letzte Bilder",
   "view.history.empty": "Noch keine Bilder. Gestartete Bilder erscheinen hier.",
@@ -197,15 +217,15 @@ export const de = {
   "view.history.openImage": "{image} öffnen",
   "view.history.openFailed": "Datei konnte nicht geöffnet werden.",
   "view.input.description":
-    "Dezoomify lädt zoombare Bilder in Fragmenten aus Bibliotheken, Museen, Galerien und anderen Websites herunter. Fügen Sie unten die Adresse eines Bildes ein, um es herunterzuladen.",
-  "view.input.placeholder": "Adresse eines Bildbetrachters oder Manifests einfügen",
+    "Speichern Sie zoombare Bilder aus Museen, Bibliotheken, Archiven und anderen Websites. Fügen Sie zum Starten die Adresse der Seite ein, die Ihr Bild zeigt.",
+  "view.input.placeholder": "Seiten- oder Bildadresse einfügen",
   "view.input.aria": "Adresse der Webseite mit dem zoombaren Bild",
   "view.input.start": "Bild finden",
   // Rate-limit explainers (see failure.ts plainMessageFor).
   "view.fail.rateProxy":
-    "Die Website, die dieses Bild hostet, begrenzt, wie viele Seiten unser Server bei ihr anfordern darf, und diese Grenze wurde gerade erreicht, daher konnte die Seite nicht geöffnet werden. Die Browser-Erweiterung und die Desktop-App laden über Ihre eigene Verbindung statt über unseren Server und sind von dieser Grenze nicht betroffen.",
+    "Die Quellwebsite begrenzt Downloads von unserem Server. Warten Sie einige Minuten oder versuchen Sie es mit der Desktop-App oder Browser-Erweiterung über Ihre eigene Internetverbindung.",
   "view.fail.rateDirect":
-    "Die Website, die dieses Bild hostet, erhält gerade zu viele Anfragen von Ihrer eigenen Verbindung. Wenige Minuten Wartezeit klären dies meist, und Erweiterung oder Desktop-App sehen bis dahin dasselbe Besetztzeichen.",
+    "Die Quellwebsite begrenzt Downloads von Ihrer eigenen Verbindung. Warten Sie einige Minuten und versuchen Sie es erneut. Desktop-App und Erweiterung nutzen dieselbe Verbindung und helfen möglicherweise nicht.",
   // Fetch-failure family (see failure.ts plainMessageFor).
   "view.fail.httpNotFound":
     "Diese Seite wurde nicht gefunden. Prüfen Sie die Adresse und versuchen Sie es erneut.",
@@ -220,13 +240,13 @@ export const de = {
   "view.fail.hintAddress": "Prüfen Sie die Adresse und versuchen Sie es erneut.",
   "view.fail.hintPrivate": "Die Website kann keine privaten oder lokalen Adressen öffnen.",
   "view.fail.hintContentType":
-    "Die Website hat mit einem Dateityp geantwortet, den sie hier nicht prüft.",
+    "Die Quellwebsite hat einen Dateityp zurückgegeben, den Dezoomify hier nicht lesen kann.",
   "view.fail.hintRedirect":
     "Die Website hat so umgeleitet, wie es die Website nicht nachvollziehen kann.",
   "view.fail.proxyBudget":
-    "Diese Seite ist zum Prüfen hier zu groß. Versuchen Sie es mit der Desktop-App für sehr große Bilder.",
+    "Diese Datei ist zu groß für den Abruf durch unseren Server. Versuchen Sie es mit der Desktop-App, um sie direkt herunterzuladen.",
   "view.fail.proxyFetch":
-    "Der Metadaten-Proxy konnte diese Adresse nicht abrufen. Versuchen Sie es in Kürze erneut.",
+    "Unser Server konnte diese Adresse nicht abrufen. Versuchen Sie es in Kürze erneut oder nutzen Sie die Desktop-App, um sich direkt mit der Quellwebsite zu verbinden.",
   // Desktop app user copy (apps/desktop/src/main.tsx). Logs and technical
   // diagnostics stay literal English and never use these keys.
   "desktop.url.invalid":
