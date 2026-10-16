@@ -30,6 +30,8 @@ From the tagged revision:
 4. `cargo xtask release verify --plan ... --artifacts target/release-dist/<version>`
 5. `cargo xtask release publish --plan ... --artifacts ...`
 
+The workflow submits the exact Chromium and Firefox release ZIPs to the existing
+store listings, without rebuilding. Submission can finish before store approval.
 Signing and installation policy: [desktop guide](../apps/desktop/desktop-app.md#install).
 Release working trees under `target/release-dist/` are never committed.
 
@@ -61,24 +63,6 @@ Apple credentials are separate from the existing Tauri updater signing key.
 updater app, then installs and launches both. Before merging,
 run `gh workflow run desktop.yml --ref <reviewed-branch>` and require success.
 This uploads test artifacts without publishing. Automatic PR builds stay ad-hoc.
-
-### Nightly extension store submissions
-
-[`store-nightly`](../.github/workflows/store-nightly.yml) submits changed releases
-at 02:30 UTC, at most once per store daily and only before 06:00 UTC. It reuses
-the release ZIPs so store review covers the same artifacts users can download.
-Submission acceptance is separate from store approval.
-
-Keep OAuth/AMO secrets in the `store-submit` environment. Chromium also needs
-the public Actions variable `CHROME_WS_PUBLISHER_ID` from its developer dashboard.
-For emergencies, dispatch [`store-submit`](../.github/workflows/store-submit.yml)
-with `release_tag`, browser and `submit=true`; this bypasses nightly limits.
-
-An uncertain response blocks retries because the store may already have accepted
-the version. Inspect the store dashboard and the corresponding deployment in
-`store-chromium` or `store-firefox`; append `success` if that version was accepted,
-otherwise `failure`, with `auto_inactive=false`. Preserve these records to enforce
-daily limits. A successful manual submission establishes a new baseline.
 
 ## Website deployment contract
 
