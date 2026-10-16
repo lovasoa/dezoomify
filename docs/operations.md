@@ -35,38 +35,22 @@ Release working trees under `target/release-dist/` are never committed.
 
 ### Nightly extension store submissions
 
-GitHub releases publish continuously; [`store-nightly`](../.github/workflows/store-nightly.yml)
-runs at 02:30 UTC and freezes the latest published release once for both stores.
-Each store submits that release's checksummed ZIP only when its commit differs
-from the last accepted submission. Missed nights accumulate changes. Scheduled
-runs may be delayed; automatic mutations are permitted only before 06:00 UTC,
-and at most one attempt per store per UTC date is allowed. Submission acceptance
-does not mean store review or approval has completed.
+[`store-nightly`](../.github/workflows/store-nightly.yml) submits changed releases
+at 02:30 UTC, at most once per store daily and only before 06:00 UTC. It reuses
+the release ZIPs so store review covers the same artifacts users can download.
+Submission acceptance is separate from store approval.
 
-The `store-submit` environment holds the existing OAuth/AMO secrets. Chromium
-also requires the public Actions variable `CHROME_WS_PUBLISHER_ID`, copied from
-the Chrome developer dashboard's publisher account. This workflow uses Chrome
-API v2 because [v1 support ended on 15 October 2026](https://developer.chrome.com/docs/webstore/api/v1).
-The extension IDs remain in `release/config.toml`; uploads update existing listings.
+Keep OAuth/AMO secrets in the `store-submit` environment. Chromium also needs
+the public Actions variable `CHROME_WS_PUBLISHER_ID` from its developer dashboard;
+[Chrome v1 support ended on 15 October 2026](https://developer.chrome.com/docs/webstore/api/v1).
+For emergencies, dispatch [`store-submit`](../.github/workflows/store-submit.yml)
+with `release_tag`, browser and `submit=true`; this bypasses nightly limits.
 
-Dispatch [`store-submit`](../.github/workflows/store-submit.yml) with an explicit
-`release_tag`, browser, and `submit=true` for an emergency submission. Manual
-submissions bypass time and daily limits, reuse the exact release ZIP, and update
-the same records. Leaving `submit=false` only builds a dry-run artifact; pushes
-that touch the extension also retain this dry-run check.
-
-GitHub deployment records with task `store-submit` and environments
-`store-chromium` / `store-firefox` persist attempts and outcomes. Per-store job
-concurrency serializes every entry point. A recorded `error`, `in_progress`, or
-missing status since the last confirmed submission blocks automatic retries: the store may have accepted a request
-whose response was lost. Inspect that record's version and the store dashboard;
-then append a deployment status with `auto_inactive=false`: `success` only if
-the intended version was accepted, or `failure` after confirming it was not.
-For example, use `gh api --method POST repos/OWNER/REPO/deployments/ID/statuses
--f state=success -F auto_inactive=false -f description='Verified version in store'`.
-Do not delete attempt records; they enforce the daily limit even after failures.
-A successful manual submission also reconciles older uncertain attempts and
-establishes a new baseline; ledger reads stop at the most recent success.
+An uncertain response blocks retries because the store may already have accepted
+the version. Inspect the store dashboard and the corresponding deployment in
+`store-chromium` or `store-firefox`; append `success` if that version was accepted,
+otherwise `failure`, with `auto_inactive=false`. Preserve these records to enforce
+daily limits. A successful manual submission establishes a new baseline.
 
 Desktop release builds require the repository Actions secret
 `TAURI_SIGNING_PRIVATE_KEY`, containing the Tauri signing key, and optionally

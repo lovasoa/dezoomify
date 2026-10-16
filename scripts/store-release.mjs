@@ -7,9 +7,9 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 
-export class Rejected extends Error {}
+class Rejected extends Error {}
 
-export async function request(fetcher, url, options = {}) {
+async function request(fetcher, url, options = {}) {
   const response = await fetcher(url, { signal: AbortSignal.timeout(300_000), ...options });
   const body = await response.text();
   if (!response.ok) {
@@ -35,6 +35,18 @@ export function githubApi({ repository, token, fetcher = fetch }) {
       },
       ...(body ? { body: JSON.stringify(body) } : {}),
     });
+}
+
+export async function downloadAsset({ repository, token, fetcher = fetch }, asset) {
+  const response = await fetcher(
+    `https://api.github.com/repos/${repository}/releases/assets/${asset.id}`,
+    {
+      headers: { Authorization: `Bearer ${token}`, Accept: "application/octet-stream" },
+      signal: AbortSignal.timeout(120_000),
+    },
+  );
+  if (!response.ok) throw new Error(`Release asset ${asset.id}: HTTP ${response.status}`);
+  return Buffer.from(await response.arrayBuffer());
 }
 
 export async function freezeRelease(api, tag) {
@@ -65,7 +77,7 @@ function nightly(now, date) {
   return now.getUTCHours() < 6 && (!date || now.toISOString().slice(0, 10) === date);
 }
 
-export async function verifyPackage(bytes, version) {
+async function verifyPackage(bytes, version) {
   const directory = await mkdtemp(join(tmpdir(), "dezoomify-store-"));
   try {
     const zip = join(directory, "extension.zip");
@@ -94,7 +106,7 @@ function automaticSkip(records, commit, now, date) {
   return undefined;
 }
 
-export async function submissionState(api, browser) {
+async function submissionState(api, browser) {
   const records = [];
   for (let page = 1; ; page++) {
     const batch = await api(`deployments?environment=store-${browser}&per_page=100&page=${page}`);
@@ -117,7 +129,6 @@ export async function submitRelease({
   automatic,
   download,
   submit,
-  verify = verifyPackage,
   now = () => new Date(),
 }) {
   if (!["chromium", "firefox"].includes(browser)) throw new Error("Unknown browser");
@@ -130,7 +141,7 @@ export async function submitRelease({
   const bytes = await download(plan.assets[browser]);
   const digest = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
   if (digest !== plan.assets[browser].digest) throw new Error("Release ZIP digest changed");
-  await verify(bytes, plan.version);
+  await verifyPackage(bytes, plan.version);
   if (automatic && !nightly(now(), date)) return "outside nightly window";
   const deployment = await api("deployments", "POST", {
     ref: plan.commit,
@@ -310,10 +321,11 @@ export function storeSubmitter({
 
 async function main() {
   const env = process.env;
-  const api = githubApi({
+  const github = {
     repository: required(env, "GITHUB_REPOSITORY"),
     token: required(env, "GH_TOKEN"),
-  });
+  };
+  const api = githubApi(github);
   if (process.argv[2] === "freeze") {
     const plan = await freezeRelease(api, env.RELEASE_TAG || undefined);
     await appendFile(required(env, "GITHUB_OUTPUT"), `plan=${JSON.stringify(plan)}\n`);
@@ -324,24 +336,13 @@ async function main() {
   const config = await readFile("release/config.toml", "utf8");
   env.EXTENSION_ID = /\[extension.chromium\][\s\S]*?\nid = "([^"]+)"/.exec(config)?.[1];
   env.AMO_GUID = /\[extension.firefox\][\s\S]*?\nid = "([^"]+)"/.exec(config)?.[1];
-  const download = async (asset) => {
-    const response = await fetch(
-      `https://api.github.com/repos/${env.GITHUB_REPOSITORY}/releases/assets/${asset.id}`,
-      {
-        headers: { Authorization: `Bearer ${env.GH_TOKEN}`, Accept: "application/octet-stream" },
-        signal: AbortSignal.timeout(120_000),
-      },
-    );
-    if (!response.ok) throw new Error(`Release asset ${asset.id}: HTTP ${response.status}`);
-    return Buffer.from(await response.arrayBuffer());
-  };
   console.log(
     await submitRelease({
       api,
       browser: env.BROWSER,
       plan: JSON.parse(required(env, "RELEASE_PLAN")),
       automatic: env.AUTOMATIC === "true",
-      download,
+      download: (asset) => downloadAsset(github, asset),
       submit: storeSubmitter(),
     }),
   );
