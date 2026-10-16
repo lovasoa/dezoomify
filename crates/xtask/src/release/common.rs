@@ -163,11 +163,9 @@ pub(crate) fn read_plan(path: &Path) -> Result<Plan, String> {
 pub(crate) fn expected_artifact_name(target: &str, version: &str) -> Option<String> {
     match target {
         "cli-linux-x86_64" => Some(format!("dezoomify-cli-v{version}-linux-x86_64.tar.gz")),
-        "desktop-linux-x86_64" => Some(format!("dezoomify-desktop-v{version}-linux-x86_64.deb")),
-        "desktop-windows-x86_64" => {
-            Some(format!("dezoomify-desktop-v{version}-windows-x86_64.msi"))
-        }
-        "desktop-macos-aarch64" => Some(format!("dezoomify-desktop-v{version}-macos-aarch64.dmg")),
+        "desktop-linux-x86_64" => Some("dezoomify-desktop.deb".into()),
+        "desktop-windows-x86_64" => Some("dezoomify-desktop.msi".into()),
+        "desktop-macos-aarch64" => Some("dezoomify-desktop.dmg".into()),
         "extension-chromium" => Some(format!("dezoomify-chromium-v{version}.zip")),
         "extension-firefox" => Some(format!("dezoomify-firefox-v{version}.zip")),
         _ => None,

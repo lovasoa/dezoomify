@@ -108,7 +108,10 @@ fn release_publish(plan: &Plan, artifacts: &std::path::Path) -> Result<(), Strin
     // Windows uses the same MSI for installation and updating.
     assets.extend(super::updater::assets(plan, artifacts));
     assets.insert(manifest_path);
-    cmd.args(assets).arg("--draft");
+    for asset in assets {
+        cmd.arg(labeled_asset(&asset));
+    }
+    cmd.arg("--draft");
     let status = cmd.status().map_err(|e| format!("failed to run gh: {e}"))?;
     if !status.success() {
         return Err(format!("gh release create {tag} failed"));
@@ -125,6 +128,29 @@ fn release_publish(plan: &Plan, artifacts: &std::path::Path) -> Result<(), Strin
         ));
     }
     Ok(())
+}
+
+fn labeled_asset(path: &std::path::Path) -> std::ffi::OsString {
+    let filename = path.file_name().unwrap_or_default().to_string_lossy();
+    let (name, signature) = filename
+        .strip_suffix(".sig")
+        .map_or((filename.as_ref(), ""), |name| (name, " (signature)"));
+    let label = [
+        (".msi", "Windows installer: x64 (MSI)"),
+        (".deb", "Linux installer: x64 (DEB)"),
+        (".dmg", "macOS installer: Apple Silicon (DMG)"),
+        ("macos-aarch64.app.tar.gz", "macOS updater: Apple Silicon"),
+        ("dezoomify-cli-", "Command line: Linux x64 (tar.gz)"),
+        ("dezoomify-chromium-", "Browser extension: Chromium (ZIP)"),
+        ("dezoomify-firefox-", "Browser extension: Firefox (ZIP)"),
+        ("latest.json", "Desktop updater manifest"),
+    ]
+    .into_iter()
+    .find_map(|(pattern, label)| name.contains(pattern).then_some(label))
+    .unwrap_or("Release asset");
+    let mut argument = path.as_os_str().to_owned();
+    argument.push(format!("#{label}{signature}"));
+    argument
 }
 
 fn remote_main_commit() -> Result<String, String> {

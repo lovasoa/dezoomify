@@ -6,6 +6,7 @@ import {
   type HistoryEntry,
   type HistoryStore,
   isValidInputUrl,
+  type PlatformHints,
   type Presentation,
   presentFailure,
   presentIdle,
@@ -78,6 +79,7 @@ export interface BrowserCapabilities
   dispose?(): void;
 }
 export interface BrowserApplicationOptions {
+  platformHints?: PlatformHints;
   root: HTMLElement;
   product: "website" | "extension";
   version?: string;
@@ -413,6 +415,7 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
         ...(a ? { ...a.view, diagnosticReport: report } : { initialUrl }),
         sourceUrl: a?.progress?.source_url ?? a?.url,
         desktopSourceUrl: a?.progress?.source_url ?? a?.url,
+        platformHints: options.platformHints,
         product: options.product,
         history: history.entries(),
         historyNow: Date.now(),

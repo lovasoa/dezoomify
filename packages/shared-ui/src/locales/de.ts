@@ -39,16 +39,13 @@ export const de = {
   "view.modal.closeTitle": "Schließen",
   // Desktop-app guidance modal.
   "view.desktop.title": "Dezoomify Desktop-App",
+  "view.desktop.download.windows": "Windows-Installationsprogramm · x64 (MSI)",
+  "view.desktop.download.macos": "macOS-Installationsprogramm · Apple Silicon (DMG)",
+  "view.desktop.download.linux": "Linux-Installationsprogramm · x64 (DEB)",
+  "view.desktop.step1":
+    "Lade oben das Installationsprogramm für dein System herunter und installiere es.",
   "view.desktop.subtitle":
     "Leistungsstarke native Anwendung für gigapixelgroße Museumsbilder und lokale Scans",
-  "view.desktop.installer": "Das unsignierte {installer} für {platform} ist verfügbar auf",
-  "view.desktop.releasesLink": "GitHub Releases",
-  "view.desktop.releasesNote": "Keine automatischen Updates; prüfen Sie GitHub Releases manuell.",
-  "view.desktop.installerMsi": ".msi-Installationsprogramm",
-  "view.desktop.installerDmg": ".dmg für Apple silicon",
-  "view.desktop.installerDeb": ".deb-Installationsprogramm",
-  "view.desktop.installerGeneric": "Installationsprogramm",
-  "view.desktop.platformGeneric": "Ihre Plattform",
   "view.desktop.whyTitle": "Warum die Desktop-App verwenden?",
   "view.desktop.why1Title": "Bewältigt größere Kunstwerke:",
   "view.desktop.why1Body":
@@ -60,8 +57,6 @@ export const de = {
   "view.desktop.why3Body":
     "Die Website bricht den Auftrag mit einem Fehler ab und verweist für das vollständige Bild auf die Desktop-App.",
   "view.desktop.howTitle": "So verwenden Sie sie",
-  "view.desktop.step1":
-    "Laden Sie das unsignierte {installer} für {platform} von unserer GitHub-Releases-Seite herunter und installieren Sie es. Es gibt keine automatischen Updates.",
   "view.desktop.step2":
     "Starten Sie Dezoomify und fügen Sie die Adresse Ihres zoombaren Bildes oder Manifests ein.",
   "view.desktop.step3":
@@ -135,7 +130,6 @@ export const de = {
   "view.resolution.sizes": "Bildgröße: {selected} Pixel. Verfügbares Maximum: {maximum} Pixel.",
   "view.resolution.download": "Volle Auflösung mit der Desktop-App erhalten",
   "view.desktop.handoffTitle": "Dieses Bild in der Desktop-App herunterladen",
-  "view.desktop.handoffDownload": "Desktop-App herunterladen",
   "view.desktop.handoffInstall":
     "Wählen Sie das Installationsprogramm für Ihr Betriebssystem und öffnen Sie Dezoomify.",
   "view.desktop.handoffPaste": "Fügen Sie diese URL in das URL-Feld der Desktop-App ein:",
