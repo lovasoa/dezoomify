@@ -115,10 +115,7 @@ fn release_notes(plan: &Plan) -> Result<String, String> {
             git_output(&["log", "--first-parent", "--format=- %s", &range])?
         }
     };
-    Ok(format!(
-        "# dezoomify v{}\n\n{introduction}\n\n{changes}\n",
-        plan.version
-    ))
+    Ok(format!("{introduction}\n\n{changes}\n"))
 }
 
 #[cfg(test)]
@@ -137,7 +134,7 @@ mod tests {
             std::fs::read_to_string(release_plan_at(&base, false).unwrap()).unwrap()
         );
         let notes = std::fs::read_to_string(base.join(&version).join("notes.md")).unwrap();
-        assert!(notes.starts_with(&format!("# dezoomify v{version}\n\n")));
+        assert!(!notes.starts_with('#'));
         let _ = std::fs::remove_dir_all(&base);
     }
 

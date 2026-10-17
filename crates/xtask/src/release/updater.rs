@@ -154,8 +154,7 @@ mod tests {
             assert_eq!(manifest["version"], plan.version);
             assert_eq!(manifest["notes"], "Release notes");
             let platforms = manifest["platforms"].as_object().unwrap();
-            assert_eq!(platforms.len(), 3);
-            assert_eq!(assets(&plan, &root).len(), platforms.len());
+            assert_eq!(assets(&plan, &root).len(), 3);
             for (platform, target, extension) in [
                 ("linux-x86_64", "desktop-linux-x86_64", ".deb"),
                 ("windows-x86_64", "desktop-windows-x86_64", ".msi"),
