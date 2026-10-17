@@ -34,6 +34,8 @@ export interface ViewContext {
   platformHints?: PlatformHints;
   product?: "website" | "extension" | "desktop";
   diagnosticReport?: DiagnosticReport;
+  /** Original discovery failure when a source image was saved instead. */
+  discoveryFallback?: JobError;
   currentProgress?: {
     active?: number;
     retrying?: number;
@@ -68,4 +70,4 @@ export interface PlatformHints {
   platform?: string;
 }
 
-import type { RetryChoice } from "@dezoomify/wasm-bindings";
+import type { Error as JobError, RetryChoice } from "@dezoomify/wasm-bindings";

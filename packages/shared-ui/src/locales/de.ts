@@ -166,6 +166,8 @@ export const de = {
   "view.done.guidance":
     "Laden Sie Ihr Bild mit der Speichern-Schaltfläche herunter. Farben können leicht abweichen, da Browser-Downloads das ursprüngliche Farbprofil nicht erhalten. Nutzen Sie die Desktop-App für Formate, die Farbprofile bewahren.",
   "view.done.summary": "{width} × {height} Pixel ({mime})",
+  "view.done.fallback":
+    "Ein auf dieser Seite verfügbares Bild wurde gespeichert. Falls es nicht das gewünschte Bild ist, können Sie dies über die technischen Details unten melden.",
   "view.display.guidance":
     "Ihr Browser kann dieses Bild anzeigen, aber die Quellwebsite erlaubt ihm nicht, eine herunterladbare Datei zu erstellen. Versuchen Sie es zum Speichern mit der Desktop-App oder Browser-Erweiterung.",
   // Failure section.

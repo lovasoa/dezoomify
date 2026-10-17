@@ -165,6 +165,8 @@ export const it = {
   "view.done.guidance":
     "Usa il pulsante di salvataggio per scaricare la tua immagine. I colori possono variare leggermente perché i download dal browser non conservano il profilo colore originale. Per i formati che conservano i profili colore, usa l’applicazione desktop.",
   "view.done.summary": "{width} × {height} pixel ({mime})",
+  "view.done.fallback":
+    "È stata salvata un’immagine disponibile su questa pagina. Se non è quella che cercavi, puoi segnalarlo tramite i dettagli tecnici qui sotto.",
   "view.display.guidance":
     "Il browser può mostrare questa immagine, ma il sito di origine non gli permette di creare un file scaricabile. Prova l’applicazione desktop o l’estensione del browser per salvarla.",
   // Failure section.
