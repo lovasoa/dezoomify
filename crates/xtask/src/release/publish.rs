@@ -132,9 +132,6 @@ fn release_publish(plan: &Plan, artifacts: &std::path::Path) -> Result<(), Strin
 
 fn labeled_asset(path: &std::path::Path) -> std::ffi::OsString {
     let filename = path.file_name().unwrap_or_default().to_string_lossy();
-    let (name, signature) = filename
-        .strip_suffix(".sig")
-        .map_or((filename.as_ref(), ""), |name| (name, " (signature)"));
     let label = [
         (".msi", "Windows installer: x64 (MSI)"),
         (".deb", "Linux installer: x64 (DEB)"),
@@ -146,10 +143,10 @@ fn labeled_asset(path: &std::path::Path) -> std::ffi::OsString {
         ("latest.json", "Desktop updater manifest"),
     ]
     .into_iter()
-    .find_map(|(pattern, label)| name.contains(pattern).then_some(label))
+    .find_map(|(pattern, label)| filename.contains(pattern).then_some(label))
     .unwrap_or("Release asset");
     let mut argument = path.as_os_str().to_owned();
-    argument.push(format!("#{label}{signature}"));
+    argument.push(format!("#{label}"));
     argument
 }
 
