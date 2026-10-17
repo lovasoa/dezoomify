@@ -25,16 +25,12 @@ pub(crate) fn bundle_name(target: &str, version: &str) -> Option<String> {
 }
 
 pub(crate) fn assets(plan: &Plan, artifacts: &Path) -> Vec<PathBuf> {
+    // Signatures are verified and embedded in latest.json, not uploaded separately.
     plan.targets
         .iter()
-        .flat_map(|target| {
+        .filter_map(|target| {
             bundle_name(&target.name, &plan.version)
-                .map(|name| {
-                    let dir = artifacts.join(&target.name);
-                    [dir.join(&name), dir.join(format!("{name}.sig"))]
-                })
-                .into_iter()
-                .flatten()
+                .map(|name| artifacts.join(&target.name).join(name))
         })
         .collect()
 }
@@ -158,7 +154,7 @@ mod tests {
             assert_eq!(manifest["version"], plan.version);
             assert_eq!(manifest["notes"], "Release notes");
             let platforms = manifest["platforms"].as_object().unwrap();
-            assert_eq!(platforms.len(), 3);
+            assert_eq!(assets(&plan, &root).len(), 3);
             for (platform, target, extension) in [
                 ("linux-x86_64", "desktop-linux-x86_64", ".deb"),
                 ("windows-x86_64", "desktop-windows-x86_64", ".msi"),
