@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import {
+  readOpenSeadragonTile,
+  releaseOpenSeadragonTiles,
+} from "../../src/job/openseadragon/session.ts";
 import { createSourceAccess } from "../../src/job/source-access.ts";
 import {
   cancelSourceFetch,
@@ -156,6 +160,66 @@ function snapshot(documentUrl = SOURCE_URL) {
     overflow: 0,
   };
 }
+
+test("live tile capabilities stay bound to their exact viewer frame and are released on retirement", async () => {
+  const viewerUrl = "https://gallery.example/viewer";
+  const base = `${viewerUrl}#dezoomify-openseadragon-tile/test-source/image`;
+  const uri = `${base}/10/0_0.png`;
+  const fake = fakeBrowser(async (injection) => {
+    const frameId = injection.target.frameIds[0];
+    const documentUrl = frameId === 9 ? viewerUrl : SOURCE_URL;
+    if (injection.files)
+      return {
+        ok: true,
+        documentUrl,
+        inputs:
+          frameId === 9
+            ? [
+                {
+                  kind: "observed-metadata",
+                  url: viewerUrl,
+                  contents: JSON.stringify({ Image: { Url: base } }),
+                },
+              ]
+            : [],
+      };
+    if (injection.func === readOpenSeadragonTile) {
+      assert.equal(frameId, 9);
+      assert.equal(injection.world, "MAIN");
+      return { ok: true, documentUrl, status: 200, url: uri, data: "AQ==", bytes: 1 };
+    }
+    return snapshot(documentUrl);
+  });
+  fake.setFrames([
+    { frameId: 0, documentUrl: SOURCE_URL, token: "root" },
+    { frameId: 9, documentUrl: viewerUrl, token: "viewer" },
+  ]);
+  const source = createSourceAccess(fake.api, { tabId: 9, documentUrl: SOURCE_URL });
+  try {
+    const observe = source.observations({
+      hasPermission: async () => true,
+      ensurePermission: () => assert.fail("already granted"),
+      scanned() {},
+      failed(_frame, error) {
+        throw error;
+      },
+    });
+    assert.ok((await observe("forbidden", new AbortController().signal)).length);
+    await source.scan();
+    const result = await source.fetch({ uri, headers: [] }, new AbortController().signal);
+    assert.deepEqual([...result.bytes], [1]);
+    source.releaseTiles();
+    await assert.rejects(source.fetch({ uri, headers: [] }, new AbortController().signal), {
+      kind: "policy-denied",
+      blocked_reason: "source-document-lost",
+    });
+    const release = fake.calls.find((call) => call.func === releaseOpenSeadragonTiles);
+    assert.deepEqual(release.args, [[base]]);
+    assert.deepEqual(release.target.frameIds, [9]);
+  } finally {
+    source.dispose();
+  }
+});
 
 test("a grant acquired between observation batches reveals the existing viewer", async () => {
   const foreign = "https://viewer.example/widget";

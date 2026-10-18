@@ -1,6 +1,7 @@
 import { projectMetadata, readTileSource } from "./metadata.ts";
 import { createElementProbe, type PageAccess, type PageObject } from "./page-object.ts";
 import { type ScanState, scanLimits } from "./scan-state.ts";
+import { createTileSession } from "./session.ts";
 import type { PageRealm } from "./types.ts";
 
 interface PageViewer {
@@ -19,15 +20,15 @@ function readViewer(object: PageObject, access: PageAccess): PageViewer | undefi
     : undefined;
 }
 
-function sources(viewer: PageViewer): PageObject[] {
+function sources(viewer: PageViewer): { source: PageObject; item: PageObject }[] {
   const world = viewer.object.reference("world");
   if (!world) {
     const source = viewer.object.reference("source");
-    return source ? [source] : [];
+    return source ? [{ source, item: viewer.object }] : [];
   }
   return world.objects("_items", scanLimits.images).flatMap((item) => {
     const source = item.reference("source");
-    return source ? [source] : [];
+    return source ? [{ source, item }] : [];
   });
 }
 
@@ -38,6 +39,7 @@ export class ViewerCollector {
 
   private readonly state: ScanState;
   private readonly access: PageAccess;
+  private readonly register = createTileSession();
 
   constructor(state: ScanState, access: PageAccess) {
     this.state = state;
@@ -56,16 +58,21 @@ export class ViewerCollector {
     return true;
   }
 
-  private async readSources(values: PageObject[], doc: Document, until: number): Promise<void> {
-    for (const source of values) {
+  private async readSources(
+    values: ReturnType<typeof sources>,
+    doc: Document,
+    until: number,
+  ): Promise<void> {
+    for (const { source, item } of values) {
       if (this.state.expired(until)) break;
       if (this.seenSources.has(source.identity)) continue;
       this.seenSources.add(source.identity);
       try {
-        const metadata = projectMetadata(readTileSource(source, doc.baseURI), {
+        const context = {
           documentUrl: doc.URL.startsWith("http") ? doc.URL : this.state.documentUrl,
           imageIndex: this.state.inputs.length,
-        });
+        };
+        const metadata = this.metadata(source, item, doc.baseURI, context);
         const collected = this.state.collect(metadata);
         if (collected === "duplicate") continue;
         if (collected === "full") break;
@@ -73,6 +80,19 @@ export class ViewerCollector {
         this.state.diagnostics.rejected++;
       }
       await this.state.yieldSlice();
+    }
+  }
+
+  private metadata(
+    source: PageObject,
+    item: PageObject,
+    base: string,
+    context: Parameters<typeof this.register>[2],
+  ) {
+    try {
+      return projectMetadata(readTileSource(source, base), context);
+    } catch {
+      return this.register(source.identity, item.identity, context);
     }
   }
 

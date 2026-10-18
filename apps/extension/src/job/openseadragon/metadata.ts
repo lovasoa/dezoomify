@@ -22,7 +22,13 @@ function geometry(source: PageObject): SourceGeometry {
   const dimensions = source.reference("dimensions");
   const width = dimensions?.number("x", source.number("width")) ?? source.number("width");
   const height = dimensions?.number("y", source.number("height")) ?? source.number("height");
-  if (!width || !height || source.matches("ready", false) || source.has("getTileUrl"))
+  if (
+    !width ||
+    !height ||
+    source.matches("ready", false) ||
+    source.has("getTileUrl") ||
+    source.has("downloadTileStart")
+  )
     throw new Error("unsupported source");
   const format = source.string(
     "fileFormat",

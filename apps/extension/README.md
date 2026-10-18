@@ -31,6 +31,12 @@ Request permissions synchronously from a visible action to preserve user
 activation. HTTP refusals must not open permission prompts. Keep injected
 operations finite, cancellable, and validated at the job-page boundary.
 
+For a live OpenSeadragon source whose regular pyramid is understood but whose
+tile loading is custom, reuse its page loader through a document-bound capability.
+Rust still plans, retries, and assembles the tiles. These temporary resources must
+never fall through to HTTP or outlive their job; see the
+[tile session](src/job/openseadragon/session.ts).
+
 ## Saving and packaging
 
 Optional tile retries await approval in the job tab and retain successful tiles.

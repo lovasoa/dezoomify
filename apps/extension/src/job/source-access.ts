@@ -14,6 +14,13 @@ import type { PublicPath, WxtBrowser } from "wxt/browser";
 import { transportError } from "../runtime/fetch.ts";
 import { findLoadedImage } from "./loaded-image.ts";
 import {
+  cancelOpenSeadragonTile,
+  isOpenSeadragonTile,
+  readOpenSeadragonTile,
+  releaseOpenSeadragonTiles,
+  tileResourceBase,
+} from "./openseadragon/session.ts";
+import {
   cancelSourceFetch,
   collectCandidates,
   fetchSource,
@@ -235,6 +242,7 @@ export function createSourceAccess(
   const sourceOrigin = originOfUrl(documentUrl);
   const rootFrame: SourceFrame = { frameId: 0, documentUrl };
   const sessionFrames = new Map<string, SourceFrame>([[sourceOrigin, rootFrame]]);
+  const tileFrames = new Map<string, SourceFrame>();
   const timeoutMs = options.timeoutMs ?? 30_000;
   const lifetime = new AbortController();
   const onUpdated = (updatedTabId: number, changeInfo: { status?: string; url?: string }) => {
@@ -459,6 +467,7 @@ export function createSourceAccess(
         frame,
       );
       ({ observed, memory } = memoryScanReply(reply));
+      rememberTileFrames(observed, frame);
     } catch (error) {
       // A memory scan is optional evidence; source loss/cancellation still
       // fails the following normal scan through the same lifetime guard.
@@ -505,6 +514,22 @@ export function createSourceAccess(
       isRecord(result) && typeof result.documentUrl === "string" ? result.documentUrl : null;
     if (!resultDocumentUrl || !sameDocumentUrl(resultDocumentUrl, frame.documentUrl)) {
       throw lostFrame(frame);
+    }
+  }
+
+  function rememberTileFrames(inputs: CandidateInput[], frame: SourceFrame) {
+    for (const input of inputs) {
+      try {
+        const base: unknown = JSON.parse(input.contents ?? "null")?.Image?.Url;
+        if (
+          typeof base === "string" &&
+          isOpenSeadragonTile(base) &&
+          sameDocumentUrl(base, frame.documentUrl)
+        )
+          tileFrames.set(base, frame);
+      } catch {
+        /* Other metadata formats do not describe page tile capabilities. */
+      }
     }
   }
 
@@ -692,6 +717,12 @@ export function createSourceAccess(
     if (signal.aborted) throw transportError("cancelled", "source fetch cancelled");
     if (!validSourceRequestUrl(request.uri))
       throw transportError("bad-url", "invalid source request URL");
+    return isOpenSeadragonTile(request.uri)
+      ? fetchTile(request.uri, signal)
+      : fetchHttp(request, signal);
+  }
+
+  async function fetchHttp(request: Pick<ResourceRequest, "uri" | "headers">, signal: AbortSignal) {
     const headers = validateRequestHeaders(request.headers ?? []);
     if (!headers) throw transportError("bad-url", "invalid source request headers");
     const range = requestedByteRange(headers);
@@ -732,10 +763,60 @@ export function createSourceAccess(
     return readSourcePayload(result, frame.documentUrl, range);
   }
 
+  async function fetchTile(url: string, signal: AbortSignal) {
+    const base = tileResourceBase(url);
+    const frame = base && tileFrames.get(base);
+    if (!frame) throw transportError("source-lost", "OpenSeadragon source is no longer available");
+    const operationId = crypto.randomUUID();
+    const deadlineAt = Date.now() + timeoutMs;
+    const cancel = () =>
+      browserApi.scripting
+        .executeScript({
+          target: target(frame),
+          func: cancelOpenSeadragonTile,
+          args: [operationId],
+          world: "MAIN",
+        })
+        .then(() => undefined);
+    const result = await inject(
+      {
+        func: readOpenSeadragonTile,
+        args: [{ url, operationId, deadlineAt }],
+        world: "MAIN",
+      },
+      signal,
+      cancel,
+      deadlineAt,
+      frame,
+    );
+    return readSourcePayload(result, frame.documentUrl, undefined);
+  }
+
   function dispose() {
+    releaseTiles();
     invalidate();
     browserApi.tabs.onUpdated.removeListener(onUpdated);
     browserApi.tabs.onRemoved.removeListener(onRemoved);
+  }
+
+  function releaseTiles() {
+    const frames = new Map<SourceFrame, string[]>();
+    for (const [base, frame] of tileFrames) {
+      const bases = frames.get(frame) ?? [];
+      bases.push(base);
+      frames.set(frame, bases);
+    }
+    tileFrames.clear();
+    for (const [frame, bases] of frames) {
+      void browserApi.scripting
+        .executeScript({
+          target: target(frame),
+          func: releaseOpenSeadragonTiles,
+          args: [bases],
+          world: "MAIN",
+        })
+        .catch(() => {});
+    }
   }
 
   return {
@@ -747,6 +828,8 @@ export function createSourceAccess(
     },
     observations,
     fetch,
+    handlesResource: isOpenSeadragonTile,
+    releaseTiles,
     hasOrigin(origin: string) {
       return sessionFrames.has(origin);
     },

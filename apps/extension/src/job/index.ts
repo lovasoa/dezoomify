@@ -194,6 +194,7 @@ const app = createBrowserApplication({
         };
       },
       observe: (interaction, signal) => observe?.(interaction, signal) ?? Promise.resolve([]),
+      dispose: () => source?.releaseTiles(),
       loadDisplayImage: (url, signal) => loadTileImage(url, { signal }),
       canvas: () => document.createElement("canvas"),
       async save(blob, width, height, signal, title) {
