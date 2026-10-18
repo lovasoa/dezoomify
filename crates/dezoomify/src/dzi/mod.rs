@@ -64,7 +64,8 @@ static POLONA_ITEM_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"polona\.pl/item/\d+/").expect("constant Polona item pattern"));
 
 static DZI_LINK_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
-    BytesRegex::new(r#"(?i)(?P<url>[^"'()<>]+\.(?:xml|dzi))"#).expect("constant DZI link pattern")
+    BytesRegex::new(r#"(?i)(?P<url>[^"'()<>]+\.(?:xml|dzi)(?:[?#][^"'()<>]*)?)(?:$|["'()<>\s])"#)
+        .expect("constant DZI link pattern")
 });
 
 static DZI_ATTR_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
