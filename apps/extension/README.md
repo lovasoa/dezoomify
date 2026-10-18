@@ -33,9 +33,11 @@ operations finite, cancellable, and validated at the job-page boundary.
 
 For a live OpenSeadragon source whose regular pyramid is understood but whose
 tile loading is custom, reuse its page loader through a document-bound capability.
-Rust still plans, retries, and assembles the tiles. These temporary resources must
-never fall through to HTTP or outlive their job; see the
+Rust still plans, retries, and assembles the tiles. Registered tile addresses must
+never fall through to HTTP and are released on retirement; see the
 [tile session](src/job/openseadragon/session.ts).
+The viewer's existing image loader owns tile I/O and its built-in retries.
+Cancellation stops waiting and prevents saving; already queued viewer work can finish.
 
 ## Saving and packaging
 

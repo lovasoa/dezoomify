@@ -39,7 +39,10 @@ while discovery is running; each batch shares the existing job's cache and limit
 Hosts choose images and resolutions from the catalogs supplied by Rust.
 The core owns deferred resolution, retry classification, scheduling, retry budgets,
 and backoff. Hosts make individual acquisition attempts and report structured
-failures; they must not add a second retry policy. GUI Hosts await Retry or Cancel
+failures; they must not add a second retry policy. The extension's
+[live viewer adapter](../apps/extension/src/job/openseadragon/tile-loader.ts) reuses
+OpenSeadragon's loader and retains its built-in retries; cancellation stops waiting
+without clearing the viewer's queue. GUI Hosts await Retry or Cancel
 inside optional acquisitions, pausing new work while in-flight operations settle.
 Retry approval retains successful tiles. Every required tile must succeed before
 finalization; permanent tile and output failures stop the job. Exact policies

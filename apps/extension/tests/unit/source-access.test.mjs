@@ -165,6 +165,8 @@ test("live tile capabilities stay bound to their exact viewer frame and are rele
   const viewerUrl = "https://gallery.example/viewer";
   const base = `${viewerUrl}#dezoomify-openseadragon-tile/test-source/image`;
   const uri = `${base}/10/0_0.png`;
+  const tile = { ok: true, documentUrl: viewerUrl, status: 200, url: uri, data: "AQ==", bytes: 1 };
+  let tileReply = () => tile;
   const fake = fakeBrowser(async (injection) => {
     const frameId = injection.target.frameIds[0];
     const documentUrl = frameId === 9 ? viewerUrl : SOURCE_URL;
@@ -186,7 +188,7 @@ test("live tile capabilities stay bound to their exact viewer frame and are rele
     if (injection.func === readOpenSeadragonTile) {
       assert.equal(frameId, 9);
       assert.equal(injection.world, "MAIN");
-      return { ok: true, documentUrl, status: 200, url: uri, data: "AQ==", bytes: 1 };
+      return tileReply();
     }
     return snapshot(documentUrl);
   });
@@ -208,6 +210,17 @@ test("live tile capabilities stay bound to their exact viewer frame and are rele
     await source.scan();
     const result = await source.fetch({ uri, headers: [] }, new AbortController().signal);
     assert.deepEqual([...result.bytes], [1]);
+    // Cancellation stops waiting without clearing the page viewer's own queue.
+    const late = Promise.withResolvers();
+    tileReply = () => late.promise;
+    const controller = new AbortController();
+    const cancelled = assert.rejects(source.fetch({ uri }, controller.signal), {
+      kind: "cancelled",
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    controller.abort();
+    await cancelled;
+    late.resolve(tile);
     source.releaseTiles();
     await assert.rejects(source.fetch({ uri, headers: [] }, new AbortController().signal), {
       kind: "policy-denied",

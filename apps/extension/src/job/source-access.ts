@@ -14,7 +14,6 @@ import type { PublicPath, WxtBrowser } from "wxt/browser";
 import { transportError } from "../runtime/fetch.ts";
 import { findLoadedImage } from "./loaded-image.ts";
 import {
-  cancelOpenSeadragonTile,
   isOpenSeadragonTile,
   readOpenSeadragonTile,
   releaseOpenSeadragonTiles,
@@ -766,27 +765,17 @@ export function createSourceAccess(
   async function fetchTile(url: string, signal: AbortSignal) {
     const base = tileResourceBase(url);
     const frame = base && tileFrames.get(base);
-    if (!frame) throw transportError("source-lost", "OpenSeadragon source is no longer available");
-    const operationId = crypto.randomUUID();
-    const deadlineAt = Date.now() + timeoutMs;
-    const cancel = () =>
-      browserApi.scripting
-        .executeScript({
-          target: target(frame),
-          func: cancelOpenSeadragonTile,
-          args: [operationId],
-          world: "MAIN",
-        })
-        .then(() => undefined);
+    if (!base || !frame)
+      throw transportError("source-lost", "OpenSeadragon source is no longer available");
     const result = await inject(
       {
         func: readOpenSeadragonTile,
-        args: [{ url, operationId, deadlineAt }],
+        args: [url, base],
         world: "MAIN",
       },
       signal,
-      cancel,
-      deadlineAt,
+      undefined,
+      Date.now() + timeoutMs,
       frame,
     );
     return readSourcePayload(result, frame.documentUrl, undefined);

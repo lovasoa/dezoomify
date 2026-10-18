@@ -6,13 +6,11 @@ import { build } from "esbuild";
 import { chromium, firefox } from "playwright";
 
 const bundle = await build({
-  entryPoints: [
-    fileURLToPath(new URL("../../src/job/openseadragon/tile-loader.ts", import.meta.url)),
-  ],
+  entryPoints: [fileURLToPath(new URL("../../src/job/openseadragon/session.ts", import.meta.url))],
   bundle: true,
   write: false,
   format: "iife",
-  globalName: "TileLoader",
+  globalName: "TileSession",
   target: "es2022",
   define: { "import.meta.url": JSON.stringify(import.meta.url) },
 });
@@ -28,66 +26,73 @@ async function loadFixture(mode) {
     height: 256,
     tileSize: 256,
     tileOverlap: 0,
-    tilesUrl: "https://tiles.fixture.invalid/image/",
+    tilesUrl: "https://tiles.fixture.invalid/tiles/",
     fileFormat: "png",
   });
   source.getTileUrl = function (level, x, y) {
-    if (mode.startsWith("custom")) return `cache-token:${level}/${x}/${y}`;
-    return `${this.tilesUrl}${level}/${x}_${y}.png?mode=${mode}`;
+    return () =>
+      mode.startsWith("custom")
+        ? `cache:${level}/${x}/${y}`
+        : `${this.tilesUrl}${level}/${x}_${y}.png?mode=${mode}`;
   };
-  source.getTilePostData = function () {
-    return `image=${this.width}&tile=8/0/0`;
-  };
-  source.getTileAjaxHeaders = function () {
-    return { "X-Tile": String(this.height), "X-Override": "tile" };
-  };
+  source.getTilePostData = () => "image=256&tile=8/0/0";
+  source.getTileAjaxHeaders = () => ({ "X-Tile": "256", "X-Override": "tile" });
   const item = {
-    loadTilesWithAjax: !mode.endsWith("image"),
+    _imageLoader: new OpenSeadragon.ImageLoader({ timeout: 1000 }),
+    loadTilesWithAjax: mode !== "image",
     ajaxHeaders: { "X-Item": "item", "X-Override": "item" },
-    crossOriginPolicy: mode === "legacy-image" ? false : "Anonymous",
-    ajaxWithCredentials: false,
+    crossOriginPolicy: false,
   };
   let bitmap;
   if (mode.startsWith("custom")) {
-    source.downloadTileStart = async function (job) {
-      if (job.src !== "cache-token:8/0/0") throw new Error("custom cache token changed");
+    source.downloadTileStart = function (job) {
+      if (job.src !== "cache:8/0/0") throw new Error("custom cache token changed");
       const { level, x, y } = job.tile;
-      const response = await fetch(`${this.tilesUrl}${level}/${x}_${y}.png?mode=${mode}`, {
+      void fetch(`${this.tilesUrl}${level}/${x}_${y}.png?mode=${mode}`, {
         method: "POST",
         body: job.postData,
         headers: job.ajaxHeaders,
-      });
-      const data = await response.blob();
-      if (mode === "custom-blob") {
-        const frame = document.createElement("iframe");
-        document.body.append(frame);
-        job.finish(new frame.contentWindow.Blob([data]), null, "rasterBlob");
-        return;
-      }
-      bitmap = await createImageBitmap(data);
-      if (mode === "custom-bitmap") job.finish(bitmap, null, "imageBitmap");
-      else {
-        const frame = document.createElement("iframe");
-        document.body.append(frame);
-        const canvas = frame.contentDocument.createElement("canvas");
-        canvas.width = bitmap.width;
-        canvas.height = bitmap.height;
-        const context = canvas.getContext("2d");
-        context.drawImage(bitmap, 0, 0);
-        bitmap.close();
-        job.finish(context, null, "context2d");
-      }
+      })
+        .then(async (response) => {
+          const data = await response.blob();
+          if (mode === "custom-blob") {
+            const frame = document.createElement("iframe");
+            document.body.append(frame);
+            job.finish(new frame.contentWindow.Blob([data]), null, "rasterBlob");
+          } else {
+            bitmap = await createImageBitmap(data);
+            if (mode === "custom-bitmap") job.finish(bitmap, null, "imageBitmap");
+            else {
+              const frame = document.createElement("iframe");
+              document.body.append(frame);
+              const canvas = frame.contentDocument.createElement("canvas");
+              canvas.width = bitmap.width;
+              canvas.height = bitmap.height;
+              const context = canvas.getContext("2d");
+              context.drawImage(bitmap, 0, 0);
+              bitmap.close();
+              job.finish(context, null, "context2d");
+            }
+          }
+        })
+        .catch((error) => job.fail(error));
     };
-  } else if (mode.startsWith("legacy")) source.downloadTileStart = undefined;
-  const blob = await TileLoader.loadOpenSeadragonTile(
-    source,
-    item,
-    8,
-    0,
-    0,
-    new AbortController().signal,
-  );
-  const decoded = await createImageBitmap(blob);
+  } else if (mode === "failure")
+    source.downloadTileStart = (job) => job.fail("original tile failure");
+  else if (mode === "oversized")
+    source.downloadTileStart = (job) =>
+      job.finish(new Blob([new Uint8Array(9 * 1024 * 1024)]), null, "rasterBlob");
+
+  const metadata = TileSession.createTileSession()(source, item, {
+    documentUrl: location.href,
+    imageIndex: 0,
+  });
+  const base = JSON.parse(metadata.contents).Image.Url;
+  const result = await TileSession.readOpenSeadragonTile(`${base}/8/0_0.png`, base);
+  TileSession.releaseOpenSeadragonTiles([base]);
+  if (!result.ok) return result.error;
+  const bytes = Uint8Array.fromBase64(result.data);
+  const decoded = await createImageBitmap(new Blob([bytes]));
   const canvas = document.createElement("canvas");
   canvas.width = decoded.width;
   canvas.height = decoded.height;
@@ -98,7 +103,7 @@ async function loadFixture(mode) {
     width: canvas.width,
     height: canvas.height,
     pixel: [...context.getImageData(0, 0, 1, 1).data],
-    bytes: [...new Uint8Array(await blob.arrayBuffer())],
+    bytes: [...bytes],
     closedBitmap: mode !== "custom-bitmap" || bitmap.width === 0,
   };
 }
@@ -107,7 +112,7 @@ for (const [name, engine] of [
   ["Chromium", chromium],
   ["Firefox", firefox],
 ]) {
-  test(`${name}: page-native tile loading, cross-realm results and cancellation`, async () => {
+  test(`${name}: existing OpenSeadragon loader returns custom and ordinary tiles`, async () => {
     const browser = await engine.launch({ headless: true });
     try {
       const page = await browser.newPage();
@@ -116,12 +121,7 @@ for (const [name, engine] of [
         const request = route.request();
         if (request.isNavigationRequest())
           return route.fulfill({ contentType: "text/html", body: "<body></body>" });
-        requests.push({
-          url: request.url(),
-          method: request.method(),
-          body: request.postData(),
-          headers: request.headers(),
-        });
+        requests.push(request);
         return route.fulfill({
           contentType: "image/png",
           body: tile,
@@ -133,195 +133,30 @@ for (const [name, engine] of [
         content: `(()=>{${library}\nwindow.OpenSeadragon=OpenSeadragon;})()`,
       });
       await page.addScriptTag({ content: bundle.outputFiles[0].text });
-      for (const mode of [
-        "ajax-blob",
-        "custom-context",
-        "custom-bitmap",
-        "custom-blob",
-        "native-image",
-        "legacy-image",
-        "legacy-ajax",
-      ]) {
+      for (const mode of ["ajax", "image", "custom-context", "custom-bitmap", "custom-blob"]) {
         const result = await page.evaluate(loadFixture, mode);
         assert.deepEqual(
           [result.width, result.height, result.pixel, result.closedBitmap],
           [256, 256, [196, 48, 48, 255], true],
           mode,
         );
-        if (mode.endsWith("blob") || mode === "legacy-ajax")
-          assert.deepEqual(
-            Buffer.from(result.bytes),
-            tile,
-            `${mode}: preserve encoded image bytes`,
-          );
-        const observed = requests.filter((request) => request.url.includes(`mode=${mode}`));
-        assert.equal(observed.length, 1, `${mode}: one load attempt`);
-        assert.equal(observed[0].method, mode.endsWith("image") ? "GET" : "POST", mode);
-        if (!mode.endsWith("image")) {
-          assert.equal(observed[0].body, "image=256&tile=8/0/0", mode);
-          assert.equal(observed[0].headers["x-item"], "item", mode);
-          assert.equal(observed[0].headers["x-tile"], "256", mode);
-          assert.equal(observed[0].headers["x-override"], "tile", mode);
+        if (mode === "ajax" || mode === "custom-blob")
+          assert.deepEqual(Buffer.from(result.bytes), tile, `${mode}: preserve encoded bytes`);
+        const request = requests.find(
+          (request) => new URL(request.url()).searchParams.get("mode") === mode,
+        );
+        assert.equal(request.method(), mode === "image" ? "GET" : "POST");
+        if (mode !== "image") {
+          assert.equal(request.postData(), "image=256&tile=8/0/0");
+          assert.equal(request.headers()["x-item"], "item");
+          assert.equal(request.headers()["x-tile"], "256");
+          assert.equal(request.headers()["x-override"], "tile");
         }
       }
-      const cancellations = await page.evaluate(async () => {
-        const results = [];
-        for (const reason of [
-          undefined,
-          { kind: "timeout", transport: "browser-session", detail: "source deadline" },
-        ]) {
-          const controller = new AbortController();
-          let job,
-            aborted = false;
-          const source = {
-            downloadTileStart(value) {
-              job = value;
-            },
-            downloadTileAbort(value) {
-              aborted = value === job;
-            },
-          };
-          const pending = TileLoader.loadOpenSeadragonTile(
-            source,
-            {},
-            0,
-            0,
-            0,
-            controller.signal,
-          ).catch((error) => error);
-          controller.abort(reason);
-          const error = await pending;
-          const canvas = document.createElement("canvas");
-          const bitmap = await createImageBitmap(canvas);
-          job.finish(bitmap, null, "imageBitmap");
-          results.push({ error, aborted, released: bitmap.width === 0 });
-        }
-        return results;
-      });
-      assert.deepEqual(cancellations, [
-        { error: { kind: "cancelled" }, aborted: true, released: true },
-        {
-          error: { kind: "timeout", transport: "browser-session", detail: "source deadline" },
-          aborted: true,
-          released: true,
-        },
-      ]);
-      const encodingCancellation = await page.evaluate(async () => {
-        const original = HTMLCanvasElement.prototype.toBlob;
-        let release, encoded;
-        const ready = new Promise((resolve) => {
-          encoded = resolve;
-        });
-        HTMLCanvasElement.prototype.toBlob = function (callback, ...args) {
-          original.call(
-            this,
-            (blob) => {
-              release = () => callback(blob);
-              encoded();
-            },
-            ...args,
-          );
-        };
-        try {
-          const controller = new AbortController();
-          const bitmap = await createImageBitmap(document.createElement("canvas"));
-          let aborted = false,
-            settled = false;
-          const source = {
-            downloadTileStart(job) {
-              job.finish(bitmap, null, "imageBitmap");
-            },
-            downloadTileAbort() {
-              aborted = true;
-            },
-          };
-          const pending = TileLoader.loadOpenSeadragonTile(
-            source,
-            {},
-            0,
-            0,
-            0,
-            controller.signal,
-          ).catch((error) => {
-            settled = true;
-            return error;
-          });
-          await ready;
-          controller.abort();
-          await new Promise((resolve) => setTimeout(resolve, 0));
-          const beforeRelease = { aborted, settled, retained: bitmap.width > 0 };
-          release();
-          const error = await pending;
-          return { beforeRelease, error, released: bitmap.width === 0 };
-        } finally {
-          HTMLCanvasElement.prototype.toBlob = original;
-        }
-      });
-      assert.deepEqual(encodingCancellation, {
-        beforeRelease: { aborted: true, settled: false, retained: true },
-        error: { kind: "cancelled" },
-        released: true,
-      });
-      const oversized = await page.evaluate(async () => {
-        const source = {
-          downloadTileStart(job) {
-            job.finish(new Blob([new Uint8Array(9 * 1024 * 1024)]));
-          },
-        };
-        return TileLoader.loadOpenSeadragonTile(
-          source,
-          {},
-          0,
-          0,
-          0,
-          new AbortController().signal,
-        ).catch((error) => error);
-      });
-      assert.equal(oversized.kind, "size-limit");
-      const invalidResults = await page.evaluate(async () => {
-        const controller = new AbortController();
-        const failed = await TileLoader.loadOpenSeadragonTile(
-          {
-            getTileUrl: () => "private-cache-token",
-            downloadTileStart(job) {
-              job.finish(
-                null,
-                { status: 503, getResponseHeader: () => "2" },
-                "original load failure",
-              );
-            },
-          },
-          {},
-          0,
-          0,
-          0,
-          controller.signal,
-        ).catch((error) => error);
-        const tooManyPixels = await TileLoader.loadOpenSeadragonTile(
-          {
-            downloadTileStart(job) {
-              const canvas = document.createElement("canvas");
-              canvas.width = canvas.height = 5000;
-              job.finish(canvas);
-            },
-          },
-          {},
-          0,
-          0,
-          0,
-          controller.signal,
-        ).catch((error) => error);
-        return { failed, tooManyPixels };
-      });
-      assert.deepEqual(invalidResults.failed, {
-        kind: "http-error",
-        status: 503,
-        request: "private-cache-token",
-        transport: "browser-session",
-        detail: "original load failure",
-        retry_after_ms: 2000,
-      });
-      assert.equal(invalidResults.tooManyPixels.kind, "size-limit");
+      const error = await page.evaluate(loadFixture, "failure");
+      assert.equal(error.kind, "network-failure");
+      assert.match(error.detail, /original tile failure/);
+      assert.equal((await page.evaluate(loadFixture, "oversized")).kind, "size-limit");
     } finally {
       await browser.close();
     }
