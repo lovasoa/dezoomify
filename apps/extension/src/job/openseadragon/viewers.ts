@@ -1,7 +1,7 @@
 import { projectMetadata, readTileSource } from "./metadata.ts";
 import { createElementProbe, type PageAccess, type PageObject } from "./page-object.ts";
 import { type ScanState, scanLimits } from "./scan-state.ts";
-import { createTileSession } from "./session.ts";
+import { registerTileSource } from "./session.ts";
 import type { PageRealm } from "./types.ts";
 
 interface PageViewer {
@@ -39,7 +39,6 @@ export class ViewerCollector {
 
   private readonly state: ScanState;
   private readonly access: PageAccess;
-  private readonly register = createTileSession();
 
   constructor(state: ScanState, access: PageAccess) {
     this.state = state;
@@ -87,12 +86,12 @@ export class ViewerCollector {
     source: PageObject,
     item: PageObject,
     base: string,
-    context: Parameters<typeof this.register>[2],
+    context: Parameters<typeof registerTileSource>[2],
   ) {
     try {
       return projectMetadata(readTileSource(source, base), context);
     } catch {
-      return this.register(source.identity, item.identity, context);
+      return registerTileSource(source.identity, item.identity, context);
     }
   }
 

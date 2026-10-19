@@ -83,13 +83,19 @@ async function loadFixture(mode) {
     source.downloadTileStart = (job) =>
       job.finish(new Blob([new Uint8Array(9 * 1024 * 1024)]), null, "rasterBlob");
 
-  const metadata = TileSession.createTileSession()(source, item, {
+  const globalKeys = new Set(Reflect.ownKeys(window));
+  const metadata = TileSession.registerTileSource(source, item, {
     documentUrl: location.href,
     imageIndex: 0,
   });
+  const addedGlobals = Reflect.ownKeys(window)
+    .filter((key) => !globalKeys.has(key))
+    .map(String);
   const base = JSON.parse(metadata.contents).Image.Url;
   const result = await TileSession.readOpenSeadragonTile(`${base}/8/0_0.png`, base);
   TileSession.releaseOpenSeadragonTiles([base]);
+  const retired = await TileSession.readOpenSeadragonTile(`${base}/8/0_0.png`, base);
+  if (retired.ok) throw new Error("retired source still loads tiles");
   if (!result.ok) return result.error;
   const bytes = Uint8Array.fromBase64(result.data);
   const decoded = await createImageBitmap(new Blob([bytes]));
@@ -105,6 +111,7 @@ async function loadFixture(mode) {
     pixel: [...context.getImageData(0, 0, 1, 1).data],
     bytes: [...bytes],
     closedBitmap: mode !== "custom-bitmap" || bitmap.width === 0,
+    addedGlobals,
   };
 }
 
@@ -133,11 +140,14 @@ for (const [name, engine] of [
         content: `(()=>{${library}\nwindow.OpenSeadragon=OpenSeadragon;})()`,
       });
       await page.addScriptTag({ content: bundle.outputFiles[0].text });
+      await page.evaluate(() => {
+        Object.defineProperty(window, "__dezoomifyOpenSeadragon", { value: "page-owned" });
+      });
       for (const mode of ["ajax", "image", "custom-context", "custom-bitmap", "custom-blob"]) {
         const result = await page.evaluate(loadFixture, mode);
         assert.deepEqual(
-          [result.width, result.height, result.pixel, result.closedBitmap],
-          [256, 256, [196, 48, 48, 255], true],
+          [result.width, result.height, result.pixel, result.closedBitmap, result.addedGlobals],
+          [256, 256, [196, 48, 48, 255], true, []],
           mode,
         );
         if (mode === "ajax" || mode === "custom-blob")
@@ -157,6 +167,7 @@ for (const [name, engine] of [
       assert.equal(error.kind, "network-failure");
       assert.match(error.detail, /original tile failure/);
       assert.equal((await page.evaluate(loadFixture, "oversized")).kind, "size-limit");
+      assert.equal(await page.evaluate(() => window.__dezoomifyOpenSeadragon), "page-owned");
     } finally {
       await browser.close();
     }
