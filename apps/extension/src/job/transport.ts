@@ -22,7 +22,11 @@ export function createResourceFetcher(deps: {
     signal: AbortSignal,
     interaction: Interaction,
   ): Promise<ResourceRead> => {
-    if (request.purpose === "metadata" || deps.sourceAccess.hasOrigin(originOfUrl(request.uri))) {
+    if (
+      deps.sourceAccess.handlesResource(request.uri) ||
+      request.purpose === "metadata" ||
+      deps.sourceAccess.hasOrigin(originOfUrl(request.uri))
+    ) {
       const result = await readSource(request, signal);
       if (result) return result;
     }
@@ -76,6 +80,7 @@ export function createResourceFetcher(deps: {
       });
     if (
       signal.aborted ||
+      deps.sourceAccess.handlesResource(request.uri) ||
       (isJobError(error) && (error.kind === "http-error" || error.kind === "timeout"))
     )
       throw error;

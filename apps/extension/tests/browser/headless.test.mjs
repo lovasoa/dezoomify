@@ -918,12 +918,12 @@ for (const [browser, runJob] of [
       rmSync(work, { recursive: true, force: true });
     }
   });
-  test(`${browser}: private OpenSeadragon sources download through existing metadata parsers`, {
+  test(`${browser}: private OpenSeadragon sources save through metadata or the page loader`, {
     timeout: 240000,
   }, async () => {
     const work = mkdtempSync(path.join(tmpdir(), "dezoomify-e2e-memory-openseadragon-"));
     try {
-      for (const type of ["deepzoom", "iiif", "zoomify", "iip"]) {
+      for (const type of ["deepzoom", "iiif", "zoomify", "iip", "custom"]) {
         const caseWork = path.join(work, type);
         mkdirSync(caseWork);
         const offset = readFileSync(fixtureServer.logFile, "utf8").length;
