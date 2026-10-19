@@ -7,7 +7,8 @@ function unsignedInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 0xffffffff;
 }
 
-/** The only boundary that reads untrusted page values. Never invokes property getters.
+/** Passive page-value extraction never invokes property getters.
+ * The live tile session deliberately calls an identified viewer's source methods.
  * Proxy traps are still page code; cooperative budgets cannot preempt them.
  */
 export class PageObject {

@@ -55,6 +55,11 @@ test("snapshotting ignores getters and rejects an executable tile URL override",
     () => readTileSource(PageObject.from(source), context.documentUrl),
     /unsupported source/,
   );
+  assert.throws(
+    () =>
+      readTileSource(PageObject.from({ ...dzi(), downloadTileStart() {} }), context.documentUrl),
+    /unsupported source/,
+  );
 });
 
 test("malformed IIIF arrays cannot become partially valid snapshots", () => {
