@@ -74,6 +74,8 @@ fn unrelated_content_is_a_route_miss_but_declared_metadata_keeps_its_error() {
         br#"{"description":"scw.min.js TileMatrixSet <krpano> topviews TileSize"}"#,
         br#"<p>Seadragon.embed('x', 'y', 'unrelated')</p>"#,
         br#"<html><head><title>Jarvis DZI viewer</title><link href="viewer.css" rel="stylesheet"></head><body></body></html>"#,
+        br#"function xhr(){try{return new C.XMLHttpRequest}catch(e){}};var u=window.XMLHttpRequest;"#,
+        br#"const scripts = ['viewer.xml.js', 'viewer.dzi.js'];"#,
     ] {
         for (uri, expected) in [
             (PAGE, None),
@@ -113,6 +115,32 @@ fn unrelated_content_is_a_route_miss_but_declared_metadata_keeps_its_error() {
                 assert_eq!(failures[0].kind, RejectionKind::InvalidMetadata);
             }
         }
+    }
+}
+
+#[test]
+fn dzi_links_skip_javascript_identifiers_and_preserve_query_parameters() {
+    for extension in ["xml", "dzi"] {
+        let metadata = format!("https://museum.test/art.{extension}?token=exact%2Bvalue&v=2");
+        let script = format!(
+            r#"function xhr(){{try{{return new C.XMLHttpRequest}}catch(e){{}}}};var u=window.XMLHttpRequest;
+            const script = 'viewer.{extension}.js'; const image = '{metadata}';"#
+        );
+        let (catalog, requests) = support::discover_inputs(
+            registry_for("deepzoom").unwrap(),
+            vec![DiscoveryInput::with_contents(PAGE, script)],
+            Default::default(),
+            |uri| (uri == metadata).then(|| Ok((DZI.to_vec(), None))),
+        );
+        let image = support::ready_image(catalog.unwrap());
+        assert_eq!(image.source_url.as_deref(), Some(metadata.as_str()));
+        assert_eq!(
+            requests
+                .iter()
+                .map(|request| request.uri.as_str())
+                .collect::<Vec<_>>(),
+            [metadata.as_str()]
+        );
     }
 }
 
@@ -378,6 +406,7 @@ fn national_gallery_handoff_uses_the_detected_iiif_metadata() {
 fn self_contained_metadata_handoffs_are_canonical_and_independently_reusable() {
     let cases: &[(&str, &[u8], &str, &[u8])] = &[
         ("deepzoom", br#"<script>Seadragon.embed('viewer', 'image', 'https://image.test/art.dzi');</script>"#, "https://image.test/art.dzi", DZI),
+        ("deepzoom", br#"<script>const image = './art name.dzi';</script>"#, "https://museum.test/art%20name.dzi", DZI),
         ("iiif", br#"<script>const image = 'https://image.test/book/info.json';</script>"#, "https://image.test/book/info.json", IIIF),
         ("zoomify", br#"<script>zoomifyImagePath = 'https://image.test/pyramid';</script>"#, "https://image.test/pyramid/ImageProperties.xml", ZOOMIFY),
         ("fzp", br#"<script>lime('image','fzp',{path:'https://image.test/resources/'});</script>"#, "https://image.test/resources/image/root.xml", br#"<pal ver="1.3"><content><resource service="FZP" url="." x="0" y="0" width="512" height="512" tilewidth="256" tileheight="256" min="0" max="1"/></content></pal>"#),
