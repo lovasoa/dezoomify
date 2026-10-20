@@ -151,7 +151,7 @@ fn opaque_metadata_and_embedded_objects_remain_discoverable() {
         (DZI, "deepzoom"),
         (br#"<script>const service = {width:512,height:512,tiles:[{width:256,scaleFactors:[1]}]};</script>"#, "iiif"),
         (br#"<script>OpenSeadragon({tileSources:{Image:{'Tile\u0053ize':256,Format:'jpg',Size:{Width:512,Height:512}}}});</script>"#, "deepzoom"),
-        (br#"{"w\u0069dth":512,"height":512}"#, "iiif"),
+        (br#"{"protocol":"http://iiif.io/api/image","w\u0069dth":512,"height":512}"#, "iiif"),
         (br#"{"type":"ImageService3","width":512,"height":512,"items":[]}"#, "iiif"),
         (include_bytes!("../../../fixtures/wmts/basic/WMTSCapabilities.xml"), "wmts"),
         (include_bytes!("../../../fixtures/krpano/basic/tour.xml"), "krpano"),

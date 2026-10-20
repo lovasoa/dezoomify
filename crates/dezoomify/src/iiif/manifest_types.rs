@@ -9,6 +9,13 @@ use crate::core::resolve_relative;
 #[derive(Default)]
 pub enum IiifLabel {
     String(String),
+    LanguageValue {
+        #[serde(rename = "@value")]
+        value: String,
+        #[serde(default, rename = "@language")]
+        language: Option<String>,
+    },
+    Values(Vec<IiifLabel>),
     Map(HashMap<String, Vec<String>>),
     #[default]
     None, // Represents JSON null or a deliberately empty label
@@ -21,15 +28,21 @@ impl IiifLabel {
     pub fn get_english_or_first(&self) -> Option<String> {
         match self {
             IiifLabel::String(s) => (!s.is_empty()).then(|| s.clone()),
+            IiifLabel::LanguageValue { value, .. } => (!value.is_empty()).then(|| value.clone()),
+            IiifLabel::Values(values) => values
+                .iter()
+                .find(|value| matches!(value, Self::LanguageValue { language: Some(language), .. } if language == "en" || language.starts_with("en-")))
+                .and_then(Self::get_english_or_first)
+                .or_else(|| values.iter().find_map(Self::get_english_or_first)),
             IiifLabel::Map(map) => {
                 if let Some(en_labels) = map.get("en")
-                    && let Some(first_en) = en_labels.first().filter(|s| !s.is_empty())
+                    && let Some(first_en) = en_labels.iter().find(|s| !s.is_empty())
                 {
                     return Some(first_en.clone());
                 }
                 // Fallback to the first non-empty label in the first language found
                 map.values()
-                    .find_map(|labels| labels.first().filter(|s| !s.is_empty()).cloned())
+                    .find_map(|labels| labels.iter().find(|s| !s.is_empty()).cloned())
             }
             IiifLabel::None => None,
         }
@@ -70,7 +83,7 @@ pub struct Manifest {
     #[serde(default)] // If ID is missing, we might use the fetch URL as a fallback later
     pub id: String,
     #[serde(default, rename = "type", alias = "@type")]
-    pub manifest_type: serde_json::Value, // Kept for lenient type warnings.
+    pub manifest_type: serde_json::Value,
     #[serde(default)]
     pub label: IiifLabel,
     pub items: Vec<Canvas>,
@@ -87,9 +100,9 @@ pub struct Manifest {
 #[allow(clippy::struct_field_names)]
 #[derive(Debug, Deserialize, Clone, PartialEq, Eq, Default)]
 pub struct Canvas {
-    #[serde(default)]
+    #[serde(default, alias = "@id")]
     pub id: String,
-    #[serde(default, rename = "type")]
+    #[serde(default, rename = "type", alias = "@type")]
     pub canvas_type: String, // Should be "Canvas"
     #[serde(default)]
     pub label: IiifLabel,
@@ -105,9 +118,9 @@ pub struct Canvas {
 #[allow(clippy::struct_field_names)]
 #[derive(Debug, Deserialize, Clone, PartialEq, Eq, Default)]
 pub struct AnnotationPage {
-    #[serde(default)]
+    #[serde(default, alias = "@id")]
     pub id: String,
-    #[serde(default, rename = "type")]
+    #[serde(default, rename = "type", alias = "@type")]
     pub annotation_page_type: String, // Should be "AnnotationPage"
     #[serde(default)]
     pub items: Vec<Annotation>,
@@ -119,44 +132,170 @@ pub struct AnnotationPage {
 #[allow(clippy::struct_field_names)]
 #[derive(Debug, Deserialize, Clone, PartialEq, Eq, Default)]
 pub struct Annotation {
+    #[serde(alias = "@id")]
     pub id: Option<String>,
-    #[serde(default, rename = "type")]
+    #[serde(
+        default,
+        rename = "type",
+        alias = "@type",
+        deserialize_with = "resource_type"
+    )]
     pub annotation_type: String, // Should be "Annotation"
-    pub motivation: Option<String>, // We are interested in "painting"
+    pub motivation: Option<serde_json::Value>, // Web Annotation permits multiple motivations.
     #[serde(default)] // Body could be missing or not an image
     pub body: AnnotationBody,
     // target: Option<Target>, // Target is usually the canvas; can be string or object
 }
 
-#[derive(Debug, Deserialize, Clone, PartialEq, Eq, Default)]
-#[serde(untagged)] // AnnotationBody can be a single ImageBody, an array of them, or something else.
-pub enum AnnotationBody {
-    Image(ImageBody),
-    Multiple(Vec<ImageBody>),
-    #[default]
-    EmptyOrUnsupported, // Catch-all for missing body or types we don't handle
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct AnnotationBody {
+    images: Vec<ImageBody>,
 }
 
 impl AnnotationBody {
-    /// The image bodies carried by this annotation (empty when missing or
-    /// unsupported). Painting annotations choose the first usable body.
+    /// The image content carried by this annotation, including alternatives and
+    /// the source of a selected image region. Unrelated content is ignored.
     fn images(&self) -> &[ImageBody] {
-        match self {
-            AnnotationBody::Image(body) => std::slice::from_ref(body),
-            AnnotationBody::Multiple(bodies) => bodies,
-            AnnotationBody::EmptyOrUnsupported => &[],
-        }
+        &self.images
     }
+}
+
+impl<'de> Deserialize<'de> for AnnotationBody {
+    fn deserialize<D: serde::Deserializer<'de>>(decoder: D) -> Result<Self, D::Error> {
+        fn collect(value: serde_json::Value, output: &mut AnnotationBody) {
+            match value {
+                serde_json::Value::Array(values) => {
+                    for value in values {
+                        collect(value, output);
+                    }
+                }
+                serde_json::Value::Object(mut body) => {
+                    let kind = body.get("type").or_else(|| body.get("@type"));
+                    if kind.is_some_and(|kind| type_is(kind, &["Choice", "oa:Choice"])) {
+                        for key in ["default", "item", "items"] {
+                            if let Some(value) = body.remove(key) {
+                                collect(value, output);
+                            }
+                        }
+                    } else if kind.is_some_and(|kind| {
+                        type_is(kind, &["SpecificResource", "oa:SpecificResource"])
+                    }) {
+                        for key in ["source", "full"] {
+                            if let Some(value) = body.remove(key) {
+                                collect(value, output);
+                            }
+                        }
+                    } else if kind.is_none_or(|kind| {
+                        type_is(
+                            kind,
+                            &[
+                                "Image",
+                                "dctypes:Image",
+                                "http://purl.org/dc/dcmitype/Image",
+                            ],
+                        )
+                    }) && let Ok(image) =
+                        serde_json::from_value(serde_json::Value::Object(body))
+                    {
+                        output.images.push(image);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut output = Self::default();
+        collect(serde_json::Value::deserialize(decoder)?, &mut output);
+        Ok(output)
+    }
+}
+
+pub(super) fn type_is(value: &serde_json::Value, names: &[&str]) -> bool {
+    value.as_str().is_some_and(|value| names.contains(&value))
+        || value
+            .as_array()
+            .is_some_and(|values| values.iter().any(|value| type_is(value, names)))
+}
+
+fn painting(motivation: Option<&serde_json::Value>) -> bool {
+    motivation.is_none_or(|value| {
+        type_is(
+            value,
+            &[
+                "painting",
+                "sc:painting",
+                "http://iiif.io/api/presentation/2#painting",
+            ],
+        )
+    })
+}
+
+fn resource_type<'de, D: serde::Deserializer<'de>>(decoder: D) -> Result<String, D::Error> {
+    preferred_type(decoder, |value| {
+        matches!(
+            value,
+            "Image"
+                | "dctypes:Image"
+                | "http://purl.org/dc/dcmitype/Image"
+                | "Annotation"
+                | "oa:Annotation"
+        )
+    })
+}
+
+fn service_type<'de, D: serde::Deserializer<'de>>(decoder: D) -> Result<String, D::Error> {
+    preferred_type(decoder, |value| {
+        super::tile_info::image_service_version(value).is_some()
+    })
+}
+
+fn preferred_type<'de, D: serde::Deserializer<'de>>(
+    decoder: D,
+    preferred: impl Fn(&str) -> bool,
+) -> Result<String, D::Error> {
+    let value = serde_json::Value::deserialize(decoder)?;
+    match value {
+        serde_json::Value::String(value) => Ok(value),
+        serde_json::Value::Array(values) => Ok(values
+            .iter()
+            .filter_map(serde_json::Value::as_str)
+            .find(|value| preferred(value))
+            .or_else(|| values.first().and_then(serde_json::Value::as_str))
+            .unwrap_or_default()
+            .to_owned()),
+        _ => Err(serde::de::Error::custom(
+            "resource type must be a string or array",
+        )),
+    }
+}
+
+fn image_services<'de, D: serde::Deserializer<'de>>(
+    decoder: D,
+) -> Result<Vec<ImageService>, D::Error> {
+    let value = serde_json::Value::deserialize(decoder)?;
+    let values = match value {
+        serde_json::Value::Array(values) => values,
+        value => vec![value],
+    };
+    Ok(values
+        .into_iter()
+        .filter_map(|value| serde_json::from_value(value).ok())
+        .collect())
 }
 
 #[derive(Debug, Deserialize, Clone, PartialEq, Eq, Default)]
 pub struct ImageBody {
-    #[serde(default)]
+    #[serde(default, alias = "@id")]
     pub id: String, // This can be the direct image URL or the base URI for an Image Service
-    #[serde(default, rename = "type")]
+    #[serde(
+        default,
+        rename = "type",
+        alias = "@type",
+        deserialize_with = "resource_type"
+    )]
     pub image_type: String, // Should be "Image"
+    #[serde(skip_deserializing)]
     pub format: Option<String>, // e.g., "image/jpeg"
-    #[serde(default)]
+    #[serde(default, deserialize_with = "image_services")]
     pub service: Vec<ImageService>, // Array of services, can be empty
     pub width: Option<u32>,
     pub height: Option<u32>,
@@ -164,11 +303,13 @@ pub struct ImageBody {
 
 #[derive(Debug, Deserialize, Clone, PartialEq, Eq, Default)]
 pub struct ImageService {
+    #[serde(default, rename = "@context")]
+    pub context: serde_json::Value,
     #[serde(alias = "@id")] // IIIF Image API 2 uses "@id"
     #[serde(default)]
     pub id: String, // IIIF Image API 3 uses "id"
     #[serde(alias = "@type")] // IIIF Image API 2 uses "@type"
-    #[serde(default, rename = "type")]
+    #[serde(default, rename = "type", deserialize_with = "service_type")]
     pub service_type: String, // e.g. "ImageService2", "ImageService3"
     pub profile: Option<serde_json::Value>,
     pub width: Option<u32>,
@@ -188,12 +329,16 @@ pub struct LegacyManifest {
 
 #[derive(Debug, Deserialize, Clone, PartialEq, Eq, Default)]
 pub struct LegacySequence {
+    #[serde(default, rename = "@type", alias = "type")]
+    pub sequence_type: serde_json::Value,
     #[serde(default)]
     pub canvases: Vec<LegacyCanvas>,
 }
 
 #[derive(Debug, Deserialize, Clone, PartialEq, Eq, Default)]
 pub struct LegacyCanvas {
+    #[serde(default, rename = "@type", alias = "type")]
+    pub canvas_type: serde_json::Value,
     #[serde(default)]
     pub label: IiifLabel,
     #[serde(default)]
@@ -202,39 +347,11 @@ pub struct LegacyCanvas {
 
 #[derive(Debug, Deserialize, Clone, PartialEq, Eq, Default)]
 pub struct LegacyAnnotation {
+    #[serde(default, rename = "@type", alias = "type")]
+    pub annotation_type: serde_json::Value,
+    pub motivation: Option<serde_json::Value>,
     #[serde(default)]
-    pub resource: LegacyImageResource,
-}
-
-#[derive(Debug, Deserialize, Clone, PartialEq, Eq, Default)]
-pub struct LegacyImageResource {
-    #[serde(default, alias = "@id")]
-    pub id: String,
-    #[serde(default, rename = "type", alias = "@type")]
-    pub resource_type: String,
-    #[serde(default)]
-    pub service: LegacyImageServices,
-    pub width: Option<u32>,
-    pub height: Option<u32>,
-}
-
-#[derive(Debug, Deserialize, Clone, PartialEq, Eq, Default)]
-#[serde(untagged)]
-pub enum LegacyImageServices {
-    Single(ImageService),
-    Multiple(Vec<ImageService>),
-    #[default]
-    None,
-}
-
-impl LegacyImageServices {
-    fn as_slice(&self) -> &[ImageService] {
-        match self {
-            LegacyImageServices::Single(service) => std::slice::from_ref(service),
-            LegacyImageServices::Multiple(services) => services.as_slice(),
-            LegacyImageServices::None => &[],
-        }
-    }
+    pub resource: AnnotationBody,
 }
 
 /// Holds information extracted from a manifest for a single image to be dezoomified.
@@ -259,15 +376,20 @@ fn declared_size(width: Option<u32>, height: Option<u32>) -> Option<crate::model
     (width > 0 && height > 0).then_some(crate::model::Size { width, height })
 }
 
+fn legacy_type(value: &serde_json::Value, names: &[&str]) -> bool {
+    value.is_null() || type_is(value, names)
+}
+
 fn image_service_info_uri(manifest_url: &str, service_id: &str) -> String {
-    let mut resolved_uri = resolve_relative(manifest_url, service_id);
-    if !resolved_uri.ends_with("/info.json") {
-        if !resolved_uri.ends_with('/') {
-            resolved_uri.push('/');
-        }
-        resolved_uri.push_str("info.json");
+    let resolved_uri = resolve_relative(manifest_url, service_id);
+    let Ok(mut url) = url::Url::parse(&resolved_uri) else {
+        return resolved_uri;
+    };
+    if !url.path().ends_with("/info.json") {
+        let path = format!("{}/info.json", url.path().trim_end_matches('/'));
+        url.set_path(&path);
     }
-    resolved_uri
+    url.into()
 }
 
 fn choose_image_service_uri(services: &[ImageService], manifest_url: &str) -> Option<String> {
@@ -280,18 +402,31 @@ fn choose_image_service_uri(services: &[ImageService], manifest_url: &str) -> Op
 fn choose_image_service(services: &[ImageService]) -> Option<&ImageService> {
     services
         .iter()
-        .find(|s| s.service_type == "ImageService3" && !s.id.is_empty())
-        .or_else(|| {
-            services
-                .iter()
-                .find(|s| s.service_type == "ImageService2" && !s.id.is_empty())
+        .filter(|service| service.is_image_service())
+        .min_by_key(|service| {
+            std::cmp::Reverse(
+                super::tile_info::image_service_version(&service.service_type).unwrap_or(1),
+            )
         })
-        .or_else(|| {
-            services
-                .iter()
-                .find(|s| s.service_type.contains("ImageService") && !s.id.is_empty())
-        })
-        .or_else(|| services.iter().find(|s| !s.id.is_empty()))
+}
+
+impl ImageService {
+    fn is_image_service(&self) -> bool {
+        if self.id.is_empty() {
+            return false;
+        }
+        if super::tile_info::image_service_version(&self.service_type).is_some() {
+            return true;
+        }
+        // Legacy image services lack a type; auth, search and extension services
+        // can share this property and must not be inferred from their ID alone.
+        self.service_type.is_empty()
+            && (super::tile_info::image_context(&self.context)
+                || self
+                    .profile
+                    .as_ref()
+                    .is_some_and(super::tile_info::image_profile))
+    }
 }
 
 fn image_size(
@@ -303,6 +438,23 @@ fn image_size(
         let service = choose_image_service(services)?;
         declared_size(service.width, service.height)
     })
+}
+
+impl Canvas {
+    fn painting_annotations(&self) -> impl Iterator<Item = &Annotation> {
+        self.items
+            .iter()
+            .filter(|page| {
+                page.annotation_page_type.is_empty()
+                    || page.annotation_page_type == "AnnotationPage"
+            })
+            .flat_map(|page| page.items.iter())
+            .filter(|annotation| {
+                (annotation.annotation_type.is_empty()
+                    || annotation.annotation_type == "Annotation")
+                    && painting(annotation.motivation.as_ref())
+            })
+    }
 }
 
 impl Manifest {
@@ -329,57 +481,44 @@ impl Manifest {
         let metadata_title = self.get_metadata_title();
 
         for (canvas_index, canvas) in self.items.iter().enumerate() {
-            // We expect "Canvas" type, but proceed even if it's different,
-            // as long as it contains annotation pages with painting annotations.
-            // if canvas.canvas_type != "Canvas" { continue; }
+            if !canvas.canvas_type.is_empty() && canvas.canvas_type != "Canvas" {
+                continue;
+            }
 
             let canvas_label = canvas.label.get_english_or_first();
 
-            for annotation_page in &canvas.items {
-                // Expect "AnnotationPage", but proceed if structure matches.
-                // if annotation_page.annotation_page_type != "AnnotationPage" { continue; }
-
-                for annotation in &annotation_page.items {
-                    for image_body in annotation.body.images() {
-                        // Expect "Image" type for the body, but rely on service presence.
-                        // if image_body.image_type != "Image" { continue; }
-
-                        let final_image_uri = choose_image_service_uri(
-                            &image_body.service,
-                            manifest_url,
-                        )
-                        .or_else(|| {
-                            if !image_body.id.is_empty() && image_body.image_type == "Image" {
+            for annotation in canvas.painting_annotations() {
+                for image_body in annotation.body.images() {
+                    let final_image_uri =
+                        choose_image_service_uri(&image_body.service, manifest_url).or_else(|| {
+                            if !image_body.id.is_empty()
+                                && matches!(
+                                    image_body.image_type.as_str(),
+                                    "Image" | "dctypes:Image" | "http://purl.org/dc/dcmitype/Image"
+                                )
+                            {
                                 Some(resolve_relative(manifest_url, &image_body.id))
                             } else {
                                 None
                             }
                         });
 
-                        if let Some(uri_to_add) = final_image_uri {
-                            let size = image_size(
-                                image_body.width,
-                                image_body.height,
-                                &image_body.service,
-                            );
-                            infos.push(ExtractedImageInfo {
-                                preview: choose_image_service(&image_body.service).and_then(
-                                    |service| {
-                                        super::manifest_preview(
-                                            manifest_url,
-                                            service,
-                                            size.as_ref(),
-                                        )
-                                    },
-                                ),
-                                size,
-                                image_uri: uri_to_add,
-                                manifest_label: manifest_label.clone(),
-                                metadata_title: metadata_title.clone(),
-                                canvas_label: canvas_label.clone(),
-                                canvas_index,
-                            });
-                        }
+                    if let Some(uri_to_add) = final_image_uri {
+                        let size =
+                            image_size(image_body.width, image_body.height, &image_body.service);
+                        infos.push(ExtractedImageInfo {
+                            preview: choose_image_service(&image_body.service).and_then(
+                                |service| {
+                                    super::manifest_preview(manifest_url, service, size.as_ref())
+                                },
+                            ),
+                            size,
+                            image_uri: uri_to_add,
+                            manifest_label: manifest_label.clone(),
+                            metadata_title: metadata_title.clone(),
+                            canvas_label: canvas_label.clone(),
+                            canvas_index,
+                        });
                     }
                 }
             }
@@ -408,41 +547,55 @@ impl LegacyManifest {
         for (canvas_index, canvas) in self
             .sequences
             .iter()
+            .filter(|sequence| legacy_type(&sequence.sequence_type, &["Sequence", "sc:Sequence"]))
             .flat_map(|sequence| sequence.canvases.iter())
             .enumerate()
         {
+            if !legacy_type(&canvas.canvas_type, &["Canvas", "sc:Canvas"]) {
+                continue;
+            }
             let canvas_label = canvas.label.get_english_or_first();
 
             for annotation in &canvas.images {
-                let resource = &annotation.resource;
-                let final_image_uri =
-                    choose_image_service_uri(resource.service.as_slice(), manifest_url).or_else(
-                        || {
+                if !legacy_type(
+                    &annotation.annotation_type,
+                    &["Annotation", "oa:Annotation"],
+                ) || !painting(annotation.motivation.as_ref())
+                {
+                    continue;
+                }
+                for resource in annotation.resource.images() {
+                    let final_image_uri = choose_image_service_uri(&resource.service, manifest_url)
+                        .or_else(|| {
                             if !resource.id.is_empty()
-                                && (resource.resource_type.is_empty()
-                                    || resource.resource_type.ends_with("Image"))
+                                && (resource.image_type.is_empty()
+                                    || matches!(
+                                        resource.image_type.as_str(),
+                                        "Image"
+                                            | "dctypes:Image"
+                                            | "http://purl.org/dc/dcmitype/Image"
+                                    ))
                             {
                                 Some(resolve_relative(manifest_url, &resource.id))
                             } else {
                                 None
                             }
-                        },
-                    );
+                        });
 
-                if let Some(uri_to_add) = final_image_uri {
-                    let size =
-                        image_size(resource.width, resource.height, resource.service.as_slice());
-                    infos.push(ExtractedImageInfo {
-                        preview: choose_image_service(resource.service.as_slice()).and_then(
-                            |service| super::manifest_preview(manifest_url, service, size.as_ref()),
-                        ),
-                        size,
-                        image_uri: uri_to_add,
-                        manifest_label: manifest_label.clone(),
-                        metadata_title: metadata_title.clone(),
-                        canvas_label: canvas_label.clone(),
-                        canvas_index,
-                    });
+                    if let Some(uri_to_add) = final_image_uri {
+                        let size = image_size(resource.width, resource.height, &resource.service);
+                        infos.push(ExtractedImageInfo {
+                            preview: choose_image_service(&resource.service).and_then(|service| {
+                                super::manifest_preview(manifest_url, service, size.as_ref())
+                            }),
+                            size,
+                            image_uri: uri_to_add,
+                            manifest_label: manifest_label.clone(),
+                            metadata_title: metadata_title.clone(),
+                            canvas_label: canvas_label.clone(),
+                            canvas_index,
+                        });
+                    }
                 }
             }
         }
@@ -456,12 +609,141 @@ mod tests {
     use super::*;
 
     #[test]
+    fn legacy_language_values_do_not_hide_the_image() {
+        let manifest: LegacyManifest = serde_json::from_value(serde_json::json!({
+            "@type": "sc:Manifest",
+            "label": [
+                {"@value": "Livre", "@language": "fr"},
+                {"@value": "Book", "@language": "en"}
+            ],
+            "metadata": [{
+                "label": {"@value": "Title", "@language": "en"},
+                "value": ["", {"@value": "Image title", "@language": "en"}]
+            }],
+            "sequences": [{"canvases": [{
+                "label": {"@value": "Page one", "@language": "en"},
+                "images": [{"resource": {"@type": "dctypes:Image", "@id": "page.jpg"}}]
+            }]}]
+        }))
+        .unwrap();
+        let images = manifest.extract_image_infos("https://images.test/manifest");
+        assert_eq!(images.len(), 1);
+        assert_eq!(images[0].image_uri, "https://images.test/page.jpg");
+        assert_eq!(images[0].manifest_label.as_deref(), Some("Book"));
+        assert_eq!(images[0].metadata_title.as_deref(), Some("Image title"));
+        assert_eq!(images[0].canvas_label.as_deref(), Some("Page one"));
+    }
+
+    fn current_images(annotations: serde_json::Value) -> Vec<ExtractedImageInfo> {
+        let manifest: Manifest = serde_json::from_value(serde_json::json!({
+            "type": "Manifest", "items": [{"type": "Canvas", "items": [{
+                "type": "AnnotationPage", "items": annotations
+            }]}]
+        }))
+        .unwrap();
+        manifest.extract_image_infos("https://images.test/manifest")
+    }
+
+    #[test]
+    fn mixed_content_and_choices_keep_only_image_content() {
+        let images = current_images(serde_json::json!([{
+            "type": ["Annotation", "custom:Annotation"],
+            "motivation": ["painting", "custom:motivation"],
+            "body": [
+                {"id": "sound.mp3", "type": "Sound", "format": ["audio/mpeg"]},
+                {"id": "video.mp4", "type": "Video", "duration": 1.5},
+                {"type": "TextualBody", "value": "Text"},
+                {"type": "Choice", "items": [
+                    {"id": "color.jpg", "type": "Image"},
+                    {"type": "SpecificResource", "source": {
+                        "id": "gray.jpg", "type": "Image",
+                        "service": [{"id": "gray", "type": "ImageService3"}]
+                    }, "selector": {"type": "FragmentSelector", "value": "xywh=0,0,100,100"}}
+                ]}
+            ]
+        }]));
+        assert_eq!(
+            images
+                .iter()
+                .map(|image| image.image_uri.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "https://images.test/color.jpg",
+                "https://images.test/gray/info.json"
+            ]
+        );
+    }
+
+    #[test]
+    fn legacy_choice_and_selected_image_sources_are_downloadable() {
+        let manifest: LegacyManifest = serde_json::from_value(serde_json::json!({
+            "@type": "sc:Manifest", "sequences": [{"canvases": [{"images": [{
+                "motivation": "sc:painting", "resource": {
+                    "@type": "oa:Choice",
+                    "default": {"@type": "dctypes:Image", "@id": "default.jpg"},
+                    "item": [{"@type": "oa:SpecificResource", "full": {
+                        "@type": "dctypes:Image", "@id": "alternative.jpg"
+                    }}]
+                }
+            }]}]}]
+        }))
+        .unwrap();
+        assert_eq!(
+            manifest
+                .extract_image_infos("https://images.test/manifest")
+                .iter()
+                .map(|image| image.image_uri.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "https://images.test/default.jpg",
+                "https://images.test/alternative.jpg"
+            ]
+        );
+    }
+
+    #[test]
+    fn nonpainting_images_and_unrelated_services_are_not_download_targets() {
+        let images = current_images(serde_json::json!([
+            {"motivation": "commenting", "body": {"id": "comment.jpg", "type": "Image"}},
+            {"motivation": "painting", "body": {"type": "Video", "service": [
+                {"id": "video", "type": "ImageService3"}
+            ]}},
+            {"motivation": "painting", "body": {"id": "actual.jpg", "type": "Image", "service": [
+                {"id": "login", "type": "AuthCookieService1"},
+                {"id": "search", "profile": "http://iiif.io/api/search/1/search"},
+                {"id": "unknown", "type": "UnknownImageService"},
+                {"id": "spoofed", "profile": "https://iiif.io.evil.test/api/image/2/level2.json"},
+                {"id": "untyped"}
+            ]}},
+            {"motivation": "painting", "body": {"id": "preview.jpg", "type": "Image", "service": [
+                {"id": "search", "type": "SearchService2"},
+                {"@id": "full?version=2", "@context": ["https://extension.test/context", "http://iiif.io/api/image/2/context.json"]}
+            ]}}
+        ]));
+        assert_eq!(
+            images
+                .iter()
+                .map(|image| image.image_uri.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "https://images.test/actual.jpg",
+                "https://images.test/full/info.json?version=2"
+            ]
+        );
+    }
+
+    #[test]
     fn test_label_extraction() {
         let label_str = IiifLabel::String("Hello".to_string());
         assert_eq!(label_str.get_english_or_first(), Some("Hello".to_string()));
 
         let label_empty_str = IiifLabel::String(String::new());
         assert_eq!(label_empty_str.get_english_or_first(), None);
+
+        let repeated: IiifLabel = serde_json::from_str(r#"["", "First", "Second"]"#).unwrap();
+        assert_eq!(repeated.get_english_or_first().as_deref(), Some("First"));
+        let empty: IiifLabel = serde_json::from_str("[]").unwrap();
+        assert_eq!(empty.get_english_or_first(), None);
 
         let mut map_en = HashMap::new();
         map_en.insert("en".to_string(), vec!["World".to_string()]);
@@ -625,7 +907,7 @@ mod tests {
               "body": { "id": "img.jpg", "type": "Image",
                 "service": [
                   { "id": "https://example.org/svc2", "type": "ImageService2", "width": 100, "height": 200 },
-                  { "id": "https://example.org/svc3", "type": "ImageService3", "width": 800, "height": 1200 }
+                  { "id": "https://example.org/svc3", "type": ["custom:Service", "http://iiif.io/api/image/3#ImageService"], "width": 800, "height": 1200 }
                 ]
               }
             }]
@@ -771,7 +1053,7 @@ mod tests {
     fn test_legacy_manifest_prefers_service_and_handles_arrays() {
         let json_data = r#"{
           "@type":"sc:Manifest","label":"A Young Lady with a Parrot","sequences":[{"canvases":[
-            {"label":"AIC canvas","images":[{"resource":{"@type":"dctypes:Image","@id":"https://www.artic.edu/iiif/2/2d9fb8b5-b9a3-3e41-270e-3c480f7b317b/full/843,/0/default.jpg","service":{"@id":"https://www.artic.edu/iiif/2/2d9fb8b5-b9a3-3e41-270e-3c480f7b317b"}}}]},
+            {"label":"AIC canvas","images":[{"resource":{"@type":"dctypes:Image","@id":"https://www.artic.edu/iiif/2/2d9fb8b5-b9a3-3e41-270e-3c480f7b317b/full/843,/0/default.jpg","service":{"@id":"https://www.artic.edu/iiif/2/2d9fb8b5-b9a3-3e41-270e-3c480f7b317b","@context":"http://iiif.io/api/image/2/context.json"}}}]},
             {"label":"Array canvas","images":[{"resource":{"@id":"thumbnail.jpg","service":[{"@id":"svc2","@type":"ImageService2"},{"id":"svc3","type":"ImageService3"}]}}]}
           ]}]
         }"#;
@@ -797,7 +1079,7 @@ mod tests {
           "@context":"http://www.shared-canvas.org/ns/context.json","@type":"sc:Manifest",
           "label":"Book 1","sequences":[{"canvases":[{"label":"p. 1","images":[{"resource":{
             "@id":"http://www.example.org/iiif/book1/res/page1.jpg","@type":"dctypes:Image",
-            "service":{"@id":"http://www.example.org/images/book1-page1"}
+            "service":{"@id":"http://www.example.org/images/book1-page1","@context":"http://library.stanford.edu/iiif/image-api/1.1/context.json"}
           }}]}]}]
         }"#;
 

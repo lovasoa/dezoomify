@@ -1,3 +1,4 @@
+use serde::Deserialize;
 use std::sync::Arc;
 
 use regex::bytes::Regex as BytesRegex;
@@ -38,23 +39,35 @@ mod title_tests;
 enum Document {
     #[serde(deserialize_with = "image_metadata")]
     Image(ImageInfo),
+    #[serde(deserialize_with = "presentation_metadata")]
     Current(manifest_types::Manifest),
+    #[serde(deserialize_with = "presentation_metadata")]
     Legacy(manifest_types::LegacyManifest),
 }
 
 fn image_metadata<'de, D: serde::Deserializer<'de>>(decoder: D) -> Result<ImageInfo, D::Error> {
     let info = <ImageInfo as serde::Deserialize>::deserialize(decoder)?;
-    if matches!(info.iiif_type.as_deref(), Some("Manifest" | "sc:Manifest"))
-        || info.context.as_deref().is_some_and(|context| {
-            context.contains("iiif.io/api/presentation")
-                || context.contains("shared-canvas.org/ns/context")
-        })
-    {
-        return Err(serde::de::Error::custom(
-            "presentation metadata is not an image service",
-        ));
+    if !info.has_distinctive_iiif_properties() {
+        return Err(serde::de::Error::custom("not an IIIF image service"));
     }
     Ok(info)
+}
+
+fn presentation_metadata<'de, D, T>(decoder: D) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::de::DeserializeOwned,
+{
+    let value = serde_json::Value::deserialize(decoder)?;
+    if let Some(kind) = value.get("type").or_else(|| value.get("@type"))
+        && !kind.is_null()
+        && !manifest_types::type_is(kind, &["Manifest", "sc:Manifest"])
+    {
+        return Err(serde::de::Error::custom(
+            "not an IIIF presentation manifest",
+        ));
+    }
+    serde_json::from_value(value).map_err(serde::de::Error::custom)
 }
 
 const ROUTES: &[DiscoveryRoute] = &[
@@ -106,6 +119,12 @@ impl Metadata for Document {
                     .map(ParsedResource::Complete);
             }
         };
+        if infos.is_empty() {
+            return Err(DiscoveryError::rejected(
+                crate::core::discovery::RejectionKind::NoImage,
+                "no IIIF painting images",
+            ));
+        }
         Ok(ParsedResource::Catalog(catalog_from_manifest_info(
             infos, warning,
         )))
@@ -295,7 +314,14 @@ fn catalog(uri: &str, contents: &[u8]) -> Result<DiscoveryCatalog, DiscoveryErro
     let parsed = match serde_json::from_slice::<Document>(contents) {
         Ok(document) => document.decode(resource),
         Err(error) => {
-            embedded_metadata(resource).unwrap_or_else(|| Err(IIIFError::from(error).into()))
+            if Url::parse(uri).is_ok_and(|url| url.path().ends_with("/info.json"))
+                && let Ok(info) = serde_json::from_slice::<ImageInfo>(contents)
+                && info.is_legacy_v1_info()
+            {
+                Document::Image(info).decode(resource)
+            } else {
+                embedded_metadata(resource).unwrap_or_else(|| Err(IIIFError::from(error).into()))
+            }
         }
     }?;
     parsed.compile("iiif")
@@ -1024,7 +1050,7 @@ mod manifest_parsing_tests {
     use super::*;
 
     fn legacy_manifest_data() -> &'static [u8] {
-        r#"{"@context":"http://iiif.io/api/presentation/2/context.json","@type":"sc:Manifest","label":"Legacy Book","sequences":[{"canvases":[{"label":"Page 1","images":[{"resource":{"@type":"dctypes:Image","@id":"https://example.com/iiif/page1/full/843,/0/default.jpg","service":{"@id":"https://example.com/iiif/page1"}}}]}]}]}"#
+        r#"{"@context":"http://iiif.io/api/presentation/2/context.json","@type":"sc:Manifest","label":"Legacy Book","sequences":[{"canvases":[{"label":"Page 1","images":[{"resource":{"@type":"dctypes:Image","@id":"https://example.com/iiif/page1/full/843,/0/default.jpg","service":{"@context":"http://iiif.io/api/image/2/context.json","@id":"https://example.com/iiif/page1"}}}]}]}]}"#
             .as_bytes()
     }
 
@@ -1080,6 +1106,30 @@ mod manifest_parsing_tests {
     }
 
     #[test]
+    fn repeated_metadata_values_do_not_turn_a_manifest_thumbnail_into_a_service() {
+        let manifest = include_str!("../../../../fixtures/iiif/legacy-context/manifest.json")
+            .replace("{{origin}}", "https://library.test");
+        let (result, _) = crate::test_support::discover(
+            SPEC,
+            "https://library.test/manifest",
+            &[(manifest.as_bytes(), None)],
+        );
+        let catalog = result.unwrap();
+        let [DiscoveredEntry::Deferred(image)] = catalog.entries() else {
+            panic!("manifest should defer to the image service, not its static thumbnail");
+        };
+        assert_eq!(image.uri, "https://library.test/fixtures/iiif/v2/info.json");
+        assert_eq!(image.title.as_deref(), Some("Legacy manifest - Map"));
+        assert_eq!(
+            image.size,
+            Some(crate::model::Size {
+                width: 512,
+                height: 512
+            })
+        );
+    }
+
+    #[test]
     fn legacy_manifests_parse_and_label_images() {
         let infos = parse_iiif_manifest_from_bytes(
             legacy_manifest_data(),
@@ -1119,19 +1169,8 @@ mod manifest_parsing_tests {
     fn test_parse_json_not_a_manifest_type() {
         let manifest_url = "https://example.com/not_a_manifest.json";
         let json_data = r#"{"id": "test", "type": "NotAManifest", "items": [{"id":"canvas","type":"Canvas","items":[{"items":[{"motivation":"painting","body":{"id":"image.jpg","type":"Image","service":[{"id":"https://example.com/iiif/page1","type":"ImageService3"}]}}]}]}]}"#;
-        // The parser remains lenient, while the application-facing catalog carries the warning.
-        // The function itself should succeed if the structure is parsable into Manifest.
-        let infos = parse_iiif_manifest_from_bytes(json_data.as_bytes(), manifest_url).unwrap();
-        assert_eq!(infos.len(), 1);
-
-        let catalog = catalog(manifest_url, json_data.as_bytes()).unwrap();
-        let [DiscoveredEntry::Deferred(image)] = catalog.entries() else {
-            panic!("lenient manifest parsing should produce one deferred image");
-        };
-        assert_eq!(
-            image.warnings,
-            ["IIIF manifest has unexpected type 'NotAManifest'; attempting lenient parsing"]
-        );
+        assert!(parse_iiif_manifest_from_bytes(json_data.as_bytes(), manifest_url).is_err());
+        assert!(catalog(manifest_url, json_data.as_bytes()).is_err());
     }
 
     #[test]
