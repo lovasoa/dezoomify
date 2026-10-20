@@ -19,6 +19,7 @@ const {
 
 const ADDR = process.env.DEZOOMIFY_E2E_ADDR;
 const { formats } = require("../../../../test/support/formats.cjs");
+const { chooseFixtureImages } = require("../../../../test/support/image-choice.mjs");
 const {
   relayFixtureRequest,
   startPublicFixtureSource,
@@ -81,6 +82,7 @@ for (const fixture of formats) {
     await page.goto(`${ADDR}/beta/`);
     await page.locator("#dz-url-input").fill(ADDR + fixture.input);
     await page.getByRole("button", { name: /find image/i }).click();
+    await page.waitForFunction(chooseFixtureImages, fixture.choice, { timeout: 30000 });
     await expect(page.locator(".dz-completed-section")).toBeVisible({ timeout: 30000 });
     await expect(page.locator("html")).not.toHaveAttribute("data-viewer-ready", "true");
     const pending = page.waitForEvent("download");

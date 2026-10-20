@@ -41,6 +41,11 @@ export interface Point {
  */
 export interface Image {
     title?: string;
+    sourceUrl?: string;
+    /**
+     * A complete, bounded single-tile level suitable for an optional preview.
+     */
+    preview?: Tile;
     format: string;
     size?: Size;
     levels: Level[];
@@ -53,6 +58,11 @@ export interface Image {
 export interface ImageRequest {
     title?: string;
     uri: string;
+    size?: Size;
+    /**
+     * A bounded preview declared by this catalog, without resolving `uri`.
+     */
+    preview?: Tile;
 }
 
 /**
@@ -89,6 +99,11 @@ export interface DesktopOutput {
     output: Output;
     saved_output: SavedOutput | undefined;
 }
+
+/**
+ * Desktop image-choice updates contain display thumbnails, never source pixels.
+ */
+export type ImageChoiceEvent = { kind: "catalog"; catalog: Catalog } | { kind: "preview"; index: number; thumbnail: string };
 
 /**
  * Durable native reference to a published output; filesystem paths stay in the shell.

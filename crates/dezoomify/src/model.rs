@@ -441,6 +441,11 @@ pub struct Level {
 pub struct Image {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_url: Option<String>,
+    /// A complete, bounded single-tile level suitable for an optional preview.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preview: Option<Tile>,
     pub format: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub size: Option<Size>,
@@ -456,6 +461,20 @@ pub struct ImageRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
     pub uri: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size: Option<Size>,
+    /// A bounded preview declared by this catalog, without resolving `uri`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preview: Option<Tile>,
+}
+
+/// Desktop image-choice updates contain display thumbnails, never source pixels.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub enum ImageChoiceEvent {
+    Catalog { catalog: Catalog },
+    Preview { index: u32, thumbnail: String },
 }
 
 /// One ordered catalog slot: a ready image or a request to resolve one.

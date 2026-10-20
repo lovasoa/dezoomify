@@ -8,11 +8,13 @@ const formats = globSync("fixtures/*/*/viewer.html", { cwd: root })
   .map((file) => {
     const dir = path.posix.dirname(file);
     const override = path.join(root, dir, "input.txt");
+    const choice = path.join(root, dir, "choice.txt");
     return {
       name: dir.slice(9),
       tolerance: path.posix.basename(dir).startsWith("approximate-") ? 2 : 0,
       input: `/${dir}/${existsSync(override) ? readFileSync(override, "utf8").trim() : "viewer.html"}`,
       viewer: `/${file}`,
+      choice: existsSync(choice) ? Number(readFileSync(choice, "utf8").trim()) : 0,
     };
   });
 module.exports = { formats };

@@ -4,6 +4,8 @@ use super::manifest_types::ExtractedImageInfo;
 #[test]
 fn test_determine_title_all_components() {
     let image_info = ExtractedImageInfo {
+        size: None,
+        preview: None,
         image_uri: "https://example.com/image.json".to_string(),
         manifest_label: Some("Manifest Title".to_string()),
         metadata_title: Some("Metadata Title".to_string()),
@@ -21,6 +23,8 @@ fn test_determine_title_all_components() {
 #[test]
 fn test_determine_title_manifest_and_canvas_only() {
     let image_info = ExtractedImageInfo {
+        size: None,
+        preview: None,
         image_uri: "https://example.com/image.json".to_string(),
         manifest_label: Some("Book Title".to_string()),
         metadata_title: None,
@@ -35,6 +39,8 @@ fn test_determine_title_manifest_and_canvas_only() {
 #[test]
 fn test_determine_title_canvas_only() {
     let image_info = ExtractedImageInfo {
+        size: None,
+        preview: None,
         image_uri: "https://example.com/image.json".to_string(),
         manifest_label: None,
         metadata_title: None,
@@ -50,6 +56,8 @@ fn test_determine_title_canvas_only() {
 fn test_determine_title_no_duplicates() {
     // Test that duplicate titles are not repeated
     let image_info = ExtractedImageInfo {
+        size: None,
+        preview: None,
         image_uri: "https://example.com/image.json".to_string(),
         manifest_label: Some("Same Title".to_string()),
         metadata_title: Some("Same Title".to_string()), // Duplicate
@@ -64,6 +72,8 @@ fn test_determine_title_no_duplicates() {
 #[test]
 fn test_determine_title_empty() {
     let image_info = ExtractedImageInfo {
+        size: None,
+        preview: None,
         image_uri: "https://example.com/image.json".to_string(),
         manifest_label: None,
         metadata_title: None,
@@ -78,6 +88,8 @@ fn test_determine_title_empty() {
 #[test]
 fn test_determine_title_metadata_only() {
     let image_info = ExtractedImageInfo {
+        size: None,
+        preview: None,
         image_uri: "https://example.com/image.json".to_string(),
         manifest_label: None,
         metadata_title: Some("Metadata Only".to_string()),
@@ -92,6 +104,8 @@ fn test_determine_title_metadata_only() {
 #[test]
 fn test_determine_title_special_characters() {
     let image_info = ExtractedImageInfo {
+        size: None,
+        preview: None,
         image_uri: "https://example.com/image.json".to_string(),
         manifest_label: Some("Ms. Smith's \"Book\" & Notes (1850-1900)".to_string()),
         metadata_title: None,
@@ -114,6 +128,8 @@ fn test_determine_title_very_long() {
     let long_canvas = "B".repeat(100);
 
     let image_info = ExtractedImageInfo {
+        size: None,
+        preview: None,
         image_uri: "https://example.com/image.json".to_string(),
         manifest_label: Some(long_manifest.clone()),
         metadata_title: None,
@@ -129,6 +145,8 @@ fn test_determine_title_very_long() {
 #[test]
 fn test_determine_title_unicode() {
     let image_info = ExtractedImageInfo {
+        size: None,
+        preview: None,
         image_uri: "https://example.com/image.json".to_string(),
         manifest_label: Some("古典文学作品集".to_string()),
         metadata_title: Some("詩經選讀".to_string()),
@@ -146,6 +164,8 @@ fn test_determine_title_unicode() {
 #[test]
 fn test_determine_title_whitespace_handling() {
     let image_info = ExtractedImageInfo {
+        size: None,
+        preview: None,
         image_uri: "https://example.com/image.json".to_string(),
         manifest_label: Some("  Manifest with spaces  ".to_string()),
         metadata_title: Some("\tTabbed metadata\t".to_string()),

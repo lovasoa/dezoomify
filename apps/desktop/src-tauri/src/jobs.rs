@@ -13,6 +13,7 @@ use std::{
 pub const CHANNEL_REGISTERED: &str = "dezoomify://registered";
 pub const CHANNEL_PROGRESS: &str = "dezoomify://progress";
 pub const CHANNEL_RETRY: &str = "dezoomify://retry";
+pub const CHANNEL_IMAGE_CHOICE: &str = "dezoomify://image-choice";
 
 pub struct Registration {
     pub controls: Controls,
@@ -21,6 +22,13 @@ pub struct Registration {
     pub saved_path: Mutex<Option<PathBuf>>,
     next_question: AtomicU64,
     retry: Mutex<Option<(u64, tokio::sync::oneshot::Sender<RetryChoice>)>>,
+    image_choice: Mutex<Option<ImageQuestion>>,
+}
+
+struct ImageQuestion {
+    id: u64,
+    count: usize,
+    answer: tokio::sync::oneshot::Sender<u32>,
 }
 
 impl Registration {
@@ -32,6 +40,7 @@ impl Registration {
             saved_path: Mutex::new(None),
             next_question: AtomicU64::new(0),
             retry: Mutex::new(None),
+            image_choice: Mutex::new(None),
         }
     }
 
@@ -40,6 +49,40 @@ impl Registration {
         let (send, receive) = tokio::sync::oneshot::channel();
         *self.retry.lock().unwrap_or_else(|error| error.into_inner()) = Some((question, send));
         (question, receive)
+    }
+
+    pub fn request_image(&self, count: usize) -> (u64, tokio::sync::oneshot::Receiver<u32>) {
+        let id = self.next_question.fetch_add(1, Ordering::SeqCst);
+        let (answer, receive) = tokio::sync::oneshot::channel();
+        *self
+            .image_choice
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = Some(ImageQuestion { id, count, answer });
+        (id, receive)
+    }
+
+    pub fn answer_image(&self, question: u64, index: u32) -> Result<(), Error> {
+        let mut pending = self
+            .image_choice
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let live = pending
+            .as_ref()
+            .filter(|pending| pending.id == question)
+            .filter(|_| !self.controls.is_cancelled())
+            .ok_or(Error::InteractionExpired)?;
+        if index as usize >= live.count {
+            return Err(Error::InvalidInput(
+                "image selection is out of range".into(),
+            ));
+        }
+        if let Some(pending) = pending.take() {
+            pending
+                .answer
+                .send(index)
+                .map_err(|_| Error::InteractionExpired)?;
+        }
+        Ok(())
     }
 
     pub fn answer_retry(&self, question: u64, answer: RetryChoice) -> Result<(), Error> {
@@ -54,6 +97,10 @@ impl Registration {
     }
 
     pub fn finish(&self, path: Option<PathBuf>) {
+        self.image_choice
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .take();
         *self
             .saved_path
             .lock()
@@ -170,6 +217,32 @@ pub fn unknown_job(id: &str) -> Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn image_answers_are_bounded_and_scoped_to_a_live_question() {
+        let registration = Registration::new();
+        let (old, _) = registration.request_image(2);
+        let (current, mut answer) = registration.request_image(2);
+        assert!(matches!(
+            registration.answer_image(old, 0),
+            Err(Error::InteractionExpired)
+        ));
+        assert!(matches!(
+            registration.answer_image(current, 2),
+            Err(Error::InvalidInput(_))
+        ));
+        registration.answer_image(current, 1).unwrap();
+        assert_eq!(answer.try_recv().unwrap(), 1);
+        assert!(matches!(
+            registration.answer_image(current, 0),
+            Err(Error::InteractionExpired)
+        ));
+        let (cancelled, _) = registration.request_image(2);
+        registration.controls.cancel();
+        assert!(matches!(
+            registration.answer_image(cancelled, 0),
+            Err(Error::InteractionExpired)
+        ));
+    }
     #[test]
     fn updates_wait_for_cancelled_jobs_to_settle_and_exclude_new_jobs() {
         let mut table = JobTable::new();

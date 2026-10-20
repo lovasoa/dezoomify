@@ -659,25 +659,27 @@ test("settlement cancels a pending retry approval without requiring a host respo
 const image = (sizes) => ({ format: "test", levels: sizes.map((size) => ({ label: "", size })) });
 const square = (width) => ({ width, height: width });
 
-test("image choice compares actual levels, skips deferred entries, and preserves ties", async () => {
-  const host = setup().host;
+test("multiple images await the supplied choice while a single pyramid continues automatically", async () => {
+  const calls = [];
+  const host = setup({
+    chooseImage: async (catalog) => {
+      calls.push(catalog);
+      return 1;
+    },
+  }).host;
   const deferred = { kind: "image-request", uri: "https://images.test/info.json" };
-  const wide = {
-    kind: "image",
-    ...image([
-      { width: 1000, height: 1 },
-      { width: 1, height: 1000 },
-    ]),
-    size: square(1000),
-  };
   const bigger = { kind: "image", ...image([square(100)]) };
-  assert.equal(await host.chooseImage({ entries: [deferred, wide, bigger] }), 2);
-  assert.equal(await host.chooseImage({ entries: [deferred, deferred] }), 0);
+  assert.equal(await host.chooseImage({ entries: [deferred, bigger] }), 1);
   assert.equal(await host.chooseImage({ entries: [bigger, bigger] }), 1);
+  assert.equal(calls.length, 2);
   assert.equal(
-    await host.chooseImage({ entries: [deferred, { kind: "image", ...image([undefined]) }] }),
-    1,
+    await host.chooseImage({
+      entries: [{ kind: "image", ...image([square(1), square(256), square(512)]) }],
+    }),
+    0,
   );
+  assert.equal(calls.length, 2);
+  await assert.rejects(host.chooseImage({ entries: [] }), { kind: "plan-empty" });
 });
 
 test("resolution choice fits device limits and preserves fallback behavior", async () => {

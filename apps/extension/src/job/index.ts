@@ -179,6 +179,10 @@ const app = createBrowserApplication({
         if (!fetchResource) return Promise.reject(new Error("The source has not been scanned."));
         return fetchResource(request, signal, interaction);
       },
+      fetchPreview: (request, signal) => {
+        if (!fetchResource) return Promise.reject(new Error("The source has not been scanned."));
+        return fetchResource.preview(request, signal);
+      },
       async recoverDiscovery(error) {
         if (!["discovery-failed", "malformed-metadata", "no-image-found"].includes(error.kind))
           return undefined;

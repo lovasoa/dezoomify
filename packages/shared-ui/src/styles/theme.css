@@ -2336,6 +2336,74 @@ abbr[title] {
   min-width: 0;
 }
 
+/* Image catalog selection. */
+.dz-image-picker {
+  text-align: left;
+  min-width: 0;
+}
+
+.dz-image-list {
+  list-style: none;
+  padding: 0;
+  margin: 1.5rem 0;
+}
+
+.dz-image-row {
+  display: flex;
+  gap: 1.25rem;
+  padding: 1.25rem 0;
+  border-bottom: 1px solid var(--dz-surface-border);
+}
+
+.dz-image-thumbnail {
+  width: 160px;
+  height: 160px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--dz-text-muted);
+  font-size: 0.85rem;
+  text-align: center;
+  background: var(--dz-btn-secondary-bg);
+}
+
+.dz-image-thumbnail img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.dz-image-description {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.65rem;
+}
+
+.dz-image-description h3 {
+  margin: 0;
+}
+
+.dz-image-url {
+  overflow-wrap: anywhere;
+  font-family: var(--dz-font-mono);
+  font-size: 0.8rem;
+  user-select: text;
+}
+
+.dz-image-size {
+  color: var(--dz-text-secondary);
+  font-size: 0.9rem;
+}
+
+@media (max-width: 480px) {
+  .dz-image-row {
+    flex-direction: column;
+  }
+}
+
 /* Modal dialog body (shared-ui openModal/confirm). */
 .dz-modal-body {
   display: flex;

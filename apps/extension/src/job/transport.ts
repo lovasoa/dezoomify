@@ -17,12 +17,14 @@ export function createResourceFetcher(deps: {
     ): Promise<ResourceRead>;
   };
 }) {
-  return async (
+  const fetchResource = async (
     request: ResourceRequest,
     signal: AbortSignal,
     interaction: Interaction,
+    sourceFirst = false,
   ): Promise<ResourceRead> => {
     if (
+      sourceFirst ||
       deps.sourceAccess.handlesResource(request.uri) ||
       request.purpose === "metadata" ||
       deps.sourceAccess.hasOrigin(originOfUrl(request.uri))
@@ -32,6 +34,12 @@ export function createResourceFetcher(deps: {
     }
     return deps.extensionTransport.fetchResource(request, signal, interaction);
   };
+  return Object.assign(fetchResource, {
+    // An authorized source page may already read a preview through CORS.
+    // Falling back to extension transport must never request another grant.
+    preview: (request: ResourceRequest, signal: AbortSignal) =>
+      fetchResource(request, signal, "forbidden", true),
+  });
 
   async function readSource(
     request: ResourceRequest,

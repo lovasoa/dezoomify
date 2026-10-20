@@ -26,6 +26,8 @@ fn decode_catalog(
         images.into_iter().map(|image| DeferredResource {
             uri: image.uri,
             title: image.title,
+            size: None,
+            preview: None,
             warnings: Vec::new(),
         }),
     )))

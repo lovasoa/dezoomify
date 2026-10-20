@@ -63,6 +63,24 @@ test("cross-origin tiles use extension fetching and retain deferred permission f
   assert.equal(h.calls[0][3], "forbidden");
 });
 
+test("cross-origin previews use source CORS or existing grants without asking for access", async () => {
+  const input = { ...request, uri: "https://cdn.test/preview.jpg", purpose: "tile" };
+  const readable = setup();
+  const preview = await readable.fetch.preview(input, signal);
+  assert.deepEqual([...preview.response.bytes], [7, 8]);
+  assert.deepEqual(
+    readable.calls.map(([route]) => route),
+    ["source"],
+  );
+
+  const blocked = setup({ sourceFailure: { kind: "network-failure" } });
+  assert.deepEqual(await blocked.fetch.preview(input, signal), {
+    kind: "needs-access",
+    origin: "https://cdn.test",
+  });
+  assert.equal(blocked.calls.at(-1)[3], "forbidden");
+});
+
 test("source injection failure tries extension once and preserves the original cause", async () => {
   const h = setup({
     sourceFailure: new Error("source unavailable", { cause: new Error("Missing host permission") }),

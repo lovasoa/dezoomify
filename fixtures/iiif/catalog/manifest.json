@@ -1,0 +1,13 @@
+{
+  "type": "Manifest", "label": {"en": ["Two pages"]},
+  "items": [
+    {"type": "Canvas", "label": {"en": ["First"]}, "items": [{"items": [{"body": {
+      "type": "Image", "width": 512, "height": 512,
+      "service": [{"id": "first", "type": "ImageService3", "profile": "level2"}]
+    }}]}]},
+    {"type": "Canvas", "label": {"en": ["Second"]}, "items": [{"items": [{"body": {
+      "type": "Image", "width": 512, "height": 512,
+      "service": [{"id": "second", "type": "ImageService3", "profile": "level2"}]
+    }}]}]}
+  ]
+}

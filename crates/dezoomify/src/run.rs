@@ -222,7 +222,7 @@ async fn acquire_plan(
             }
         })
         .map(|tile| {
-            tile.map(|tile| portable_tile(tile, canvas.clone()))
+            tile.map(|tile| tile.into_tile(canvas.clone()))
                 .map_err(Error::from)
         });
     acquire_tiles(tiles, host, options, progress).await?;
@@ -232,7 +232,7 @@ async fn acquire_plan(
         let count = grid.count() as u32;
         acquire_tiles(
             grid.tiles_row_major().map(|tile| {
-                let mut tile = portable_tile(tile.map_err(Error::from)?, dimensions.clone());
+                let mut tile = tile.map_err(Error::from)?.into_tile(dimensions.clone());
                 tile.index += offset;
                 Ok(tile)
             }),
@@ -471,30 +471,6 @@ fn size(point: Vec2d) -> Size {
         height: point.y,
     }
 }
-fn portable_tile(tile: TileSpec, canvas: Option<Size>) -> Tile {
-    Tile {
-        index: tile.ordinal,
-        request: ResourceRequest {
-            uri: tile.request.uri,
-            headers: tile.request.headers,
-            purpose: if tile.role.probe {
-                RequestPurpose::Probe
-            } else {
-                RequestPurpose::Tile
-            },
-        },
-        placement: TilePlacement {
-            position: Point {
-                x: tile.destination.x,
-                y: tile.destination.y,
-            },
-            expected_size: tile.expected_size.map(size),
-            canvas,
-            processing: tile.processing,
-            role: tile.role,
-        },
-    }
-}
 pub(crate) async fn probe(
     host: &impl Host,
     tile: TileSpec,
@@ -504,7 +480,7 @@ pub(crate) async fn probe(
         .checked_sub(1)
         .ok_or_else(|| Error::ResourceLimit("probe count exceeds max_tiles".to_string().into()))?;
     host.checkpoint(Gate::Cancellation).await?;
-    match host.probe(portable_tile(tile, None)).await? {
+    match host.probe(tile.into_tile(None)).await? {
         ProbeOutcome::Missing => Ok(core::ObservationResult::Missing),
         ProbeOutcome::Available { width, height } => Ok(core::ObservationResult::Available {
             size: Vec2d {

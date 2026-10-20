@@ -339,6 +339,37 @@ fn live_observations_win_before_blocked_http_access() {
 }
 
 #[test]
+fn loaded_page_wins_without_reading_the_viewers_catalog() {
+    use dezoomify::model::DiscoveryInputKind;
+    let catalog = futures::executor::block_on(core::default_registry().discover(
+        vec![
+            DiscoveryInput::with_contents(
+                "https://viewer.onb.ac.at/1000ABD0",
+                "<html></html>",
+            ),
+            DiscoveryInput::with_contents(
+                "https://images.test/first/info.json",
+                include_str!("../../../fixtures/iiif/v3/info.json")
+                    .replace("{{origin}}/fixtures/iiif/v3", "https://images.test/first"),
+            )
+            .with_kind(DiscoveryInputKind::ObservedMetadata),
+            DiscoveryInput::new("https://api.onb.ac.at/iiif/presentation/v3/manifest/1000ABD0")
+                .with_kind(DiscoveryInputKind::ObservedResource),
+        ],
+        Default::default(),
+        |_, _| async { panic!("the loaded image already supplies its metadata") },
+        support::parse_html,
+        |_| async { panic!("no additional source access is needed") },
+    ))
+    .unwrap();
+    assert_eq!(catalog.len(), 1);
+    assert_eq!(
+        support::ready_image(catalog).source_url.as_deref(),
+        Some("https://images.test/first/info.json")
+    );
+}
+
+#[test]
 fn deferred_frame_observations_precede_permissions_for_unrelated_resources() {
     let observations = RefCell::new(Vec::new());
     let catalog = futures::executor::block_on(core::default_registry().discover(

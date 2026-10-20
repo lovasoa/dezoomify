@@ -1,4 +1,5 @@
 //! Native platform operations used directly by the shared async algorithm.
+mod image_choice;
 use std::{
     cell::{Cell, RefCell},
     collections::BTreeSet,
@@ -229,6 +230,13 @@ impl Controls {
 type RetryAnswer<'a> = Pin<Box<dyn Future<Output = Result<RetryChoice, Error>> + 'a>>;
 type RetryCallback<'a> = Box<dyn FnMut(TileAcquisition) -> RetryAnswer<'a> + 'a>;
 
+/// A graphical host owns the pending answer and publication of optional thumbnails.
+pub struct ImageSelection<'a> {
+    pub answer: Pin<Box<dyn Future<Output = Result<u32, Error>> + 'a>>,
+    pub preview: Box<dyn FnMut(u32, String) + 'a>,
+}
+type ImageChooser<'a> = Box<dyn FnMut(Catalog) -> Result<ImageSelection<'a>, Error> + 'a>;
+
 struct PendingPixels {
     id: u32,
     placement: TilePlacement,
@@ -255,6 +263,7 @@ pub struct NativeHost<'a> {
     progress: RefCell<Box<dyn FnMut(Progress) + 'a>>,
     last_progress: RefCell<Progress>,
     retry: RefCell<Option<RetryCallback<'a>>>,
+    image_chooser: RefCell<Option<ImageChooser<'a>>>,
     approved_attempt: Cell<u32>,
     retry_pending: Cell<bool>,
     published: RefCell<Option<Publication>>,
@@ -330,6 +339,7 @@ impl<'a> NativeHost<'a> {
             progress: RefCell::new(Box::new(|_| {})),
             last_progress: RefCell::new(Progress::default()),
             retry: RefCell::new(None),
+            image_chooser: RefCell::new(None),
             approved_attempt: Cell::new(0),
             retry_pending: Cell::new(false),
             published: RefCell::new(None),
@@ -346,6 +356,13 @@ impl<'a> NativeHost<'a> {
 
     pub fn on_retry(&self, callback: impl FnMut(TileAcquisition) -> RetryAnswer<'a> + 'a) {
         *self.retry.borrow_mut() = Some(Box::new(callback));
+    }
+
+    pub fn on_choose_image(
+        &self,
+        callback: impl FnMut(Catalog) -> Result<ImageSelection<'a>, Error> + 'a,
+    ) {
+        *self.image_chooser.borrow_mut() = Some(Box::new(callback));
     }
 
     async fn approve_retry(&self, request: &TileAcquisition) -> Result<(), Error> {
@@ -1283,12 +1300,7 @@ impl Host for NativeHost<'_> {
     }
 
     async fn choose_image(&self, catalog: Catalog) -> Result<u32, Error> {
-        let last = catalog
-            .entries
-            .len()
-            .checked_sub(1)
-            .ok_or(Error::PlanEmpty)?;
-        Ok(self.options.image_index.unwrap_or(0).min(last) as u32)
+        self.select_image(catalog).await
     }
 
     async fn choose_level(&self, image: Image) -> Result<u32, Error> {
@@ -1480,6 +1492,8 @@ mod tests {
     fn configured_choices_preserve_native_defaults_caps_and_precedence() {
         let image = Image {
             title: None,
+            source_url: None,
+            preview: None,
             format: "test".into(),
             size: None,
             levels: [None, Some(1), Some(256), Some(512)]
@@ -1522,6 +1536,8 @@ mod tests {
                     entries: vec![
                         CatalogEntry::ImageRequest(ImageRequest {
                             title: None,
+                            size: None,
+                            preview: None,
                             uri: "info.json".into(),
                         }),
                         CatalogEntry::Image(image.clone()),

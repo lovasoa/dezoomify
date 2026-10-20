@@ -100,6 +100,35 @@ test("a replacement invocation ignores late progress, output and history from it
   await act(() => h.app.dispose());
 });
 
+test("catalog choices render metadata and resume with the selected image index", async () => {
+  const h = harness();
+  let run, selected;
+  act(() => {
+    run = h.app.run("https://museum.test/catalog");
+  });
+  await tick();
+  const entry = {
+    kind: "image",
+    title: "Painting",
+    sourceUrl: "https://images.test/painting.dzi",
+    size: { width: 512, height: 256 },
+    levels: [],
+  };
+  act(() => {
+    selected = h.calls[0].host.chooseImage({ entries: [entry, entry] });
+  });
+  await tick();
+  assert.equal(h.root.querySelectorAll(".dz-image-row").length, 2);
+  assert.match(h.root.textContent, /512 × 256 px/);
+  assert.match(h.root.textContent, /https:\/\/images.test\/painting.dzi/);
+  act(() => click(h.root.querySelector('[data-dz-image-index="1"]')));
+  assert.equal(await selected, 1);
+  assert.equal(h.root.querySelector(".dz-image-picker"), null);
+  act(() => h.calls[0].resolve(output));
+  await act(() => run);
+  await act(() => h.app.dispose());
+});
+
 test("discovery recovery belongs to the invocation and replacement waits for its cleanup", async () => {
   let finishRecovery;
   const h = harness(

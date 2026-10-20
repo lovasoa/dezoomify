@@ -4,6 +4,7 @@
     "identifier": "dev.ophir.dezoomify"
   },
   "commands": [
+    "answer_image",
     "answer_retry",
     "cancel_job",
     "dezoomify",
@@ -41,6 +42,7 @@
     "iiif-dir"
   ],
   "eventChannels": [
+    "dezoomify://image-choice",
     "dezoomify://progress",
     "dezoomify://registered",
     "dezoomify://retry"

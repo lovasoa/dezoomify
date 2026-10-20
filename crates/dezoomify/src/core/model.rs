@@ -60,6 +60,37 @@ pub struct TileSpec {
     pub role: TileRole,
 }
 
+impl TileSpec {
+    pub(crate) fn into_tile(self, canvas: Option<Size>) -> crate::model::Tile {
+        use crate::model::{Point, RequestPurpose, ResourceRequest, Tile, TilePlacement};
+        Tile {
+            index: self.ordinal,
+            request: ResourceRequest {
+                uri: self.request.uri,
+                headers: self.request.headers,
+                purpose: if self.role.probe {
+                    RequestPurpose::Probe
+                } else {
+                    RequestPurpose::Tile
+                },
+            },
+            placement: TilePlacement {
+                position: Point {
+                    x: self.destination.x,
+                    y: self.destination.y,
+                },
+                expected_size: self.expected_size.map(|size| Size {
+                    width: size.x,
+                    height: size.y,
+                }),
+                canvas,
+                processing: self.processing,
+                role: self.role,
+            },
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 #[doc(hidden)]
 pub struct ResolvedLevel {
@@ -248,6 +279,8 @@ pub struct ResolvedImage {
 pub struct DeferredResource {
     pub uri: String,
     pub title: Option<String>,
+    pub size: Option<Size>,
+    pub preview: Option<crate::model::Tile>,
     pub warnings: Vec<String>,
 }
 
@@ -265,6 +298,8 @@ impl DiscoveredEntry {
         Self::Deferred(DeferredResource {
             uri: uri.into(),
             title,
+            size: None,
+            preview: None,
             warnings,
         })
     }
@@ -320,6 +355,8 @@ impl DiscoveryCatalog {
                         PublicCatalogEntry::ImageRequest(ImageRequest {
                             title: image.title.clone(),
                             uri: image.uri.clone(),
+                            size: image.size.clone(),
+                            preview: image.preview.clone(),
                         })
                     }
                 })
@@ -375,26 +412,51 @@ impl From<&ResolvedImage> for Image {
                 }),
             })
             .collect();
-        let size = levels.iter().filter_map(|level| level.size.as_ref()).fold(
-            None,
-            |largest: Option<Size>, size| {
-                Some(Size {
-                    width: largest
-                        .as_ref()
-                        .map_or(size.width, |value| value.width.max(size.width)),
-                    height: largest
-                        .as_ref()
-                        .map_or(size.height, |value| value.height.max(size.height)),
-                })
-            },
-        );
+        let size = levels
+            .iter()
+            .filter_map(|level| level.size.as_ref())
+            .max_by_key(|size| u64::from(size.width) * u64::from(size.height))
+            .cloned();
         Self {
             title: image.title.clone(),
+            source_url: image.source_url.clone(),
+            preview: image_preview(image),
             format: image.format.to_string(),
             size,
             levels,
         }
     }
+}
+
+pub(crate) fn image_preview(image: &ResolvedImage) -> Option<crate::model::Tile> {
+    let mut candidates: Vec<_> = image
+        .levels
+        .iter()
+        .filter_map(|level| {
+            let grid = match &level.source {
+                TileSource::Grid(grid) => grid,
+                TileSource::Adaptive(source) => source.declared_grid()?,
+                _ => return None,
+            };
+            if grid.count() == 1 {
+                let size = grid.image_size();
+                (size.x > 0 && size.y > 0 && size.x <= 1024 && size.y <= 1024)
+                    .then_some((size, grid))
+            } else {
+                None
+            }
+        })
+        .collect();
+    candidates.sort_by_key(|(size, _)| size.area());
+    let (size, grid) = candidates
+        .iter()
+        .find(|(size, _)| size.x.max(size.y) >= 160)
+        .or_else(|| candidates.last())?;
+    let tile = grid.tiles_row_major().next()?.ok()?;
+    Some(tile.into_tile(Some(Size {
+        width: size.x,
+        height: size.y,
+    })))
 }
 
 #[cfg(test)]
@@ -484,5 +546,39 @@ mod tests {
         };
         assert!(image.levels.is_empty());
         assert_eq!(image.warnings, ["invalid scene"]);
+    }
+
+    #[test]
+    fn previews_choose_useful_complete_tiles_with_bounded_geometry() {
+        let grid = |size, tile_size| {
+            ResolvedLevel::grid(Vec2d::square(size), Vec2d::square(tile_size), move |_| {
+                Request::new(format!("memory://level/{size}"))
+            })
+            .unwrap()
+        };
+        let image = ResolvedImage {
+            source_url: Some("memory://catalog".into()),
+            levels: vec![grid(1, 256), grid(128, 256), grid(256, 256), grid(512, 256)],
+            ..Default::default()
+        };
+        let public = Image::from(&image);
+        let preview = public.preview.unwrap();
+        assert_eq!(preview.request.uri, "memory://level/256");
+        assert_eq!(preview.placement.canvas.unwrap().width, 256);
+        assert_eq!(public.size.unwrap().width, 512);
+        assert_eq!(public.source_url.as_deref(), Some("memory://catalog"));
+        let smaller = ResolvedImage {
+            levels: vec![grid(1, 256), grid(128, 256)],
+            ..Default::default()
+        };
+        assert_eq!(
+            image_preview(&smaller).unwrap().request.uri,
+            "memory://level/128"
+        );
+        let unavailable = ResolvedImage {
+            levels: vec![grid(512, 256), grid(2048, 2048)],
+            ..Default::default()
+        };
+        assert!(image_preview(&unavailable).is_none());
     }
 }
