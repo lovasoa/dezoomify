@@ -1524,32 +1524,12 @@ where
     let mut diagnostics = Vec::new();
     let mut blocked = Vec::new();
     let mut branch = roots.len();
-    let mut loaded_catalog = None;
     loop {
         let candidates = tier_candidates(&mut roots, specs);
-        let evidence = candidates.first().map(|(rank, ..)| rank.0);
         if let Some(catalog) = resources
             .resolve_tier(candidates, &mut blocked, &mut diagnostics)
             .await?
         {
-            if evidence == Some(0) {
-                loaded_catalog = Some(catalog);
-            } else {
-                return Ok(if catalog.len() > 1 {
-                    catalog
-                } else {
-                    loaded_catalog.unwrap_or(catalog)
-                });
-            }
-        }
-        // A loaded viewer can expose only its current page. Give the explicit
-        // source a chance to declare the complete catalog, without following
-        // unrelated observations, frames, or interactive access first.
-        if let Some(catalog) = loaded_catalog.take() {
-            if roots.iter().any(|(evidence, ..)| *evidence == 1) {
-                loaded_catalog = Some(catalog);
-                continue;
-            }
             return Ok(catalog);
         }
         resources.follow_pages(&mut roots, &mut visited, &mut branch);

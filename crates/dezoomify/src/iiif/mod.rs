@@ -7,7 +7,7 @@ use url::Url;
 
 use crate::Vec2d;
 use crate::core::discovery::{
-    Metadata, any, css, html_matches, image_url, js_matches, json_metadata, metadata, url_matches,
+    Metadata, any, html_matches, image_url, js_matches, json_metadata, metadata, url_matches,
     url_suffix, viewer,
 };
 use crate::core::{
@@ -67,11 +67,6 @@ const ROUTES: &[DiscoveryRoute] = &[
         .resolve_metadata(manifest_parameter)
         .then_decode(decode),
     onb::ROUTE.then_decode(decode),
-    viewer(css(
-        "link[rel='alternate'][type^='application/ld+json'][href]",
-    ))
-    .follow_attribute("href")
-    .then_decode(decode),
     contentdm::RECORD_ROUTE.then_decode(contentdm::follow_info),
     contentdm::METADATA_ROUTE,
     micrio::ROUTE.then_decode(decode),
