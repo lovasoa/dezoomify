@@ -4,6 +4,11 @@
 // the `tauri` feature the real desktop window runs.
 
 #![deny(clippy::unwrap_used)]
+// Prevent an additional console window in Windows GUI release builds.
+#![cfg_attr(
+    all(windows, feature = "tauri", not(debug_assertions)),
+    windows_subsystem = "windows"
+)]
 
 #[cfg(feature = "tauri")]
 fn main() {
