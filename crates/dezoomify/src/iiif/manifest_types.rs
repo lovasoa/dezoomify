@@ -1,6 +1,7 @@
 use serde::Deserialize;
 use std::collections::HashMap;
 
+use super::tile_info::{Context, Profile, StringOrArray};
 use crate::core::resolve_relative;
 
 // Helper for potentially multilingual labels
@@ -76,14 +77,19 @@ impl MetadataEntry {
 // (`id`/`type`/`label`/`items`); renaming them would break serde
 // mapping, so the shared-prefix lint stays allowed here.
 #[allow(clippy::struct_field_names)]
-#[derive(Debug, Deserialize, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Deserialize, Clone, PartialEq, Default)]
 pub struct Manifest {
     #[serde(default, rename = "@context", skip_deserializing)]
     pub context: Option<String>, // Can be string or array of strings
     #[serde(default)] // If ID is missing, we might use the fetch URL as a fallback later
     pub id: String,
-    #[serde(default, rename = "type", alias = "@type")]
-    pub manifest_type: serde_json::Value,
+    #[serde(
+        default,
+        rename = "type",
+        alias = "@type",
+        deserialize_with = "manifest_type"
+    )]
+    pub manifest_type: String,
     #[serde(default)]
     pub label: IiifLabel,
     pub items: Vec<Canvas>,
@@ -98,7 +104,7 @@ pub struct Manifest {
 // (`id`/`type`/`label`/`items`); renaming them would break serde
 // mapping, so the shared-prefix lint stays allowed here.
 #[allow(clippy::struct_field_names)]
-#[derive(Debug, Deserialize, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Deserialize, Clone, PartialEq, Default)]
 pub struct Canvas {
     #[serde(default, alias = "@id")]
     pub id: String,
@@ -116,7 +122,7 @@ pub struct Canvas {
 // (`id`/`type`/`label`/`items`); renaming them would break serde
 // mapping, so the shared-prefix lint stays allowed here.
 #[allow(clippy::struct_field_names)]
-#[derive(Debug, Deserialize, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Deserialize, Clone, PartialEq, Default)]
 pub struct AnnotationPage {
     #[serde(default, alias = "@id")]
     pub id: String,
@@ -130,7 +136,7 @@ pub struct AnnotationPage {
 // (`id`/`type`/`label`/`items`); renaming them would break serde
 // mapping, so the shared-prefix lint stays allowed here.
 #[allow(clippy::struct_field_names)]
-#[derive(Debug, Deserialize, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Deserialize, Clone, PartialEq, Default)]
 pub struct Annotation {
     #[serde(alias = "@id")]
     pub id: Option<String>,
@@ -141,82 +147,80 @@ pub struct Annotation {
         deserialize_with = "resource_type"
     )]
     pub annotation_type: String, // Should be "Annotation"
-    pub motivation: Option<serde_json::Value>, // Web Annotation permits multiple motivations.
+    pub motivation: Option<StringOrArray>, // Web Annotation permits multiple motivations.
     #[serde(default)] // Body could be missing or not an image
     pub body: AnnotationBody,
     // target: Option<Target>, // Target is usually the canvas; can be string or object
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct AnnotationBody {
-    images: Vec<ImageBody>,
+#[derive(Debug, Deserialize, Clone, PartialEq, Default)]
+#[serde(untagged)]
+pub enum AnnotationBody {
+    Multiple(Vec<Self>),
+    Resource(Box<BodyResource>),
+    Ignored(serde::de::IgnoredAny),
+    #[default]
+    Empty,
+}
+
+#[derive(Debug, Deserialize, Clone, PartialEq)]
+pub struct BodyResource {
+    #[serde(flatten)]
+    image: ImageBody,
+    #[serde(default)]
+    default: AnnotationBody,
+    #[serde(default)]
+    item: AnnotationBody,
+    #[serde(default)]
+    items: AnnotationBody,
+    #[serde(default)]
+    source: AnnotationBody,
+    #[serde(default)]
+    full: AnnotationBody,
 }
 
 impl AnnotationBody {
     /// The image content carried by this annotation, including alternatives and
     /// the source of a selected image region. Unrelated content is ignored.
-    fn images(&self) -> &[ImageBody] {
-        &self.images
+    fn images(&self) -> Vec<&ImageBody> {
+        let mut images = Vec::new();
+        self.collect_images(&mut images);
+        images
     }
-}
 
-impl<'de> Deserialize<'de> for AnnotationBody {
-    fn deserialize<D: serde::Deserializer<'de>>(decoder: D) -> Result<Self, D::Error> {
-        fn collect(value: serde_json::Value, output: &mut AnnotationBody) {
-            match value {
-                serde_json::Value::Array(values) => {
-                    for value in values {
-                        collect(value, output);
+    fn collect_images<'a>(&'a self, images: &mut Vec<&'a ImageBody>) {
+        match self {
+            Self::Multiple(bodies) => {
+                for body in bodies {
+                    body.collect_images(images);
+                }
+            }
+            Self::Resource(body) => match body.image.image_type.as_str() {
+                "Choice" | "oa:Choice" => {
+                    for child in [&body.default, &body.item, &body.items] {
+                        child.collect_images(images);
                     }
                 }
-                serde_json::Value::Object(mut body) => {
-                    let kind = body.get("type").or_else(|| body.get("@type"));
-                    if kind.is_some_and(|kind| type_is(kind, &["Choice", "oa:Choice"])) {
-                        for key in ["default", "item", "items"] {
-                            if let Some(value) = body.remove(key) {
-                                collect(value, output);
-                            }
-                        }
-                    } else if kind.is_some_and(|kind| {
-                        type_is(kind, &["SpecificResource", "oa:SpecificResource"])
-                    }) {
-                        for key in ["source", "full"] {
-                            if let Some(value) = body.remove(key) {
-                                collect(value, output);
-                            }
-                        }
-                    } else if kind.is_none_or(|kind| {
-                        type_is(
-                            kind,
-                            &[
-                                "Image",
-                                "dctypes:Image",
-                                "http://purl.org/dc/dcmitype/Image",
-                            ],
-                        )
-                    }) && let Ok(image) =
-                        serde_json::from_value(serde_json::Value::Object(body))
-                    {
-                        output.images.push(image);
+                "SpecificResource" | "oa:SpecificResource" => {
+                    for child in [&body.source, &body.full] {
+                        child.collect_images(images);
                     }
+                }
+                "" | "Image" | "dctypes:Image" | "http://purl.org/dc/dcmitype/Image" => {
+                    images.push(&body.image);
                 }
                 _ => {}
-            }
+            },
+            Self::Ignored(_) | Self::Empty => {}
         }
-        let mut output = Self::default();
-        collect(serde_json::Value::deserialize(decoder)?, &mut output);
-        Ok(output)
     }
 }
 
-pub(super) fn type_is(value: &serde_json::Value, names: &[&str]) -> bool {
-    value.as_str().is_some_and(|value| names.contains(&value))
-        || value
-            .as_array()
-            .is_some_and(|values| values.iter().any(|value| type_is(value, names)))
+fn type_is(value: &StringOrArray, names: &[&str]) -> bool {
+    value.matches(|value| names.contains(&value))
 }
 
-fn painting(motivation: Option<&serde_json::Value>) -> bool {
+fn painting(motivation: Option<&StringOrArray>) -> bool {
     motivation.is_none_or(|value| {
         type_is(
             value,
@@ -238,6 +242,10 @@ fn resource_type<'de, D: serde::Deserializer<'de>>(decoder: D) -> Result<String,
                 | "http://purl.org/dc/dcmitype/Image"
                 | "Annotation"
                 | "oa:Annotation"
+                | "Choice"
+                | "oa:Choice"
+                | "SpecificResource"
+                | "oa:SpecificResource"
         )
     })
 }
@@ -252,33 +260,54 @@ fn preferred_type<'de, D: serde::Deserializer<'de>>(
     decoder: D,
     preferred: impl Fn(&str) -> bool,
 ) -> Result<String, D::Error> {
-    let value = serde_json::Value::deserialize(decoder)?;
-    match value {
-        serde_json::Value::String(value) => Ok(value),
-        serde_json::Value::Array(values) => Ok(values
-            .iter()
-            .filter_map(serde_json::Value::as_str)
-            .find(|value| preferred(value))
-            .or_else(|| values.first().and_then(serde_json::Value::as_str))
-            .unwrap_or_default()
-            .to_owned()),
-        _ => Err(serde::de::Error::custom(
-            "resource type must be a string or array",
-        )),
+    let types = StringOrArray::deserialize(decoder)?;
+    Ok(types
+        .strings()
+        .iter()
+        .find(|value| preferred(value))
+        .or_else(|| types.strings().first())
+        .cloned()
+        .unwrap_or_default())
+}
+
+fn manifest_type<'de, D: serde::Deserializer<'de>>(decoder: D) -> Result<String, D::Error> {
+    let types = StringOrArray::deserialize(decoder)?;
+    if matches!(types, StringOrArray::None) {
+        return Ok(String::new());
     }
+    types
+        .strings()
+        .iter()
+        .find(|value| matches!(value.as_str(), "Manifest" | "sc:Manifest"))
+        .cloned()
+        .ok_or_else(|| serde::de::Error::custom("not an IIIF presentation manifest"))
 }
 
 fn image_services<'de, D: serde::Deserializer<'de>>(
     decoder: D,
 ) -> Result<Vec<ImageService>, D::Error> {
-    let value = serde_json::Value::deserialize(decoder)?;
-    let values = match value {
-        serde_json::Value::Array(values) => values,
-        value => vec![value],
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Service {
+        Image(Box<ImageService>),
+        Other(serde::de::IgnoredAny),
+    }
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Services {
+        Multiple(Vec<Service>),
+        Single(Service),
+    }
+    let services = match Services::deserialize(decoder)? {
+        Services::Multiple(services) => services,
+        Services::Single(service) => vec![service],
     };
-    Ok(values
+    Ok(services
         .into_iter()
-        .filter_map(|value| serde_json::from_value(value).ok())
+        .filter_map(|service| match service {
+            Service::Image(image) => Some(*image),
+            Service::Other(_) => None,
+        })
         .collect())
 }
 
@@ -304,22 +333,27 @@ pub struct ImageBody {
 #[derive(Debug, Deserialize, Clone, PartialEq, Eq, Default)]
 pub struct ImageService {
     #[serde(default, rename = "@context")]
-    pub context: serde_json::Value,
+    pub context: Context,
     #[serde(alias = "@id")] // IIIF Image API 2 uses "@id"
     #[serde(default)]
     pub id: String, // IIIF Image API 3 uses "id"
     #[serde(alias = "@type")] // IIIF Image API 2 uses "@type"
     #[serde(default, rename = "type", deserialize_with = "service_type")]
     pub service_type: String, // e.g. "ImageService2", "ImageService3"
-    pub profile: Option<serde_json::Value>,
+    pub profile: Option<Profile>,
     pub width: Option<u32>,
     pub height: Option<u32>,
 }
 
-#[derive(Debug, Deserialize, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Deserialize, Clone, PartialEq, Default)]
 pub struct LegacyManifest {
-    #[serde(default, rename = "@type", alias = "type")]
-    pub manifest_type: serde_json::Value,
+    #[serde(
+        default,
+        rename = "@type",
+        alias = "type",
+        deserialize_with = "manifest_type"
+    )]
+    pub manifest_type: String,
     #[serde(default)]
     pub label: IiifLabel,
     pub sequences: Vec<LegacySequence>,
@@ -327,29 +361,29 @@ pub struct LegacyManifest {
     pub metadata: Option<Vec<MetadataEntry>>,
 }
 
-#[derive(Debug, Deserialize, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Deserialize, Clone, PartialEq, Default)]
 pub struct LegacySequence {
     #[serde(default, rename = "@type", alias = "type")]
-    pub sequence_type: serde_json::Value,
+    pub sequence_type: StringOrArray,
     #[serde(default)]
     pub canvases: Vec<LegacyCanvas>,
 }
 
-#[derive(Debug, Deserialize, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Deserialize, Clone, PartialEq, Default)]
 pub struct LegacyCanvas {
     #[serde(default, rename = "@type", alias = "type")]
-    pub canvas_type: serde_json::Value,
+    pub canvas_type: StringOrArray,
     #[serde(default)]
     pub label: IiifLabel,
     #[serde(default)]
     pub images: Vec<LegacyAnnotation>,
 }
 
-#[derive(Debug, Deserialize, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Deserialize, Clone, PartialEq, Default)]
 pub struct LegacyAnnotation {
     #[serde(default, rename = "@type", alias = "type")]
-    pub annotation_type: serde_json::Value,
-    pub motivation: Option<serde_json::Value>,
+    pub annotation_type: StringOrArray,
+    pub motivation: Option<StringOrArray>,
     #[serde(default)]
     pub resource: AnnotationBody,
 }
@@ -376,8 +410,8 @@ fn declared_size(width: Option<u32>, height: Option<u32>) -> Option<crate::model
     (width > 0 && height > 0).then_some(crate::model::Size { width, height })
 }
 
-fn legacy_type(value: &serde_json::Value, names: &[&str]) -> bool {
-    value.is_null() || type_is(value, names)
+fn legacy_type(value: &StringOrArray, names: &[&str]) -> bool {
+    matches!(value, StringOrArray::None) || type_is(value, names)
 }
 
 fn image_service_info_uri(manifest_url: &str, service_id: &str) -> String {
@@ -422,10 +456,7 @@ impl ImageService {
         // can share this property and must not be inferred from their ID alone.
         self.service_type.is_empty()
             && (super::tile_info::image_context(&self.context)
-                || self
-                    .profile
-                    .as_ref()
-                    .is_some_and(super::tile_info::image_profile))
+                || self.profile.as_ref().is_some_and(Profile::is_image_profile))
     }
 }
 

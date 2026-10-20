@@ -8,13 +8,69 @@ use serde::{Deserialize, Serialize};
 use crate::Vec2d;
 use crate::core::resolve_relative;
 
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
+#[serde(untagged)]
+pub enum StringOrArray {
+    String(String),
+    Array(Vec<String>),
+    #[default]
+    None,
+}
+
+impl StringOrArray {
+    pub(super) fn strings(&self) -> &[String] {
+        match self {
+            Self::String(value) => std::slice::from_ref(value),
+            Self::Array(values) => values,
+            Self::None => &[],
+        }
+    }
+
+    pub(super) fn matches(&self, predicate: impl Fn(&str) -> bool) -> bool {
+        self.strings().iter().any(|value| predicate(value))
+    }
+}
+
+impl From<&str> for StringOrArray {
+    fn from(value: &str) -> Self {
+        Self::String(value.into())
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
+#[serde(untagged)]
+pub enum Context {
+    Uri(String),
+    Array(Vec<Context>),
+    // JSON-LD extension definitions are arbitrary JSON, not IIIF properties.
+    Inline(std::collections::HashMap<String, serde_json::Value>),
+    #[default]
+    None,
+}
+
+impl Context {
+    fn matches(&self, predicate: impl Fn(&str) -> bool + Copy) -> bool {
+        match self {
+            Self::Uri(uri) => predicate(uri),
+            Self::Array(contexts) => contexts.iter().any(|context| context.matches(predicate)),
+            Self::Inline(_) | Self::None => false,
+        }
+    }
+}
+
+impl From<&str> for Context {
+    fn from(value: &str) -> Self {
+        Self::Uri(value.into())
+    }
+}
+
 #[derive(Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ImageInfo {
     #[serde(rename = "@context", skip_serializing_if = "Option::is_none")]
-    pub context: Option<serde_json::Value>,
+    pub context: Option<Context>,
     #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
     #[serde(alias = "@type")]
-    pub iiif_type: Option<serde_json::Value>,
+    pub iiif_type: Option<StringOrArray>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub protocol: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -95,13 +151,13 @@ impl ImageInfo {
             .cloned()
             .unwrap_or_else(|| {
                 if self.iiif_type.as_ref().is_some_and(|value| {
-                    json_ld_matches(value, |value| image_service_version(value) == Some(1))
+                    value.matches(|value| image_service_version(value) == Some(1))
                 }) || (self.identifier.is_some()
                     && self.iiif_type.is_none()
                     && self.context.is_none()
                     && self.protocol.is_none())
                     || self.context.as_ref().is_some_and(|context| {
-                        json_ld_matches(context, |value| {
+                        context.matches(|value| {
                             matches!(
                                 without_scheme(value),
                                 "library.stanford.edu/iiif/image-api/1.1/context.json"
@@ -155,12 +211,13 @@ impl ImageInfo {
 
     #[must_use]
     pub fn supports_v3_size_upscaling(&self) -> bool {
-        self.iiif_type.as_ref().is_some_and(|value| {
-            json_ld_matches(value, |value| image_service_version(value) == Some(3))
-        }) && self
-            .extra_features
+        self.iiif_type
             .as_ref()
-            .is_some_and(|features| features.iter().any(|feature| feature == "sizeUpscaling"))
+            .is_some_and(|value| value.matches(|value| image_service_version(value) == Some(3)))
+            && self
+                .extra_features
+                .as_ref()
+                .is_some_and(|features| features.iter().any(|feature| feature == "sizeUpscaling"))
     }
 
     #[must_use]
@@ -210,11 +267,11 @@ impl ImageInfo {
 
     pub(super) fn has_presentation_signature(&self) -> bool {
         self.iiif_type.as_ref().is_some_and(|value| {
-            json_ld_matches(value, |value| {
+            value.matches(|value| {
                 matches!(value, "Manifest" | "sc:Manifest" | "Canvas" | "sc:Canvas")
             })
         }) || self.context.as_ref().is_some_and(|value| {
-            json_ld_matches(value, |value| {
+            value.matches(|value| {
                 matches!(
                     without_scheme(value),
                     "iiif.io/api/presentation/2/context.json"
@@ -250,7 +307,7 @@ impl ImageInfo {
             || self.height == 0
             || self.has_presentation_signature()
             || self.iiif_type.as_ref().is_some_and(|value| {
-                json_ld_matches(value, |value| {
+                value.matches(|value| {
                     matches!(value, "ImageProfile" | "iiif:ImageProfile")
                         || matches!(
                             without_scheme(value),
@@ -267,7 +324,7 @@ impl ImageInfo {
             .is_some_and(|value| without_scheme(value) == "iiif.io/api/image")
             || self.context.as_ref().is_some_and(image_context)
             || self.iiif_type.as_ref().is_some_and(|value| {
-                json_ld_matches(value, |value| {
+                value.matches(|value| {
                     image_service_version(value).is_some() || value == "iiif:Image"
                 })
             })
@@ -332,8 +389,8 @@ pub(super) fn image_service_version(value: &str) -> Option<u8> {
     }
 }
 
-pub(super) fn image_context(value: &serde_json::Value) -> bool {
-    json_ld_matches(value, |value| {
+pub(super) fn image_context(value: &Context) -> bool {
+    value.matches(|value| {
         matches!(
             without_scheme(value),
             "iiif.io/api/image/1/context.json"
@@ -342,10 +399,6 @@ pub(super) fn image_context(value: &serde_json::Value) -> bool {
                 | "library.stanford.edu/iiif/image-api/1.1/context.json"
         )
     })
-}
-
-pub(super) fn image_profile(value: &serde_json::Value) -> bool {
-    json_ld_matches(value, image_profile_reference)
 }
 
 fn image_profile_reference(reference: &str) -> bool {
@@ -357,17 +410,6 @@ fn without_scheme(value: &str) -> &str {
         .strip_prefix("http://")
         .or_else(|| value.strip_prefix("https://"))
         .unwrap_or("")
-}
-
-fn json_ld_matches(value: &serde_json::Value, predicate: impl Fn(&str) -> bool) -> bool {
-    match value {
-        serde_json::Value::String(value) => predicate(value),
-        serde_json::Value::Array(values) => values
-            .iter()
-            .filter_map(serde_json::Value::as_str)
-            .any(predicate),
-        _ => false,
-    }
 }
 
 fn rewrite_default_port_origin(resolved: &str, info_uri: &str, raw_id: &str) -> String {
@@ -486,7 +528,7 @@ fn update_max<T: Ord + Copy>(target: &mut Option<T>, new: Option<T>) {
 }
 
 impl Profile {
-    fn is_image_profile(&self) -> bool {
+    pub(super) fn is_image_profile(&self) -> bool {
         match self {
             Self::Reference(reference) => image_profile_reference(reference),
             Self::Info(_) => false,
