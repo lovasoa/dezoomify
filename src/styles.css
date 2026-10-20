@@ -6,3 +6,37 @@
   display: flex;
   flex-direction: column;
 }
+
+.dz-legacy-notice {
+  position: fixed;
+  z-index: 10;
+  bottom: 1rem;
+  right: 1rem;
+  width: min(20rem, calc(100vw - 2rem));
+  padding: 1rem;
+  border: 1px solid var(--dz-surface-border);
+  border-radius: var(--dz-radius);
+  background: var(--dz-surface-gradient);
+  box-shadow: var(--dz-surface-shadow);
+  color: var(--dz-text-primary);
+  font-size: 0.875rem;
+}
+
+.dz-legacy-notice[hidden] {
+  display: none;
+}
+
+.dz-legacy-notice strong {
+  display: block;
+  padding-right: 2rem;
+}
+
+.dz-legacy-notice p {
+  margin: 0.5rem 0 0;
+}
+
+#dz-legacy-notice-close {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+}

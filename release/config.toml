@@ -6,8 +6,8 @@ id = "iapjjopjejpelnfdonefbffahmcndfbm"
 store_url = "https://chrome.google.com/webstore/detail/dezoomify/iapjjopjejpelnfdonefbffahmcndfbm"
 # Privacy policy URL set in the Chromium store listing (dashboard field; the
 # store API cannot set it). Keep in sync with privacy.html, which the website
-# build serves under /beta/ (the .html link 308-redirects to this URL).
-privacy_policy_url = "https://dezoomify.ophir.dev/beta/privacy"
+# build serves at /privacy (the .html link 308-redirects to this URL).
+privacy_policy_url = "https://dezoomify.ophir.dev/privacy"
 
 [extension.firefox]
 # AMO listing identity: the EXISTING addons.mozilla.org listing for Dezoomify

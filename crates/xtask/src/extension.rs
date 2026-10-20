@@ -7,7 +7,7 @@ use super::content::{EXT_ZIP_FAIL_BYTES, WASM_FAIL_BYTES};
 use std::process::Command;
 
 /// Glue-JS size budget (bytes): the wasm glue has no `check` equivalent
-/// (it ships inside the `dist/beta` JS budget there) so its build-time line
+/// (it ships inside the `dist/assets` JS budget there) so its build-time line
 /// stays local. Zip and wasm-binary budgets reuse the `check` fail lines
 /// above so a build never produces what `check` rejects (see
 /// `check_size_budget` uses below).

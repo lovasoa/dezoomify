@@ -46,7 +46,7 @@ test("website saves a no-CORS ZIF URL through real public-data relay policies", 
       if (request.url() === publicUrl) directFailures.push(request.failure().errorText);
     });
     await page.route("**/api/proxy", (route) => relayFixtureRequest(route, source, ADDR, relayed));
-    await page.goto(`${ADDR}/beta/`);
+    await page.goto(`${ADDR}/`);
     await page.locator("#dz-url-input").fill(publicUrl);
     await page.getByRole("button", { name: /find image/i }).click();
     await expect(page.locator(".dz-completed-section, .dz-error-section, .dz-retry-section"))
@@ -77,9 +77,26 @@ test("website saves a no-CORS ZIF URL through real public-data relay policies", 
   }
 });
 
+test("website notice links to the working legacy app and can be dismissed", async ({ page }) => {
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.goto(`${ADDR}/`);
+  const notice = page.getByRole("complementary", { name: "Looking for the old Dezoomify?" });
+  await expect(notice).toBeVisible();
+  await notice.getByRole("link", { name: "the legacy site" }).click();
+  await expect(page).toHaveURL(`${ADDR}/legacy/`);
+  await expect(page.locator("#url")).toBeVisible();
+  await expect(page.getByText("Try the new Dezoomify")).toHaveCount(0);
+  assert.deepEqual(errors, [], "legacy scripts still initialize from the relocated directory");
+  await page.goto(`${ADDR}/`);
+  await notice.getByRole("button", { name: "Close", exact: true }).click();
+  await expect(notice).toBeHidden();
+  await expect(page.locator("#dz-url-input")).toBeVisible();
+});
+
 for (const fixture of formats) {
   test(`website saves ${fixture.name} pixels`, async ({ page }) => {
-    await page.goto(`${ADDR}/beta/`);
+    await page.goto(`${ADDR}/`);
     await page.locator("#dz-url-input").fill(ADDR + fixture.input);
     await page.getByRole("button", { name: /find image/i }).click();
     await page.waitForFunction(chooseFixtureImages, fixture.choice, { timeout: 30000 });
@@ -112,7 +129,7 @@ test("webapp discovers, downloads, assembles, and saves a real DZI pyramid", asy
     if (route.request().method() === "POST") proxyRequests += 1;
     route.continue();
   });
-  await page.goto(ADDR + "/beta/", { waitUntil: "networkidle" });
+  await page.goto(ADDR + "/", { waitUntil: "networkidle" });
   const input = page.locator("#dz-url-input");
   await expect(input).toBeVisible();
   const url = `${ADDR}/fetch?url=https://fixtures.test/cli/pyramid.dzi`;
@@ -173,7 +190,7 @@ test("webapp discovers, downloads, assembles, and saves a real DZI pyramid", asy
 });
 
 test("webapp fails honestly on a page without a zoomable signal", async ({ page }) => {
-  await page.goto(ADDR + "/beta/", { waitUntil: "networkidle" });
+  await page.goto(ADDR + "/", { waitUntil: "networkidle" });
   const input = page.locator("#dz-url-input");
   await expect(input).toBeVisible();
   const url = `${ADDR}/fetch?url=https://fixtures.test/cli/plain.html`;
@@ -208,7 +225,7 @@ test("FreezoomPack computed Lime paths discover an index and save browser pixels
     contentType: "application/xml",
     body: `<item title="Reported viewer"><item resource="floor" ext="fzp" label="1/1"/></item>`,
   }));
-  await page.goto(`${ADDR}/beta/`, { waitUntil: "networkidle" });
+  await page.goto(`${ADDR}/`, { waitUntil: "networkidle" });
   await page.locator("#dz-url-input").fill(`${ADDR}/fzp/views/reported.html?l=1&amp;n=6`);
   await page.getByRole("button", { name: /find image/i }).click();
   await expect(page.locator(".dz-completed-section")).toBeVisible({ timeout: 60000 });
@@ -239,7 +256,7 @@ for (const [profile, levels] of Object.entries(fzpGolden)) {
           await route.fulfill({ response, body: (await response.text()).replace('min="0"', 'min="1"') });
         });
       }
-      await page.goto(`${ADDR}/beta/`, { waitUntil: "networkidle" });
+      await page.goto(`${ADDR}/`, { waitUntil: "networkidle" });
       await page.locator("#dz-url-input").fill(`${ADDR}/fzp/resources/${profile}/root.xml`);
       await page.getByRole("button", { name: /find image/i }).click();
       await expect(page.locator(".dz-completed-section")).toBeVisible({ timeout: 60000 });
@@ -272,7 +289,7 @@ test("metadata proxy failure reaches the error UI with its complete typed contex
       body: JSON.stringify({ code: "TRANSPORT_HTTP_ERROR", preview: "Cloudflare challenge" }),
     });
   });
-  await page.goto(ADDR + "/beta/", { waitUntil: "networkidle" });
+  await page.goto(ADDR + "/", { waitUntil: "networkidle" });
   await page.locator("#dz-url-input").fill(FAILED_METADATA_URL);
   await page.getByRole("button", { name: /find image/i }).click();
   await expect(page.locator(".dz-error-section")).toBeVisible({ timeout: 30000 });
@@ -324,7 +341,7 @@ test("webapp downloads a Google Arts & Culture image through the metadata proxy"
     },
   );
 
-  await page.goto(ADDR + "/beta/", { waitUntil: "networkidle" });
+  await page.goto(ADDR + "/", { waitUntil: "networkidle" });
   await page.locator("#dz-url-input").fill(ARTS_PAGE_URL);
   await page.getByRole("button", { name: /find image/i }).click();
 
@@ -377,7 +394,7 @@ test("webapp displays CORS-blocked ordinary tiles instead of failing", async ({ 
       }
     },
   );
-  await page.goto(ADDR + "/beta/", { waitUntil: "networkidle" });
+  await page.goto(ADDR + "/", { waitUntil: "networkidle" });
   const url = `${ADDR}/fetch?url=https://fixtures.test/cli/pyramid.dzi`;
   await page.locator("#dz-url-input").fill(url);
   await page.getByRole("button", { name: /find image/i }).click();
@@ -412,7 +429,7 @@ test("webapp follows a deferred IIIF manifest request to the info.json and tiles
       await route.fulfill({ response });
     },
   );
-  await page.goto(ADDR + "/beta/", { waitUntil: "networkidle" });
+  await page.goto(ADDR + "/", { waitUntil: "networkidle" });
   const manifest = `${ADDR}/fetch?url=https://fixtures.test/iiif-presentation/manifest.json`;
   await page.locator("#dz-url-input").fill(manifest);
   await page.getByRole("button", { name: /find image/i }).click();
@@ -452,7 +469,7 @@ test("desktop guidance downloads directly without leaving the website", async ({
     headers: { "content-disposition": 'attachment; filename="dezoomify-test.msi"' },
     body: "Mock installer bytes",
   }));
-  await page.goto(`${ADDR}/beta/`, { waitUntil: "networkidle" });
+  await page.goto(`${ADDR}/`, { waitUntil: "networkidle" });
   await page.locator("#dz-nav-btn-desktop").click();
   const dialog = page.getByRole("dialog");
   const downloads = dialog.locator(".dz-modal-download-box");
@@ -464,7 +481,7 @@ test("desktop guidance downloads directly without leaving the website", async ({
   const pending = page.waitForEvent("download");
   await windows.click();
   expect((await pending).suggestedFilename()).toBe("dezoomify-test.msi");
-  await expect(page).toHaveURL(`${ADDR}/beta/`);
+  await expect(page).toHaveURL(`${ADDR}/`);
   expect(apiRequests).toBe(0);
 });
 
@@ -489,7 +506,7 @@ test("lower resolution opens a desktop handoff with the exact URL and keyboard n
       });
     },
   );
-  await page.goto(ADDR + "/beta/", { waitUntil: "networkidle" });
+  await page.goto(ADDR + "/", { waitUntil: "networkidle" });
   await page.locator("#dz-url-input").fill("https://fixtures.test/resolution/big.dzi");
   await page.getByRole("button", { name: /find image/i }).click();
 
@@ -574,7 +591,7 @@ test("webapp proxy fallback matches the website/proxy-fallback flow contract", a
     (url) => url.host === "fixtures.test" && url.pathname.includes("pyramid_files"),
     async (route) => relayToFixture(route, route.request().url()),
   );
-  await page.goto(ADDR + "/beta/", { waitUntil: "networkidle" });
+  await page.goto(ADDR + "/", { waitUntil: "networkidle" });
   await page.locator("#dz-url-input").fill(METADATA_URL);
   await page.getByRole("button", { name: /find image/i }).click();
 
@@ -652,7 +669,7 @@ test("post-cutover proxy fallback with ordinary tiles keeps the visible transpor
       }
     },
   );
-  await page.goto(ADDR + "/beta/", { waitUntil: "networkidle" });
+  await page.goto(ADDR + "/", { waitUntil: "networkidle" });
   await page.locator("#dz-url-input").fill(METADATA_URL);
   await page.getByRole("button", { name: /find image/i }).click();
 

@@ -321,8 +321,8 @@ fn dev_web(args: &[String]) -> Result<(), String> {
     serve_dist(8080, "dev web")
 }
 
-/// Isolated shared-UI development: same served tree, beta app origin. The
-/// shared UI renders inside the new app at /beta; iterate there, then run
+/// Isolated shared-UI development: same served tree on a separate port. The
+/// shared UI renders inside the website at /; iterate there, then run
 /// `cargo xtask test web` plus the affected integration lane.
 fn dev_ui(args: &[String]) -> Result<(), String> {
     let no_wasm = parse_dev_site_args("dev ui", args)?;

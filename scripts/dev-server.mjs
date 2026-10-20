@@ -103,6 +103,17 @@ export function createDevServerHandler({ staticDir, proxyHandler = handleNodePro
   const absoluteStaticDir = path.resolve(staticDir);
   return async function handler(req, res) {
     const url = new URL(req.url ?? "/", "http://localhost");
+    if (url.pathname === "/beta" || url.pathname.startsWith("/beta/")) {
+      const destination = url.pathname.slice(5).replace(/^\/+/, "/") || "/";
+      res.writeHead(301, { location: destination + url.search });
+      res.end();
+      return;
+    }
+    if (url.pathname === "/legacy") {
+      res.writeHead(301, { location: `/legacy/${url.search}` });
+      res.end();
+      return;
+    }
     if (url.pathname === "/api/proxy") {
       await proxyHandler(req, res);
       return;

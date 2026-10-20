@@ -246,7 +246,7 @@ test("relay exposes the post-redirect upstream URL for relative tile bases", asy
   });
   assert.equal(res.status, 200);
   // Relative tile URLs (krpano galleria_04.tiles/*) resolve against this;
-  // without it the app fell back to an empty base and fetched /beta/* 404s.
+  // without it the app fell back to an empty base and fetched tiles from the app origin, returning 404s.
   assert.equal(res.headers.get("x-proxy-upstream-url"), "https://public.test/galleria_04.xml");
   const exposed = res.headers.get("access-control-expose-headers") ?? "";
   assert.match(exposed.toLowerCase(), /x-proxy-upstream-url/);

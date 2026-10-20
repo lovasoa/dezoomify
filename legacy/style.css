@@ -224,33 +224,3 @@ a:visited {
 div[hidden] {
 	display: none;
 }
-
-#popup {
-	position: fixed;
-	bottom: 20px;
-	right: 20px;
-	font-size: .8em;
-	width: 300px;
-	background:linear-gradient(rgb(227, 222, 222),rgb(236, 231, 231));
-	box-shadow:0 0 8px rgba(200,200,255,0.5);
-	border-radius:3px;
-	color:black;
-	border: 1px solid #a19797;
-	padding: 5px;
-	animation: slidein 1s;
-	transition: 1s;
-}
-
-#popup > button[title=Close] {
-	position: absolute;
-	right: 3px;
-	padding: 0;
-	border: 0;
-	width: 17px;
-	height: 17px;
-}
-
-@keyframes slidein {
-  from { bottom: -500px; }
-  to { bottom: 20px; }
-}
