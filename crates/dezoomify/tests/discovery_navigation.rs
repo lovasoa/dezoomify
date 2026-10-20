@@ -168,6 +168,8 @@ fn opaque_metadata_and_embedded_objects_remain_discoverable() {
     for bytes in [
         include_bytes!("../../../fixtures/iiif/manifest/manifest.json").as_slice(),
         include_bytes!("../../../fixtures/iiif/legacy-context/manifest.json"),
+        include_bytes!("../../../fixtures/iiif/repeated-metadata/manifest.json"),
+        include_bytes!("../../../fixtures/iiif/mixed-media/manifest.json"),
     ] {
         let bytes = String::from_utf8_lossy(bytes).replace(
             "\"type\": \"Manifest\"",

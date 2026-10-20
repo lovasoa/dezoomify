@@ -1070,7 +1070,7 @@ mod manifest_parsing_tests {
 
     #[test]
     fn repeated_metadata_values_do_not_turn_a_manifest_thumbnail_into_a_service() {
-        let manifest = include_str!("../../../../fixtures/iiif/legacy-context/manifest.json")
+        let manifest = include_str!("../../../../fixtures/iiif/repeated-metadata/manifest.json")
             .replace("{{origin}}", "https://library.test");
         let (result, _) = crate::test_support::discover(
             SPEC,

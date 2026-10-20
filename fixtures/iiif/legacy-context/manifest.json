@@ -1,10 +1,6 @@
 {
   "@context": ["http://iiif.io/api/presentation/2/context.json"],
   "label": "Legacy manifest",
-  "metadata": [{"label": "Rights", "value": ["Example attribution", "https://example.org/rights"]}],
-  "thumbnail": {
-    "@id": "{{origin}}/fixtures/tiles/whole.jpg", "@type": "dctypes:Image", "width": 200, "height": 177
-  },
   "sequences": [{"canvases": [{"label":"Map", "images":[{"resource":{
     "@id":"{{origin}}/fixtures/tiles/whole.jpg", "width":512, "height":512,
     "service":{"@id":"{{origin}}/fixtures/iiif/v2", "profile":"http://iiif.io/api/image/2/level2.json"}
