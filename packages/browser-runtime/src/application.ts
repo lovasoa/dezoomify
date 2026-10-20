@@ -5,6 +5,7 @@ import {
   type DiagnosticRecorder,
   type HistoryEntry,
   type HistoryStore,
+  ImagePicker,
   isValidInputUrl,
   type PlatformHints,
   type Presentation,
@@ -35,6 +36,8 @@ import {
   createAttemptDiagnostics,
   saveDiagnosticReport,
 } from "./diagnostics.ts";
+import { chooseCatalogImage, type ImageChoice } from "./image-choice.ts";
+import { imageThumbnail } from "./image-thumbnail.ts";
 import { createJobActivity } from "./job-activity.ts";
 import {
   BROWSER_MAX_PLAN_TILES,
@@ -126,6 +129,7 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
         | { request: TileAcquisition; answer(choice: RetryChoice): void }
         | undefined,
       permission: undefined as PermissionWait | undefined,
+      imageChoice: undefined as ImageChoice | undefined,
       done: false,
       historyEntry: null as HistoryEntry | null,
       view: {
@@ -182,6 +186,7 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
       history.update(current.historyEntry, { status: "cancelled" });
       current.controller.abort();
       current.permission = undefined;
+      current.imageChoice = undefined;
       current.retryApproval = undefined;
       current.activity.stopHeartbeat();
       current.diagnostics.finish("cancelled");
@@ -340,6 +345,33 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
         }
       },
       transport: () => capabilities.transport(),
+      chooseImage: (catalog, signal) =>
+        chooseCatalogImage(catalog, {
+          signal,
+          changed(choice) {
+            if (current !== a || signal.aborted) return;
+            a.imageChoice = choice;
+            update();
+          },
+          async preview(tile, previewSignal) {
+            const blob = await imageThumbnail(tile, previewSignal, {
+              fetch: (request, owned) => capabilities.fetchResource(request, owned, "forbidden"),
+              process: (recipe, bytes) =>
+                wasm.applyProcessing(recipe, new Uint8Array(bytes)).slice().buffer,
+              decoder,
+              canvas: () => options.root.ownerDocument.createElement("canvas"),
+            });
+            if (!blob) return;
+            const url = URL.createObjectURL(blob);
+            return { url, dispose: () => URL.revokeObjectURL(url) };
+          },
+          failed(tile, error) {
+            a.diagnostics.record("debug", "image-preview-failed", {
+              request: tile.request.uri,
+              detail: unknownDetail(error),
+            });
+          },
+        }),
       approveRetry: (request) => approval.acquire(request),
     });
     a.host = host;
@@ -421,6 +453,17 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
         historyNow: Date.now(),
       },
       {
+        ...(a?.imageChoice
+          ? {
+              replace: createElement(ImagePicker, {
+                catalog: a.imageChoice.catalog,
+                previews: a.imageChoice.previews,
+                sourceUrl: a.url,
+                onChoose: a.imageChoice.choose,
+                onCancel: cancel,
+              }),
+            }
+          : {}),
         ...(a?.permission
           ? {
               replace: createElement(AccessRequestView, {

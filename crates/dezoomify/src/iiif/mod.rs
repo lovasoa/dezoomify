@@ -311,6 +311,7 @@ fn catalog_from_manifest_info(
         DeferredResource {
             uri: image_info.image_uri,
             title,
+            size: image_info.size,
             warnings: warnings.clone(),
         }
     });

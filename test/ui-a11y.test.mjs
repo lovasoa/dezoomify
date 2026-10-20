@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createElement } from "react";
 import { createDiagnosticRecorder } from "../packages/shared-ui/src/diagnostics.ts";
+import { ImagePicker } from "../packages/shared-ui/src/image-picker.tsx";
 import {
   presentFailure,
   presentIdle,
@@ -39,6 +40,48 @@ function render(el, presentation, cb, ctx, options) {
 function progressPresentation(current, total) {
   return presentProgress({ phase: "acquisition", completed: current, total });
 }
+
+test("image choices have distinct accessible names and preserve missing metadata", () => {
+  const el = makeContainer();
+  const chosen = [],
+    cancelled = [];
+  const entry = {
+    kind: "image",
+    title: "Painting",
+    sourceUrl: "https://images.test/painting.dzi",
+    size: { width: 512, height: 256 },
+    levels: [],
+  };
+  render(
+    el,
+    presentIdle(),
+    callbacks,
+    {},
+    {
+      replace: createElement(ImagePicker, {
+        catalog: {
+          entries: [entry, entry, { kind: "image-request", uri: "https://images.test/unknown" }],
+        },
+        previews: new Map([[1, "blob:preview"]]),
+        sourceUrl: "https://museum.test/catalog",
+        onChoose: (index) => chosen.push(index),
+        onCancel: () => cancelled.push(true),
+      }),
+    },
+  );
+  assertButtonsNamed(el, "image picker");
+  const buttons = [...el.querySelectorAll("[data-dz-image-index]")];
+  assert.equal(new Set(buttons.map((button) => button.getAttribute("aria-label"))).size, 3);
+  assert.equal(el.querySelectorAll(".dz-image-row").length, 3);
+  assert.equal(el.querySelector(".dz-image-thumbnail img").getAttribute("alt"), "");
+  assert.match(el.textContent, /Image 3/);
+  assert.match(el.textContent, /Dimensions unknown/);
+  assert.match(el.textContent, /512 × 256 px/);
+  act(() => click(buttons[1]));
+  act(() => click(el.querySelector("#dz-btn-cancel")));
+  assert.deepEqual(chosen, [1]);
+  assert.deepEqual(cancelled, [true]);
+});
 
 /** Every button must expose a non-empty accessible name (text or aria-label). */
 function assertButtonsNamed(root, where) {

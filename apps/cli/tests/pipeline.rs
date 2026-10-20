@@ -66,10 +66,12 @@ fn every_shared_format_saves_the_same_pixels() {
     for fixture in inputs {
         let input = fixture.input;
         let url = format!("{}{input}", start());
-        let run = cli(
-            &dir,
-            &["--json", "--retries", "0", "--overwrite", &url, "out.png"],
-        );
+        let mut args = vec!["--json", "--retries", "0", "--overwrite", &url, "out.png"];
+        let index = fixture.choice.map(|index| index.to_string());
+        if let Some(index) = &index {
+            args.extend(["--image-index", index]);
+        }
+        let run = cli(&dir, &args);
         assert!(
             run.status.success(),
             "{input}: {}",

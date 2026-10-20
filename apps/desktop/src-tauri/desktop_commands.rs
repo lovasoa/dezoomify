@@ -11,6 +11,7 @@ macro_rules! desktop_commands {
             pause_job,
             resume_job,
             answer_retry,
+            answer_image,
             open_saved_output,
             inspect_saved_output,
             open_history_output,

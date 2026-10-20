@@ -6,6 +6,7 @@
     "core:default",
     "dialog:allow-open",
     "opener:allow-open-url",
+    "dezoomify:allow-answer-image",
     "dezoomify:allow-answer-retry",
     "dezoomify:allow-cancel-job",
     "dezoomify:allow-dezoomify",
@@ -25,6 +26,7 @@
   ],
   "x-dezoomify": {
     "commands": [
+      "answer_image",
       "answer_retry",
       "cancel_job",
       "dezoomify",
@@ -62,6 +64,7 @@
       "iiif-dir"
     ],
     "eventChannels": [
+      "dezoomify://image-choice",
       "dezoomify://progress",
       "dezoomify://registered",
       "dezoomify://retry"

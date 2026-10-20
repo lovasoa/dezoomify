@@ -100,6 +100,13 @@ function languageQuality(parameters: string[]): number {
 export type I18nVars = Record<string, string | number>;
 
 const en = {
+  "view.images.title": "Choose an image",
+  "view.images.untitled": "Image {number}",
+  "view.images.noPreview": "No preview available",
+  "view.images.unknownSize": "Dimensions unknown",
+  "view.images.choose": "Choose",
+  "view.images.chooseNamed": "Choose {title} (image {number})",
+  "view.images.cancel": "Cancel",
   "page.brand": "Save zoomable images",
   "page.nav.label": "Main navigation",
   "page.nav.extension": "Browser extension",

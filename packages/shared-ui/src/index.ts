@@ -5,6 +5,7 @@ export * from "./diagnostics.ts";
 export * from "./failure.ts";
 export * from "./history.ts";
 export * from "./i18n.ts";
+export * from "./image-picker.tsx";
 export * from "./labels.ts";
 export * from "./notice.tsx";
 export * from "./presentation.ts";

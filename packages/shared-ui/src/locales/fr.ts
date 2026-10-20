@@ -10,6 +10,13 @@
 // type-strip it directly in tests.
 
 export const fr = {
+  "view.images.title": "Choisir une image",
+  "view.images.untitled": "Image {number}",
+  "view.images.noPreview": "Aucun aperçu disponible",
+  "view.images.unknownSize": "Dimensions inconnues",
+  "view.images.choose": "Choisir",
+  "view.images.chooseNamed": "Choisir {title} (image {number})",
+  "view.images.cancel": "Annuler",
   "page.brand": "Enregistrer des images zoomables",
   "page.nav.label": "Navigation principale",
   "page.nav.extension": "Extension de navigateur",

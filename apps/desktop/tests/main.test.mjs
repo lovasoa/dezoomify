@@ -56,6 +56,9 @@ globalThis.desktopTestNative = {
           answers.push({ question, choice, resolve, reject }),
         );
       },
+      answerImage(question, index) {
+        return new Promise((resolve, reject) => answers.push({ question, index, resolve, reject }));
+      },
     };
     invocations.push(invocation);
     callbacks.progress(progress);
@@ -248,6 +251,40 @@ test("saved history renders during slow disk checks, opens the file after retire
   delete globalThis.desktopTestNative.inspectSavedOutput;
 });
 
+test("desktop catalog choice keeps newer questions and ignores stale previews and answers", async () => {
+  const invocation = await start();
+  const catalog = {
+    entries: [
+      { kind: "image-request", uri: "https://images.test/one" },
+      { kind: "image-request", title: "Second", uri: "https://images.test/two" },
+    ],
+  };
+  act(() => invocation.callbacks.imageChoice(1, { kind: "catalog", catalog }));
+  assert.equal(root.querySelectorAll(".dz-image-row").length, 2);
+  act(() => click(root.querySelector('[data-dz-image-index="1"]')));
+  assert.deepEqual(
+    invocation.answers.map(({ question, index }) => [question, index]),
+    [[1, 1]],
+  );
+  act(() => invocation.callbacks.imageChoice(2, { kind: "catalog", catalog }));
+  act(() =>
+    invocation.callbacks.imageChoice(1, {
+      kind: "preview",
+      index: 0,
+      thumbnail: "data:image/png;base64,AAAA",
+    }),
+  );
+  assert.equal(root.querySelector(".dz-image-thumbnail img"), null);
+  await act(() => invocation.answers[0].resolve());
+  assert.ok(root.querySelector(".dz-image-picker"), "old answer cannot close the new picker");
+  act(() => click(root.querySelector('[data-dz-image-index="1"]')));
+  await act(() => invocation.answers[1].resolve());
+  assert.equal(root.querySelector(".dz-image-picker"), null);
+  act(() => invocation.callbacks.imageChoice(1, { kind: "catalog", catalog }));
+  assert.equal(root.querySelector(".dz-image-picker"), null);
+  await reset();
+});
+
 test("desktop retry actions retain a newer native question", async () => {
   const invocation = await start();
   const request = { tile: { index: 3 }, attempt: 4, requires_approval: true };
@@ -265,6 +302,24 @@ test("desktop retry actions retain a newer native question", async () => {
   assert.equal(invocation.answers[1].choice, "cancel");
   await act(async () => invocation.answers[1].resolve());
   assert.equal(root.querySelector("[data-dz-retry-actions]"), null);
+  await reset();
+});
+
+test("a failed image answer closes the picker and exposes recovery", async () => {
+  const invocation = await start();
+  const catalog = {
+    entries: [
+      { kind: "image-request", uri: "https://images.test/one" },
+      { kind: "image-request", uri: "https://images.test/two" },
+    ],
+  };
+  act(() => invocation.callbacks.imageChoice(1, { kind: "catalog", catalog }));
+  act(() => click(root.querySelector('[data-dz-image-index="1"]')));
+  await act(() => invocation.answers[0].reject(new Error("native choice unavailable")));
+  assert.equal(root.querySelector(".dz-image-picker"), null);
+  assert.ok(root.querySelector(".dz-error-section"));
+  act(() => invocation.callbacks.imageChoice(2, { kind: "catalog", catalog }));
+  assert.equal(root.querySelector(".dz-image-picker"), null);
   await reset();
 });
 

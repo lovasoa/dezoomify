@@ -335,6 +335,7 @@ fn index(index: Index, resource: DiscoveryResource<'_>) -> Result<ParsedResource
             entries.push(DeferredResource {
                 uri,
                 title,
+                size: None,
                 warnings: Vec::new(),
             });
         }

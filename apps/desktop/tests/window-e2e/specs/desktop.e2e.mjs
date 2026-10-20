@@ -9,6 +9,7 @@ import path from "node:path";
 import { after, afterEach, before, describe, it } from "node:test";
 import { Builder, By } from "selenium-webdriver";
 import { formats } from "../../../../../test/support/formats.cjs";
+import { chooseFixtureImages } from "../../../../../test/support/image-choice.mjs";
 import { assertSavedPyramid } from "../../../../../test/support/png.mjs";
 import {
   createRunDirs,
@@ -275,6 +276,10 @@ describe("Dezoomify desktop window", () => {
     it(`saves ${fixtureInput.name} pixels`, async () => {
       clearOutput();
       await submitUrl(driver, fixture.base + fixtureInput.input);
+      await driver.wait(
+        () => driver.executeScript(chooseFixtureImages, fixtureInput.choice),
+        60000,
+      );
       await waitFor(
         driver,
         async () => {

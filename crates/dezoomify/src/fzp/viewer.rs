@@ -390,6 +390,7 @@ fn navigate(
                     Ok(DeferredResource {
                         uri: image_uri(&base, &name)?,
                         title: Some(name),
+                        size: None,
                         warnings: Vec::new(),
                     })
                 })

@@ -2,6 +2,7 @@ import { isValidInputUrl } from "@dezoomify/shared-ui";
 import type {
   DesktopOutput,
   DiagnosticReport,
+  ImageChoiceEvent,
   Error as JobError,
   Progress,
   RetryChoice,
@@ -44,16 +45,62 @@ export interface NativeInvocation {
   pause(): Promise<void>;
   resume(): Promise<void>;
   answer(question: number, choice: RetryChoice): Promise<void>;
+  answerImage(question: number, index: number): Promise<void>;
   openOutput(reveal: boolean): Promise<void>;
   dispose(): Promise<void>;
 }
 
+function receiveImageChoice(
+  payload: object,
+  receive: ((question: number, event: ImageChoiceEvent) => void) | undefined,
+): void {
+  if ("question" in payload && typeof payload.question === "number" && "event" in payload)
+    receive?.(payload.question, payload.event as ImageChoiceEvent);
+}
+
+function belongsToJob(payload: unknown, job: string): payload is object & { job: string } {
+  return !!payload && typeof payload === "object" && "job" in payload && payload.job === job;
+}
+
+function receiveRetry(
+  payload: object,
+  receive: (question: number, request: TileAcquisition) => void,
+): void {
+  if ("question" in payload && typeof payload.question === "number" && "request" in payload)
+    receive(payload.question, payload.request as TileAcquisition);
+}
+
+interface NativeCallbacks {
+  progress(value: Progress): void;
+  retry(question: number, value: TileAcquisition): void;
+  imageChoice?(question: number, event: ImageChoiceEvent): void;
+}
+
+function deliverNativeEvent(
+  channel: string,
+  payload: object,
+  callbacks: NativeCallbacks,
+  registered?: () => void,
+): void {
+  switch (channel) {
+    case "dezoomify://registered":
+      registered?.();
+      break;
+    case "dezoomify://progress":
+      if ("progress" in payload) callbacks.progress(payload.progress as Progress);
+      break;
+    case "dezoomify://retry":
+      receiveRetry(payload, callbacks.retry);
+      break;
+    case "dezoomify://image-choice":
+      receiveImageChoice(payload, callbacks.imageChoice);
+      break;
+  }
+}
+
 export async function invokeNative(
   request: { inputUrl: string; settings: DesktopSettings },
-  callbacks: {
-    progress(value: Progress): void;
-    retry(question: number, value: TileAcquisition): void;
-  },
+  callbacks: NativeCallbacks,
   api: DesktopIpc = ipc,
 ): Promise<NativeInvocation> {
   if (!isValidInputUrl(request.inputUrl)) {
@@ -70,28 +117,16 @@ export async function invokeNative(
     for (const stop of unlisten.splice(0)) stop();
   };
   try {
-    for (const channel of ["dezoomify://registered", "dezoomify://progress", "dezoomify://retry"]) {
+    for (const channel of [
+      "dezoomify://registered",
+      "dezoomify://progress",
+      "dezoomify://retry",
+      "dezoomify://image-choice",
+    ]) {
       const stop = await api.listen(channel, ({ payload }) => {
-        if (
-          retired ||
-          !payload ||
-          typeof payload !== "object" ||
-          !("job" in payload) ||
-          payload.job !== id
-        )
-          return;
+        if (retired || !belongsToJob(payload, id)) return;
         assertNoTileBytes(payload);
-        if (channel === "dezoomify://registered") acknowledgeRegistration?.();
-        if (channel === "dezoomify://progress" && "progress" in payload)
-          callbacks.progress(payload.progress as Progress);
-        if (
-          channel === "dezoomify://retry" &&
-          "question" in payload &&
-          typeof payload.question === "number" &&
-          "request" in payload
-        ) {
-          callbacks.retry(payload.question, payload.request as TileAcquisition);
-        }
+        deliverNativeEvent(channel, payload, callbacks, acknowledgeRegistration);
       });
       if (typeof stop === "function") unlisten.push(stop as () => void);
     }
@@ -131,6 +166,7 @@ export async function invokeNative(
     pause: () => call("pause_job"),
     resume: () => call("resume_job"),
     answer: (question, answer) => call("answer_retry", { question, answer }),
+    answerImage: (question, index) => call("answer_image", { question, index }),
     openOutput: (reveal) => call("open_saved_output", { reveal }),
     async dispose() {
       if (retired) return;

@@ -41,6 +41,7 @@ export interface BrowserHostDependencies {
   ): Promise<ResourceRead>;
   loadDisplayImage?(url: string, signal: AbortSignal): Promise<TileImageLike>;
   onProgress(progress: Progress): void;
+  chooseImage(catalog: Catalog, signal: AbortSignal): Promise<number>;
   approveRetry(request: TileAcquisition, signal: AbortSignal): Promise<void>;
   transport?(): ErrorTransport | null;
 }
@@ -352,21 +353,9 @@ export class BrowserHost implements Host {
 
   async chooseImage(catalog: Catalog): Promise<number> {
     await this.checkpoint("cancellation");
-    let chosen = 0,
-      bestArea = -1;
-    catalog.entries.forEach((entry, index) => {
-      if (entry.kind !== "image") return;
-      const area = entry.levels.reduce(
-        (largest, level) =>
-          Math.max(largest, level.size ? level.size.width * level.size.height : 0),
-        0,
-      );
-      if (area >= bestArea) {
-        chosen = index;
-        bestArea = area;
-      }
-    });
-    return chosen;
+    if (!catalog.entries.length) throw { kind: "plan-empty" } satisfies JobError;
+    if (catalog.entries.length === 1) return 0;
+    return this.own(() => this.deps.chooseImage(catalog, this.signal));
   }
   async chooseLevel(image: Image): Promise<number> {
     await this.checkpoint("cancellation");

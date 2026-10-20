@@ -25,6 +25,7 @@ import webdriver from "selenium-webdriver";
 import firefox from "selenium-webdriver/firefox.js";
 import sharp from "sharp";
 import { formats } from "../../../../test/support/formats.cjs";
+import { chooseFixtureImages } from "../../../../test/support/image-choice.mjs";
 import {
   assertSavedPyramid,
   decodePngPixels,
@@ -323,6 +324,8 @@ async function runChromiumJob(base, work, options = {}) {
     const jobPage = await waitForJobPage(context);
     await grantChromiumFrame(context, jobPage, extensionId, options);
     if (options.beforeCompletion) await options.beforeCompletion(jobPage);
+    if (options.scenario?.startsWith("fixtures/"))
+      await jobPage.waitForFunction(chooseFixtureImages, options.choice ?? 0, { timeout: 60000 });
     if (options.expectFailure) {
       await waitForVisible(jobPage, ".dz-error-section", "failed acquisition");
       assert.equal(downloads.length, 0, "a failed acquisition publishes no download");
@@ -566,6 +569,7 @@ async function runFirefoxJob(base, work, runOptions = {}) {
       assert.equal((await driver.findElements(webdriver.By.css(".dz-error-section"))).length, 0);
       await grant.click();
     }
+    await chooseFirefoxFixture(driver, runOptions);
     const deadline = Date.now() + 90000;
     const output = await readCompletedPng(downloadsDir, deadline).catch(async (error) => {
       const pages = [];
@@ -627,6 +631,12 @@ async function runFirefoxJob(base, work, runOptions = {}) {
   } finally {
     if (!shared) await driver.quit();
   }
+}
+
+async function chooseFirefoxFixture(driver, options) {
+  if (!options.scenario?.startsWith("fixtures/")) return;
+  await findFirefoxTab(driver, "/job.html#sourceTabId=");
+  await driver.wait(() => driver.executeScript(chooseFixtureImages, options.choice ?? 0), 60000);
 }
 
 async function firefoxJobDriver(shared, browserOptions, service) {
@@ -691,7 +701,10 @@ test("packaged browser format matrices", { concurrency: 2 }, async (matrix) => {
               const work = mkdtempSync(path.join(tmpdir(), "dezoomify-format-"));
               try {
                 assertSavedPyramid(
-                  await run(fixtureServer.base, work, { scenario: `fixtures/${fixture.name}` }),
+                  await run(fixtureServer.base, work, {
+                    scenario: `fixtures/${fixture.name}`,
+                    choice: fixture.choice,
+                  }),
                   fixture.tolerance,
                 );
               } finally {

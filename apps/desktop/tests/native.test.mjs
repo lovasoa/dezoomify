@@ -118,6 +118,48 @@ test("retired invocation rejects controls and ignores late progress", async () =
   await assert.rejects(handle.finished, (error) => error.kind === "cancelled");
 });
 
+test("image questions and encoded thumbnails stay scoped to the native invocation", async () => {
+  const api = platform();
+  const received = [];
+  const handle = await invokeNative(
+    request(),
+    {
+      progress() {},
+      retry() {},
+      imageChoice: (...args) => received.push(args),
+    },
+    api,
+  );
+  const event = {
+    kind: "catalog",
+    catalog: {
+      entries: [
+        { kind: "image-request", uri: "https://images.test/one" },
+        { kind: "image-request", uri: "https://images.test/two" },
+      ],
+    },
+  };
+  api.emit("dezoomify://image-choice", { job: "job:other", question: 1, event });
+  api.emit("dezoomify://image-choice", { job: handle.id, question: 1, event });
+  const preview = { kind: "preview", index: 1, thumbnail: "data:image/png;base64,AAAA" };
+  api.emit("dezoomify://image-choice", { job: handle.id, question: 1, event: preview });
+  assert.deepEqual(received, [
+    [1, event],
+    [1, preview],
+  ]);
+  await handle.answerImage(1, 1);
+  assert.deepEqual(api.calls.at(-1), {
+    command: "answer_image",
+    args: { job: handle.id, question: 1, index: 1 },
+  });
+  const late = api.handlers.get("dezoomify://image-choice");
+  await handle.dispose();
+  late({ payload: { job: handle.id, question: 2, event } });
+  assert.equal(received.length, 2);
+  api.resolve(output);
+  await handle.finished;
+});
+
 test("early cancellation and replacement wait for native registration", async () => {
   for (const control of ["cancel", "dispose"]) {
     const api = platform({ deferRegistration: true });

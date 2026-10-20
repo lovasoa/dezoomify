@@ -28,6 +28,7 @@ pub fn replay_url(origin: &str, target: &str) -> String {
 pub struct FormatInput {
     pub input: String,
     pub tolerance: u8,
+    pub choice: Option<usize>,
 }
 
 /// Product inputs discovered from ordinary fixture folders, without registration.
@@ -46,6 +47,9 @@ pub fn format_inputs() -> Vec<FormatInput> {
                 let input = std::fs::read_to_string(variant.path().join("input.txt"))
                     .unwrap_or_else(|_| "viewer.html".to_owned());
                 inputs.push(FormatInput {
+                    choice: std::fs::read_to_string(variant.path().join("choice.txt"))
+                        .ok()
+                        .map(|value| value.trim().parse().expect("fixture image index")),
                     tolerance: if variant
                         .file_name()
                         .to_string_lossy()

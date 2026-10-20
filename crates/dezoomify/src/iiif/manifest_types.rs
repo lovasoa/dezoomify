@@ -215,6 +215,8 @@ pub struct LegacyImageResource {
     pub resource_type: String,
     #[serde(default)]
     pub service: LegacyImageServices,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
 }
 
 #[derive(Debug, Deserialize, Clone, PartialEq, Eq, Default)]
@@ -239,6 +241,7 @@ impl LegacyImageServices {
 /// Holds information extracted from a manifest for a single image to be dezoomified.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExtractedImageInfo {
+    pub size: Option<crate::model::Size>,
     /// The URI to be dezoomified (either an `info.json` or a direct image link).
     pub image_uri: String,
     /// The label of the manifest, if available.
@@ -249,6 +252,11 @@ pub struct ExtractedImageInfo {
     pub canvas_label: Option<String>,
     /// The 0-based index of the canvas in the manifest's `items` array.
     pub canvas_index: usize,
+}
+
+fn declared_size(width: Option<u32>, height: Option<u32>) -> Option<crate::model::Size> {
+    let (width, height) = (width?, height?);
+    (width > 0 && height > 0).then_some(crate::model::Size { width, height })
 }
 
 fn image_service_info_uri(manifest_url: &str, service_id: &str) -> String {
@@ -263,7 +271,14 @@ fn image_service_info_uri(manifest_url: &str, service_id: &str) -> String {
 }
 
 fn choose_image_service_uri(services: &[ImageService], manifest_url: &str) -> Option<String> {
-    let service = services
+    Some(image_service_info_uri(
+        manifest_url,
+        &choose_image_service(services)?.id,
+    ))
+}
+
+fn choose_image_service(services: &[ImageService]) -> Option<&ImageService> {
+    services
         .iter()
         .find(|s| s.service_type == "ImageService3" && !s.id.is_empty())
         .or_else(|| {
@@ -276,9 +291,18 @@ fn choose_image_service_uri(services: &[ImageService], manifest_url: &str) -> Op
                 .iter()
                 .find(|s| s.service_type.contains("ImageService") && !s.id.is_empty())
         })
-        .or_else(|| services.iter().find(|s| !s.id.is_empty()))?;
+        .or_else(|| services.iter().find(|s| !s.id.is_empty()))
+}
 
-    Some(image_service_info_uri(manifest_url, &service.id))
+fn image_size(
+    width: Option<u32>,
+    height: Option<u32>,
+    services: &[ImageService],
+) -> Option<crate::model::Size> {
+    declared_size(width, height).or_else(|| {
+        let service = choose_image_service(services)?;
+        declared_size(service.width, service.height)
+    })
 }
 
 impl Manifest {
@@ -334,6 +358,11 @@ impl Manifest {
 
                         if let Some(uri_to_add) = final_image_uri {
                             infos.push(ExtractedImageInfo {
+                                size: image_size(
+                                    image_body.width,
+                                    image_body.height,
+                                    &image_body.service,
+                                ),
                                 image_uri: uri_to_add,
                                 manifest_label: manifest_label.clone(),
                                 metadata_title: metadata_title.clone(),
@@ -392,6 +421,11 @@ impl LegacyManifest {
 
                 if let Some(uri_to_add) = final_image_uri {
                     infos.push(ExtractedImageInfo {
+                        size: image_size(
+                            resource.width,
+                            resource.height,
+                            resource.service.as_slice(),
+                        ),
                         image_uri: uri_to_add,
                         manifest_label: manifest_label.clone(),
                         metadata_title: metadata_title.clone(),
@@ -479,6 +513,8 @@ mod tests {
                       "body": {
                         "id": "https://example.org/iiif/book1/page1_img/full/max/0/default.jpg",
                         "type": "Image",
+                        "width": 800,
+                        "height": 1200,
                         "format": "image/jpeg",
                         "service": [
                           {
@@ -514,6 +550,13 @@ mod tests {
         assert_eq!(info.manifest_label, Some("Book 1".to_string()));
         assert_eq!(info.canvas_label, Some("Page 1".to_string()));
         assert_eq!(info.canvas_index, 0);
+        assert_eq!(
+            info.size,
+            Some(crate::model::Size {
+                width: 800,
+                height: 1200
+            })
+        );
     }
 
     #[test]
@@ -570,8 +613,8 @@ mod tests {
             { "id": "a1", "type": "Annotation", "motivation": "painting",
               "body": { "id": "img.jpg", "type": "Image",
                 "service": [
-                  { "id": "https://example.org/svc2", "type": "ImageService2" },
-                  { "id": "https://example.org/svc3", "type": "ImageService3" }
+                  { "id": "https://example.org/svc2", "type": "ImageService2", "width": 100, "height": 200 },
+                  { "id": "https://example.org/svc3", "type": "ImageService3", "width": 800, "height": 1200 }
                 ]
               }
             }]
@@ -583,6 +626,13 @@ mod tests {
         let infos = manifest.extract_image_infos("https://example.org/"); // Base URL for resolving "svc3"
         assert_eq!(infos.len(), 1);
         assert_eq!(infos[0].image_uri, "https://example.org/svc3/info.json");
+        assert_eq!(
+            infos[0].size,
+            Some(crate::model::Size {
+                width: 800,
+                height: 1200
+            })
+        );
     }
 
     #[test]

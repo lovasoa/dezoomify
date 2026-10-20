@@ -6,7 +6,7 @@ use crate::commands;
 use crate::jobs::JobTable;
 use crate::saved_outputs::SavedOutputs;
 use crate::settings::parse_settings;
-use dezoomify::model::{DesktopOutput, Error, Failure, SavedOutputState};
+use dezoomify::model::{DesktopOutput, Error, Failure, ImageChoiceEvent, SavedOutputState};
 use dezoomify_native::{NativeHost, OutputTarget};
 
 #[cfg(all(test, target_os = "linux"))]
@@ -253,6 +253,29 @@ async fn dezoomify(
             );
             Box::pin(async move { answer.await.map_err(|_| Error::InteractionExpired) })
         });
+        host.on_choose_image(|catalog| {
+            let (question, answer) = registration.request_image(catalog.entries.len());
+            app.emit(
+                crate::jobs::CHANNEL_IMAGE_CHOICE,
+                serde_json::json!({"job": job, "question": question,
+                    "event": ImageChoiceEvent::Catalog { catalog }}),
+            )
+            .map_err(|error| Error::ChoiceFailed(error.to_string().into()))?;
+            let app = app.clone();
+            let job = job.clone();
+            Ok(dezoomify_native::host::ImageSelection {
+                answer: Box::pin(
+                    async move { answer.await.map_err(|_| Error::InteractionExpired) },
+                ),
+                preview: Box::new(move |index, thumbnail| {
+                    let _ = app.emit(
+                        crate::jobs::CHANNEL_IMAGE_CHOICE,
+                        serde_json::json!({"job": job, "question": question,
+                            "event": ImageChoiceEvent::Preview { index, thumbnail }}),
+                    );
+                }),
+            })
+        });
         let result = host.transport.block_on(dezoomify::dezoomify(
             host.inputs(),
             host.algorithm_options(),
@@ -318,6 +341,18 @@ async fn answer_retry(
 async fn release_job(state: State<'_, Mutex<JobTable>>, job: String) -> Result<(), Error> {
     lock_table(&state)?.release_job(&job);
     Ok(())
+}
+
+#[tauri::command]
+async fn answer_image(
+    state: State<'_, Mutex<JobTable>>,
+    job: String,
+    question: u64,
+    index: u32,
+) -> Result<(), Error> {
+    lock_table(&state)?
+        .live(&job)?
+        .answer_image(question, index)
 }
 #[tauri::command]
 async fn get_job_diagnostics(

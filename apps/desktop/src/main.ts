@@ -12,6 +12,7 @@ import {
   getLocale,
   HISTORY_KEY_DESKTOP,
   type HistoryEntry,
+  ImagePicker,
   isJobError,
   isValidInputUrl,
   type Presentation,
@@ -26,8 +27,10 @@ import {
   setLocale,
   t,
   trimTechnical,
+  unknownDetail,
 } from "@dezoomify/shared-ui";
 import type {
+  Catalog,
   Error as JobError,
   Output,
   Progress,
@@ -75,6 +78,13 @@ function newAttempt() {
     progress: null as Progress | null,
     output: null as Output | null,
     retry: null as { question: number; value: TileAcquisition } | null,
+    imageChoice: null as {
+      question: number;
+      catalog: Catalog;
+      previews: Map<number, string>;
+      answering: boolean;
+    } | null,
+    lastImageQuestion: -1,
     paused: false,
     localFailure: null as JobError | null,
     lastInputUrl: "",
@@ -299,6 +309,7 @@ function retireActiveJob(): void {
   currentAttempt.progress = null;
   currentAttempt.output = null;
   currentAttempt.retry = null;
+  currentAttempt.imageChoice = null;
   currentAttempt.localFailure = null;
   clearJobViewState();
   if (handle) void handle.dispose().catch(() => undefined);
@@ -342,6 +353,22 @@ function launchNativeJob(trimmed: string): void {
       attempt.retry = { question, value };
       update();
     },
+    imageChoice(question, event) {
+      if (!owns(attempt) || attempt.settled || attempt.localFailure) return;
+      if (event.kind === "catalog") {
+        if (question <= attempt.lastImageQuestion) return;
+        attempt.lastImageQuestion = question;
+        attempt.imageChoice = {
+          question,
+          catalog: event.catalog,
+          previews: new Map(),
+          answering: false,
+        };
+      } else if (attempt.imageChoice?.question === question) {
+        attempt.imageChoice.previews.set(event.index, event.thumbnail);
+      }
+      update();
+    },
   })
     .then(async (handle) => {
       if (!owns(attempt)) {
@@ -355,6 +382,7 @@ function launchNativeJob(trimmed: string): void {
       const { output, saved_output } = await handle.finished;
       if (!owns(attempt)) return;
       attempt.settled = true;
+      attempt.imageChoice = null;
       attempt.output = output;
       attempt.retry = null;
       stopHeartbeat();
@@ -364,6 +392,7 @@ function launchNativeJob(trimmed: string): void {
     .catch((error: unknown) => {
       if (!owns(attempt)) return;
       attempt.settled = true;
+      attempt.imageChoice = null;
       attempt.retry = null;
       if (isJobError(error) && causeOf(error).kind === "cancelled") {
         desktopHistory.update(attempt.historyEntry, { status: "cancelled" });
@@ -478,6 +507,27 @@ function answerRetry(
         kind: "choice-failed",
         detail: invokeDetail(error, t("desktop.invoke.retry")),
       });
+    },
+  );
+}
+
+function chooseImage(attempt: DesktopAttempt, index: number): void {
+  const choice = attempt.imageChoice;
+  const handle = attempt.activeHandle;
+  if (!owns(attempt) || !choice || choice.answering || !handle) return;
+  choice.answering = true;
+  update();
+  void handle.answerImage(choice.question, index).then(
+    () => {
+      if (!owns(attempt) || attempt.imageChoice !== choice) return;
+      attempt.imageChoice = null;
+      update();
+    },
+    (error: unknown) => {
+      if (!owns(attempt) || attempt.imageChoice !== choice) return;
+      attempt.imageChoice = null;
+      void handle.cancel().catch(() => undefined);
+      failLocally({ kind: "choice-failed", detail: unknownDetail(error) });
     },
   );
 }
@@ -697,6 +747,18 @@ function update() {
       historyNow: Date.now(),
     },
     {
+      ...(attempt.imageChoice
+        ? {
+            replace: createElement(ImagePicker, {
+              catalog: attempt.imageChoice.catalog,
+              previews: attempt.imageChoice.previews,
+              sourceUrl: attempt.lastInputUrl,
+              onChoose: (index: number) => chooseImage(attempt, index),
+              onCancel: handleCancel,
+              disabled: !attempt.activeHandle || attempt.imageChoice.answering,
+            }),
+          }
+        : {}),
       ...(presentation.phase === "idle"
         ? {
             idleBeforeHistory: createElement(DesktopSettingsView, {
