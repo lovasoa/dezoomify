@@ -9,8 +9,8 @@ product when that is simpler; share code when it improves the design.
 
 ## Invariants
 
-- Keep `legacy/` and the app at `/` pristine, byte for byte. Product changes
-  belong to `/beta` and the other products.
+- Keep the app at `/legacy/` stable. Product changes belong to `/` and the
+  other products; website assembly copies `legacy/` byte for byte.
 - Keep parsers/geometry pure. Hosts own I/O, clocks, codecs, resources and tasks.
   Products never import each other; shared UI never accesses host globals.
   Browser transport/image modules receive callbacks.

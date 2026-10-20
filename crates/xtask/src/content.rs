@@ -3,7 +3,7 @@
 //! Size budgets pin the shipped bytes that prose guards cannot
 //! see: the WASM binding (`wasm/dezoomify-wasm_bg.wasm`, 5 MB warn / 6 MB
 //! fail), the extension store ZIPs (`target/extension/*.zip`, 3 MB warn /
-//! 4 MB fail), the served `dist/beta` JavaScript (750 kB warn / 1 MB fail),
+//! 4 MB fail), the served `dist/assets` JavaScript (750 kB warn / 1 MB fail),
 //! and the shared-UI theme (`packages/shared-ui/src/styles/theme.css`,
 //! 2000-line warn / 2500-line fail). Build outputs are gitignored, so a
 //! missing artifact skips with a rebuild note instead of failing a fresh
@@ -191,10 +191,10 @@ fn budget_file(r: &Path, rel: &str, warn: u64, fail: u64, hint: &str) -> Result<
     }
 }
 
-/// Total bytes of served `dist/beta` JavaScript (`*.js` only, so the wasm
+/// Total bytes of the new app's `dist/assets` JavaScript (`*.js` only, so the wasm
 /// binary never counts). `None` when the tree was never built.
 fn dist_js_bytes(r: &Path) -> Result<Option<u64>, String> {
-    let dir = r.join("dist/beta");
+    let dir = r.join("dist/assets");
     if !dir.is_dir() {
         return Ok(None);
     }
@@ -240,16 +240,16 @@ fn verify_sizes(r: &Path) -> Result<(), String> {
         )?;
     }
     match dist_js_bytes(r)? {
-        None => println!("sizes: dist/beta missing (run `cargo xtask build web`); skipped"),
+        None => println!("sizes: dist/assets missing (run `cargo xtask build web`); skipped"),
         Some(total) => match verdict(total, DIST_JS_WARN_BYTES, DIST_JS_FAIL_BYTES) {
-            Verdict::Pass => println!("sizes: dist/beta JS {total} bytes ok"),
+            Verdict::Pass => println!("sizes: dist/assets JS {total} bytes ok"),
             Verdict::Warn => println!(
-                "sizes: WARNING dist/beta JS {total} bytes exceeds warn {} (fail {})",
+                "sizes: WARNING dist/assets JS {total} bytes exceeds warn {} (fail {})",
                 DIST_JS_WARN_BYTES, DIST_JS_FAIL_BYTES
             ),
             Verdict::Fail => {
                 return Err(format!(
-                    "sizes: dist/beta JS {total} bytes exceeds fail budget {} (warn {})",
+                    "sizes: dist/assets JS {total} bytes exceeds fail budget {} (warn {})",
                     DIST_JS_FAIL_BYTES, DIST_JS_WARN_BYTES
                 ));
             }

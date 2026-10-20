@@ -26,6 +26,10 @@ import { PROXY_MAX_BYTES } from "./server/security.ts";
 setLocale(pickLocale(navigator.languages?.length ? navigator.languages : navigator.language));
 document.documentElement.lang = getLocale();
 localizeWebsite(document);
+document.getElementById("dz-legacy-notice-close")?.addEventListener("click", () => {
+  const notice = document.getElementById("dz-legacy-notice");
+  if (notice) notice.hidden = true;
+});
 
 const preview = createPreviewControls();
 const proxyTransport = createProxyTransport(fetch, {

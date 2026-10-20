@@ -570,8 +570,8 @@ mod tests {
         // Regression: https://krpano.com/panos/andreabiffi/galleria_04.xml
         // fetched through the metadata proxy arrived with an empty final URI,
         // so relative galleria_04.tiles/* URLs resolved against the app page
-        // (/beta/) and every tile 404'd. The core must fall back to the
-        // request URI, keeping tiles on krpano.com.
+        // instead of the source site and every tile 404'd. The core must fall
+        // back to the request URI, keeping tiles on krpano.com.
         let xml = br#"<krpano version="1.16"><image type="CUBE" multires="true" tilesize="512" progressive="false"><level tiledimagewidth="955" tiledimageheight="955"><cube url="galleria_04.tiles/mres_%s/l2/%v/l2_%s_%v_%h.jpg" /></level></image></krpano>"#;
         for with_empty in [false, true] {
             let uri = "https://krpano.com/panos/andreabiffi/galleria_04.xml";

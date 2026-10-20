@@ -22,7 +22,8 @@ rather than accessing host globals. Browser transport and image modules receive
 callbacks rather than importing UI. Parsers consume supplied data; Hosts own
 networking and inert HTML parsing, clocks, codecs, and resources.
 
-The website serves the preserved legacy app at `/` and the new app at `/beta`.
+The website serves the new app at `/`, the preserved legacy app at `/legacy/`,
+and redirects `/beta` links to the new app.
 The local and deployed website proxies share one implementation. See
 [Operations](operations.md#website-deployment-contract) for deployment.
 

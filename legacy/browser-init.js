@@ -12,12 +12,4 @@
   if (startURL) {
     document.getElementById("url").value = startURL;
   }
-
-  document.querySelector("#popup > button[title=Close]").addEventListener("click", function () {
-    document.getElementById("popup").style.bottom = "-500px";
-  })
-
-  // Beta invitation: show the popup on every load of the legacy site.
-  // The popup content and slide-away styling come from index.html and style.css.
-  document.getElementById("popup").style.display = "block";
 })();

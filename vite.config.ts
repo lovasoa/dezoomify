@@ -2,10 +2,9 @@ import { fileURLToPath } from "node:url";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
-// New website build. The deployed app serves below /beta/ while the legacy
-// site remains at / (assembled by scripts/build-site.mjs).
+// The website serves /; scripts/build-site.mjs adds the legacy app at /legacy/.
 export default defineConfig({
-  base: "/beta/",
+  base: "/",
   plugins: [react()],
   resolve: {
     alias: [
@@ -18,7 +17,7 @@ export default defineConfig({
   define: { __DEZOOMIFY_VERSION__: JSON.stringify(process.env.DEZOOMIFY_VERSION ?? "development") },
   build: {
     target: "es2022",
-    outDir: "dist/beta",
+    outDir: "dist",
     emptyOutDir: true,
     // External maps ship in prod: the project is open source and prod
     // bundles must stay one-click debuggable. Maps are fetched lazily by

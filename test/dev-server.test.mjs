@@ -52,26 +52,43 @@ function request(base, pathname, { method = "GET", headers = {}, body } = {}) {
 test("dev server serves static files with content types and directory index", async (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dz-dev-server-"));
   fs.writeFileSync(path.join(dir, "index.html"), "<h1>root</h1>");
-  fs.mkdirSync(path.join(dir, "beta"), { recursive: true });
-  fs.writeFileSync(path.join(dir, "beta", "index.html"), "<h1>beta</h1>");
-  fs.writeFileSync(path.join(dir, "beta", "app.js"), "console.log(1)");
+  fs.mkdirSync(path.join(dir, "legacy"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "legacy", "index.html"), "<h1>legacy</h1>");
+  fs.writeFileSync(path.join(dir, "legacy", "app.js"), "console.log(1)");
   const base = await withServer(t, createDevServerHandler({ staticDir: dir }));
 
   const root = await request(base, "/");
   assert.equal(root.status, 200);
   assert.equal(await root.text(), "<h1>root</h1>");
 
-  const beta = await request(base, "/beta/");
-  assert.equal(beta.status, 200);
-  assert.equal(await beta.text(), "<h1>beta</h1>");
+  const legacy = await request(base, "/legacy/");
+  assert.equal(legacy.status, 200);
+  assert.equal(await legacy.text(), "<h1>legacy</h1>");
+  const directoryRedirect = await request(base, "/legacy?lang=fr");
+  assert.equal(directoryRedirect.status, 301);
+  assert.equal(directoryRedirect.headers.location, "/legacy/?lang=fr");
 
-  const js = await request(base, "/beta/app.js");
+  const js = await request(base, "/legacy/app.js");
   assert.equal(js.status, 200);
   assert.equal(js.headers["content-type"], "application/javascript");
   assert.equal(await js.text(), "console.log(1)");
 
   const missing = await request(base, "/nope.txt");
   assert.equal(missing.status, 404);
+});
+
+test("dev server redirects old beta links to the root app", async (t) => {
+  const base = await withServer(t, createDevServerHandler({ staticDir: os.tmpdir() }));
+  for (const [from, to] of [
+    ["/beta", "/"],
+    ["/beta/", "/"],
+    ["/beta/help/", "/help/"],
+    ["/beta/privacy?lang=fr", "/privacy?lang=fr"],
+  ]) {
+    const response = await request(base, from);
+    assert.equal(response.status, 301);
+    assert.equal(response.headers.location, to);
+  }
 });
 
 test("dev server refuses path traversal", async (t) => {

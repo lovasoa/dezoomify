@@ -25,7 +25,7 @@ Read [Architecture](architecture.md) to choose where a change belongs and
 
 | Command | Output |
 |---|---|
-| `cargo xtask build web` | `dist/`: legacy at `/`, new app at `/beta`, WASM and help |
+| `cargo xtask build web` | `dist/`: new app at `/`, legacy at `/legacy/`, WASM and help |
 | `cargo xtask build cli` | `target/debug/dezoomify-cli` |
 | `cargo xtask build extension` | Chromium and Firefox ZIPs in `target/extension/` |
 | `cargo xtask build desktop` | Matching-host installer; [prerequisites](../apps/desktop/README.md#bundles) |
@@ -39,7 +39,7 @@ Do not commit `dist/`, `wasm/`, or `help/`. Website assembly must preserve
 | Command | Environment |
 |---|---|
 | `cargo xtask dev web` | Full site and proxy at `http://127.0.0.1:8080/` |
-| `cargo xtask dev ui` | Beta UI at `http://127.0.0.1:8081/beta` |
+| `cargo xtask dev ui` | Website UI at `http://127.0.0.1:8081/` |
 | `cargo xtask dev desktop` | Tauri with Vite at `http://localhost:1420/`; needs platform webview packages |
 | `cargo xtask dev extension --browser chromium` | Packaged extension in a temporary browser profile; rerun after changes |
 

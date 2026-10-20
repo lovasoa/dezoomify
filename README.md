@@ -1,6 +1,6 @@
 # Dezoomify
 
-[Dezoomify](https://dezoomify.ophir.dev/beta/) finds the full image behind a
+[Dezoomify](https://dezoomify.ophir.dev/) finds the full image behind a
 zoomable viewer and assembles its tiles into a picture you can save. It works
 with image viewers used by museums, libraries, archives, and map collections.
 
@@ -9,7 +9,7 @@ with image viewers used by museums, libraries, archives, and map collections.
 The same Dezoomify codebase runs on different platforms, with different
 capabilities.
 
-- **[Website](https://dezoomify.ophir.dev/beta/):** The easiest to run, but
+- **[Website](https://dezoomify.ophir.dev/):** The easiest to run, but
   least powerful. Nothing to install: paste the address of the image's page.
   Some websites block it, and it cannot use your browser login. The browser
   limits the maximum image size, so it may save a smaller resolution than
@@ -41,12 +41,12 @@ operating system may ask you to confirm that you trust the installer. Use
 **Help → Check for updates…** to install a signed update after confirmation;
 see the [desktop guide](apps/desktop/desktop-app.md#install).
 
-The [legacy website](https://dezoomify.ophir.dev/) remains available.
+The [legacy website](https://dezoomify.ophir.dev/legacy/) remains available.
 
 ## Save your first image
 
 1. Open the page that shows the zoomable image and copy its address.
-2. Paste it into the [Dezoomify website](https://dezoomify.ophir.dev/beta/)
+2. Paste it into the [Dezoomify website](https://dezoomify.ophir.dev/)
    and press **Dezoomify**.
 3. When the image is ready, press **Save** to keep the PNG file.
 

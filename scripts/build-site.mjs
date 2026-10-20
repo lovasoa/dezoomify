@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Single website builder: regenerates every derived artifact (help pages,
 // wasm glue) and assembles one deployable tree under dist/: the legacy site
-// (vendored under legacy/, copied verbatim) serves /, and the Vite+React app
-// serves /beta. The website-deploy workflow runs this on GitHub Actions and
+// (vendored under legacy/, copied verbatim) serves /legacy/, and the Vite+React
+// app serves /. The website-deploy workflow runs this on GitHub Actions and
 // uploads dist/ to Cloudflare Pages with wrangler; `cargo xtask build web`
 // runs the same script locally. Nothing under dist/ is committed. See
 // docs/development.md for the deployment contract.
@@ -19,9 +19,8 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const DIST = path.join(ROOT, "dist");
-const BETA = "beta";
 
-// The legacy site serves / verbatim from legacy/ (vendored from master).
+// The legacy site serves /legacy/ verbatim from legacy/ (vendored from master).
 // These entries are the legacy repo's dev tooling, never served; everything
 // else in legacy/ is copied byte-identical. legacy/functions/proxy.js is
 // bound at /proxy by the functions/proxy.js re-export shim, not by dist/.
@@ -54,7 +53,7 @@ function copyTree(srcRel, destRel) {
   fs.cpSync(path.join(ROOT, srcRel), path.join(DIST, destRel), { recursive: true });
 }
 
-// The legacy site serves /: everything in legacy/ except dev tooling,
+// The legacy site serves /legacy/: everything in legacy/ except dev tooling,
 // copied byte-identical.
 function copyLegacy() {
   const legacyRoot = path.join(ROOT, "legacy");
@@ -63,13 +62,13 @@ function copyLegacy() {
   }
   for (const entry of fs.readdirSync(legacyRoot, { withFileTypes: true })) {
     if (LEGACY_EXCLUDE.has(entry.name)) continue;
-    copyTree(path.join("legacy", entry.name), entry.name);
+    copyTree(path.join("legacy", entry.name), path.join("legacy", entry.name));
   }
 }
 
 /** The entry bundle, imported glue, and referenced binary must all be present. */
 function hasViteAssets() {
-  const assets = path.join(DIST, BETA, "assets");
+  const assets = path.join(DIST, "assets");
   if (!fs.existsSync(assets)) return false;
   const names = fs.readdirSync(assets);
   return [/^index-.+\.js$/, /^dezoomify-wasm-.+\.js$/, /^dezoomify-wasm_bg-.+\.wasm$/].every(
@@ -114,30 +113,34 @@ function main() {
     ]);
   }
 
-  // 3. Vite production build: hashed JavaScript and WASM assets under dist/beta/.
+  // 3. Vite production build: hashed JavaScript and WASM assets under dist/assets/.
   fs.rmSync(DIST, { recursive: true, force: true });
   run(process.execPath, ["node_modules/vite/bin/vite.js", "build"]);
 
-  // 4. Assemble the legacy site at /, help below /beta/, and Function routes.
+  // 4. Assemble the legacy site at /legacy/, help at /help/, and Function routes.
   copyLegacy();
-  // The beta help pages use the beta app's canonical logo.
   for (const name of ["favicon.svg", "favicon.png"]) {
-    // Help pages at /beta/help/ reference their parent directory's favicon.
-    copyTree(name, path.join(BETA, name));
+    // Help pages at /help/ reference their parent directory's favicon.
+    copyTree(name, name);
   }
-  copyTree("help", path.join(BETA, "help"));
+  copyTree("help", "help");
+  // Keep old app, help, and privacy-policy links working after the promotion.
+  fs.writeFileSync(path.join(DIST, "_redirects"), "/beta / 301\n/beta/* /:splat 301\n");
+  // A top-level 404 disables Pages' implicit SPA fallback for missing files.
+  copyTree("legacy/404.html", "404.html");
   fs.writeFileSync(path.join(DIST, "_routes.json"), `${JSON.stringify(ROUTES, null, 2)}\n`);
 
   // 5. Sanity: the served tree must contain the deployed contract's keys.
   for (const must of [
     "index.html",
     "404.html",
-    "zoommanager.js",
-    path.join("dezoomers", "zoomify.js"),
-    path.join(BETA, "index.html"),
-    path.join(BETA, "privacy.html"),
-    path.join(BETA, "terms.html"),
-    path.join(BETA, "help", "index.html"),
+    "legacy/index.html",
+    "legacy/zoommanager.js",
+    "legacy/dezoomers/zoomify.js",
+    "privacy.html",
+    "terms.html",
+    "help/index.html",
+    "_redirects",
     "_routes.json",
   ]) {
     if (!fs.existsSync(path.join(DIST, must))) {
@@ -145,12 +148,12 @@ function main() {
     }
   }
   if (!hasViteAssets()) {
-    throw new Error("assembled dist/beta/assets is missing the entry bundle or WASM assets");
+    throw new Error("assembled dist/assets is missing the entry bundle or WASM assets");
   }
   const count = spawnSync("find", [DIST, "-type", "f"], { encoding: "utf8" });
   const files = count.stdout.trim().split("\n").length;
   console.log(
-    `build-site: dist/ assembled (${files} files; legacy at /, Vite+React app at /${BETA})`,
+    `build-site: dist/ assembled (${files} files; Vite+React app at /, legacy at /legacy/)`,
   );
 }
 

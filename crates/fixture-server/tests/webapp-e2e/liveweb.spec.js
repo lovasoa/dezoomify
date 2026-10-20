@@ -74,7 +74,7 @@ for (const [id, url] of TARGETS) {
     // green. At least one planned tile (a non-input request to the site
     // origin) must return 2xx/3xx. Tile 404s on the site origin, or tile-like
     // 404s against the app itself (the krpano regression where relative
-    // galleria_04.tiles/* resolved against /beta/), fail the target outright.
+    // galleria_04.tiles/* resolved against /), fail the target outright.
     const tileUrls = [];
     const tileOkUrls = [];
     const tileFailedUrls = [];
@@ -94,7 +94,7 @@ for (const [id, url] of TARGETS) {
         if (target !== url) tileUrls.push(target);
       } else if (target.startsWith(ADDR) && isTileLike(target)) {
         // Wrong-base tiles (relative metadata URLs resolved against the app
-        // page) surface here as /beta/*.tiles/* 404s; record for the verdict.
+        // page) surface here as /*.tiles/* 404s; record for the verdict.
         tileUrls.push(target);
       }
     });
@@ -152,7 +152,7 @@ for (const [id, url] of TARGETS) {
       }
       await route.fulfill({ response: upstream, headers });
     });
-    await page.goto(ADDR + "/beta/", { waitUntil: "domcontentloaded" });
+    await page.goto(ADDR + "/", { waitUntil: "domcontentloaded" });
     const input = page.locator("#dz-url-input");
     await expect(input).toBeVisible();
     await input.fill(url);
@@ -161,7 +161,7 @@ for (const [id, url] of TARGETS) {
     // Bounded observation: wait for at least one readable tile (the app
     // planned tiles from real, auto-selected metadata and fetched one), or
     // an honest terminal state. Breaking on the first tile *request* alone
-    // hid the krpano regression where every tile 404'd against /beta/.
+    // hid the krpano regression where every tile 404'd against /.
     const deadline = Date.now() + PER_TARGET_MS;
     let errorState = null;
     while (Date.now() < deadline) {
@@ -190,7 +190,7 @@ for (const [id, url] of TARGETS) {
     if (appOriginTile404s.length >= 1) {
       throw new Error(
         `${url}: planned tile URLs resolved against the app instead of the site ` +
-          `(relative base lost, e.g. krpano galleria_04.tiles/* under /beta/): ${appOriginTile404s[0]}; ` +
+          `(relative base lost, e.g. krpano galleria_04.tiles/* under /): ${appOriginTile404s[0]}; ` +
           "fix the metadata finalUri propagation",
       );
     }

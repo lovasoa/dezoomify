@@ -1,7 +1,7 @@
 // Single proxy policy vector: pins the bounded public source policy that lives once
 // in src/server/security.ts and serves POST /api/proxy through
 // src/server/proxy.ts plus functions/api/proxy.ts, while GET /proxy keeps the
-// legacy policy served from legacy/. Legacy behavior at / stays byte-identical.
+// legacy policy served from legacy/. The legacy app at /legacy/ keeps using /proxy.
 
 import assert from "node:assert/strict";
 import test from "node:test";

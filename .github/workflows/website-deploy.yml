@@ -1,7 +1,7 @@
 name: website-deploy
 # GitHub Actions builds the entire website into dist/ via scripts/
-# build-site.mjs: the legacy site (vendored under legacy/) at / and the
-# Vite+React app at /beta. It uploads dist/ to the existing Cloudflare Pages project
+# build-site.mjs: the legacy site (vendored under legacy/) at /legacy/ and the
+# Vite+React app at /. It uploads dist/ to the existing Cloudflare Pages project
 # (dezoomify) with wrangler; the project's automatic git deployments are
 # disabled, so this workflow is the only publisher (see docs/development.md).
 # Pushes to main are production deployments; same-repository pull requests
@@ -82,22 +82,22 @@ jobs:
           # user agent, like real users.
           UA="Mozilla/5.0 (X11; Linux x86_64; rv:132.0) Gecko/20100101 Firefox/132.0"
           curl() { command curl -sS -A "$UA" "$@"; }
-          # Content-hash fast path: dist/beta/index.html is copied verbatim
-          # by scripts/build-site.mjs, so the served /beta/ bytes must hash
+          # Content-hash fast path: dist/index.html is copied verbatim
+          # by scripts/build-site.mjs, so the served / bytes must hash
           # identically once THIS build is live (never a stale deploy).
           # Cloudflare Pages injects its Pages Analytics beacon into served
           # HTML at the edge, so the served bytes never equal the uploaded
-          # ones: strip that injection before hashing (see normalize_beta
+          # ones: strip that injection before hashing (see normalize_app
           # below). Backoff keeps early retries cheap while preserving the
           # ~12min budget for slow Pages propagation: 10s, 20s, 40s, then 60s.
-          expected_beta_hash="$(sha256sum dist/beta/index.html | cut -d' ' -f1)"
-          echo "expected beta content hash: $expected_beta_hash (dist/beta/index.html)"
+          expected_app_hash="$(sha256sum dist/index.html | cut -d' ' -f1)"
+          echo "expected app content hash: $expected_app_hash (dist/index.html)"
           # Served HTML arrives with Cloudflare Pages Analytics injected at the
           # edge (the project's analytics toggle); drop every beacon script and
           # its marker comments so the remaining bytes must be exactly the
-          # uploaded dist/beta/index.html. Any other served difference still
+          # uploaded dist/index.html. Any other served difference still
           # fails the gate.
-          normalize_beta() {
+          normalize_app() {
             sed -E \
               -e "s#<!-- Cloudflare Pages Analytics -->##g" \
               -e "s#<script[^>]*static\.cloudflareinsights\.com/beacon\.min\.js[^>]*></script>##g" \
@@ -105,19 +105,23 @@ jobs:
           }
           delay=10
           for i in $(seq 1 15); do
-            # / is the legacy site: the dezoomify-web app, served verbatim.
-            legacy=$(curl -sS -o /tmp/legacy.html -w "%{http_code}" --max-time 20 "https://${{ env.SITE_HOST }}/" || true)
-            # /beta/ is the new app: honest gate on HTTP 200 plus real app
+            # /legacy/ is the legacy site: the dezoomify-web app, served verbatim.
+            legacy=$(curl -sS -o /tmp/legacy.html -w "%{http_code}" --max-time 20 "https://${{ env.SITE_HOST }}/legacy/" || true)
+            # / is the new app: honest gate on HTTP 200 plus real app
             # markers (input, entry), not just the word Dezoomify.
-            beta=$(curl -sS -o /tmp/beta.html -w "%{http_code}" --max-time 20 "https://${{ env.SITE_HOST }}/beta/" || true)
+            app=$(curl -sS -o /tmp/app.html -w "%{http_code}" --max-time 20 "https://${{ env.SITE_HOST }}/" || true)
+            beta_redirect=$(curl -o /dev/null -w "%{http_code} %{redirect_url}" --max-time 20 "https://${{ env.SITE_HOST }}/beta" || true)
+            beta_slash_redirect=$(curl -o /dev/null -w "%{http_code} %{redirect_url}" --max-time 20 "https://${{ env.SITE_HOST }}/beta/" || true)
+            beta_help_redirect=$(curl -o /dev/null -w "%{http_code} %{redirect_url}" --max-time 20 "https://${{ env.SITE_HOST }}/beta/help/" || true)
+            legacy_js=$(curl -o /dev/null -w "%{http_code} %{content_type}" --max-time 20 "https://${{ env.SITE_HOST }}/legacy/zoommanager.js" || true)
             # Vite emits a hashed entry bundle; read its path from the built
             # HTML and probe that exact asset.
-            main_asset=$(grep -oE '/beta/assets/index-[A-Za-z0-9_-]+\.js' dist/beta/index.html | head -1)
+            main_asset=$(grep -oE '/assets/index-[A-Za-z0-9_-]+\.js' dist/index.html | head -1)
             main_js=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 20 "https://${{ env.SITE_HOST }}${main_asset}" || true)
             # Check the actual WASM assets referenced by Vite's bundles. An
             # HTML fallback for a missing asset must fail deployment verification.
-            wasm_js_asset=$(find dist/beta/assets -maxdepth 1 -name 'dezoomify-wasm-*.js' -printf '/beta/assets/%f\n' | head -1)
-            wasm_bin_asset=$(find dist/beta/assets -maxdepth 1 -name 'dezoomify-wasm_bg-*.wasm' -printf '/beta/assets/%f\n' | head -1)
+            wasm_js_asset=$(find dist/assets -maxdepth 1 -name 'dezoomify-wasm-*.js' -printf '/assets/%f\n' | head -1)
+            wasm_bin_asset=$(find dist/assets -maxdepth 1 -name 'dezoomify-wasm_bg-*.wasm' -printf '/assets/%f\n' | head -1)
             wasm_js=$(curl -sS -o /dev/null -w "%{http_code} %{content_type}" --max-time 20 \
               "https://${{ env.SITE_HOST }}${wasm_js_asset}" || true)
             wasm_bin=$(curl -sS -o /dev/null -w "%{http_code} %{content_type}" --max-time 20 \
@@ -133,9 +137,9 @@ jobs:
             legacy_proxy=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 20 \
               "https://${{ env.SITE_HOST }}/proxy" || true)
             # Pages canonicalizes .../index.html to the directory form (308),
-            # so the help gate uses /beta/help/ directly.
+            # so the help gate uses /help/ directly.
             help=$(curl -sS -o /tmp/help.html -w "%{http_code}" --max-time 20 \
-              "https://${{ env.SITE_HOST }}/beta/help/" || true)
+              "https://${{ env.SITE_HOST }}/help/" || true)
             # Exposure gate: the deployment must serve only the assembled
             # dist/ tree. Repository files (README, crates) must not appear;
             # match on content, not status.
@@ -145,25 +149,29 @@ jobs:
             repo_files_served=0
             if grep -qx '# Dezoomify' <<<"$readme"; then repo_files_served=1; fi
             if [ "$cargo_toml_ct" = "application/toml" ]; then repo_files_served=1; fi
-            served_beta_hash="$(normalize_beta /tmp/beta.html 2>/dev/null | sha256sum | cut -d' ' -f1 || true)"
+            served_app_hash="$(normalize_app /tmp/app.html 2>/dev/null | sha256sum | cut -d' ' -f1 || true)"
             if [ "$legacy" = "200" ] \
               && grep -q "rendering-canvas" /tmp/legacy.html \
               && grep -q "zoommanager.js" /tmp/legacy.html \
-              && [ "$beta" = "200" ] \
-              && [ "$served_beta_hash" = "$expected_beta_hash" ] \
-              && grep -q "dz-url-input\|id=\"app\"" /tmp/beta.html \
-              && grep -q "$main_asset" /tmp/beta.html \
+              && [ "$app" = "200" ] \
+              && [ "$beta_redirect" = "301 https://${{ env.SITE_HOST }}/" ] \
+              && [ "$beta_slash_redirect" = "301 https://${{ env.SITE_HOST }}/" ] \
+              && [ "$beta_help_redirect" = "301 https://${{ env.SITE_HOST }}/help/" ] \
+              && case "$legacy_js" in "200 application/javascript"*|"200 text/javascript"*) ;; *) false;; esac \
+              && [ "$served_app_hash" = "$expected_app_hash" ] \
+              && grep -q "dz-url-input\|id=\"app\"" /tmp/app.html \
+              && grep -q "$main_asset" /tmp/app.html \
               && [ "$main_js" = "200" ] \
               && [ "$proxy" = "403" ] && [ "$legacy_proxy" = "400" ] \
                && case "$wasm_js" in "200 application/javascript"*|"200 text/javascript"*) ;; *) false;; esac \
                && case "$wasm_bin" in "200 application/wasm"*) ;; *) false;; esac \
               && [ "$help" = "200" ] && grep -q "dz-help-topics" /tmp/help.html \
               && [ "$repo_files_served" = "0" ] \
-              && ! grep -q "14 of 28" /tmp/beta.html; then
-              echo "deployment live: legacy=$legacy beta=$beta main_asset=$main_asset main_js=$main_js proxy=$proxy legacy_proxy=$legacy_proxy wasm_js=$wasm_js wasm_bin=$wasm_bin help=$help repo_files_served=$repo_files_served beta_hash=$served_beta_hash"
+              && ! grep -q "14 of 28" /tmp/app.html; then
+              echo "deployment live: legacy=$legacy app=$app main_asset=$main_asset main_js=$main_js proxy=$proxy legacy_proxy=$legacy_proxy wasm_js=$wasm_js wasm_bin=$wasm_bin help=$help repo_files_served=$repo_files_served app_hash=$served_app_hash"
               exit 0
             fi
-            echo "attempt $i: legacy=$legacy beta=$beta main_asset=$main_asset main_js=$main_js proxy=$proxy legacy_proxy=$legacy_proxy wasm_js=$wasm_js wasm_bin=$wasm_bin help=$help repo_files_served=$repo_files_served beta_hash=${served_beta_hash:-none} (want $expected_beta_hash); retrying in ${delay}s"
+            echo "attempt $i: legacy=$legacy legacy_js=$legacy_js app=$app beta_redirect=$beta_redirect beta_slash_redirect=$beta_slash_redirect beta_help_redirect=$beta_help_redirect main_asset=$main_asset main_js=$main_js proxy=$proxy legacy_proxy=$legacy_proxy wasm_js=$wasm_js wasm_bin=$wasm_bin help=$help repo_files_served=$repo_files_served app_hash=${served_app_hash:-none} (want $expected_app_hash); retrying in ${delay}s"
             sleep "$delay"
             delay=$(( delay * 2 > 60 ? 60 : delay * 2 ))
           done

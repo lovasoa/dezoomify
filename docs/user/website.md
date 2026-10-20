@@ -2,7 +2,7 @@
 
 # The Dezoomify website
 
-Open the [Dezoomify website](https://dezoomify.ophir.dev/beta/); no installation
+Open the [Dezoomify website](https://dezoomify.ophir.dev/); no installation
 is needed.
 
 ## Save an image
