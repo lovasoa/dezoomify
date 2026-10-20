@@ -37,24 +37,19 @@ mod title_tests;
 #[serde(untagged)]
 enum Document {
     #[serde(deserialize_with = "image_metadata")]
-    Image(ImageInfo),
+    Image(Box<ImageInfo>),
     Current(manifest_types::Manifest),
     Legacy(manifest_types::LegacyManifest),
 }
 
-fn image_metadata<'de, D: serde::Deserializer<'de>>(decoder: D) -> Result<ImageInfo, D::Error> {
+fn image_metadata<'de, D: serde::Deserializer<'de>>(
+    decoder: D,
+) -> Result<Box<ImageInfo>, D::Error> {
     let info = <ImageInfo as serde::Deserialize>::deserialize(decoder)?;
-    if matches!(info.iiif_type.as_deref(), Some("Manifest" | "sc:Manifest"))
-        || info.context.as_deref().is_some_and(|context| {
-            context.contains("iiif.io/api/presentation")
-                || context.contains("shared-canvas.org/ns/context")
-        })
-    {
-        return Err(serde::de::Error::custom(
-            "presentation metadata is not an image service",
-        ));
+    if !info.has_distinctive_iiif_properties() {
+        return Err(serde::de::Error::custom("not an IIIF image service"));
     }
-    Ok(info)
+    Ok(Box::new(info))
 }
 
 const ROUTES: &[DiscoveryRoute] = &[
@@ -92,23 +87,21 @@ fn decode(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryEr
 
 impl Metadata for Document {
     fn decode(self, resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
-        let (infos, warning) = match self {
-            Self::Current(manifest) => (
-                manifest.extract_image_infos(resource.final_uri()),
-                manifest_type_warning(&manifest.manifest_type),
-            ),
-            Self::Legacy(manifest) => (
-                manifest.extract_image_infos(resource.final_uri()),
-                manifest_type_warning(&manifest.manifest_type),
-            ),
+        let infos = match self {
+            Self::Current(manifest) => manifest.extract_image_infos(resource.final_uri()),
+            Self::Legacy(manifest) => manifest.extract_image_infos(resource.final_uri()),
             Self::Image(info) => {
-                return catalog_from_levels(levels_from_info(resource.final_uri(), info)?)
+                return catalog_from_levels(levels_from_info(resource.final_uri(), *info)?)
                     .map(ParsedResource::Complete);
             }
         };
-        Ok(ParsedResource::Catalog(catalog_from_manifest_info(
-            infos, warning,
-        )))
+        if infos.is_empty() {
+            return Err(DiscoveryError::rejected(
+                crate::core::discovery::RejectionKind::NoImage,
+                "no IIIF painting images",
+            ));
+        }
+        Ok(ParsedResource::Catalog(catalog_from_manifest_info(infos)))
     }
 }
 
@@ -295,17 +288,20 @@ fn catalog(uri: &str, contents: &[u8]) -> Result<DiscoveryCatalog, DiscoveryErro
     let parsed = match serde_json::from_slice::<Document>(contents) {
         Ok(document) => document.decode(resource),
         Err(error) => {
-            embedded_metadata(resource).unwrap_or_else(|| Err(IIIFError::from(error).into()))
+            if Url::parse(uri).is_ok_and(|url| url.path().ends_with("/info.json"))
+                && let Ok(info) = serde_json::from_slice::<ImageInfo>(contents)
+                && info.is_legacy_v1_info()
+            {
+                Document::Image(Box::new(info)).decode(resource)
+            } else {
+                embedded_metadata(resource).unwrap_or_else(|| Err(IIIFError::from(error).into()))
+            }
         }
     }?;
     parsed.compile("iiif")
 }
 
-fn catalog_from_manifest_info(
-    image_infos: Vec<manifest_types::ExtractedImageInfo>,
-    warning: Option<String>,
-) -> CatalogPlan {
-    let warnings: Vec<String> = warning.into_iter().collect();
+fn catalog_from_manifest_info(image_infos: Vec<manifest_types::ExtractedImageInfo>) -> CatalogPlan {
     let resources = image_infos.into_iter().map(|image_info| {
         let title = determine_title(&image_info);
         DeferredResource {
@@ -313,7 +309,7 @@ fn catalog_from_manifest_info(
             title,
             size: image_info.size,
             preview: image_info.preview,
-            warnings: warnings.clone(),
+            warnings: Vec::new(),
         }
     });
     CatalogPlan::deferred(resources)
@@ -327,7 +323,7 @@ fn manifest_preview(
     size: Option<&crate::model::Size>,
 ) -> Option<crate::model::Tile> {
     let size = size?;
-    let mut profile: tile_info::Profile = serde_json::from_value(service.profile.clone()?).ok()?;
+    let mut profile = service.profile.clone()?;
     if profile == tile_info::Profile::Reference("level1".into())
         && service.service_type == "ImageService3"
     {
@@ -387,7 +383,7 @@ fn manifest_previews_use_declared_capabilities_and_image_dimensions() {
     let mut service = manifest_types::ImageService {
         id: "https://images.test/page".into(),
         service_type: "ImageService3".into(),
-        profile: Some(serde_json::json!("level2")),
+        profile: Some(tile_info::Profile::Reference("level2".into())),
         ..Default::default()
     };
     let size = crate::model::Size {
@@ -413,12 +409,14 @@ fn manifest_previews_use_declared_capabilities_and_image_dimensions() {
         serde_json::json!({"unknown": true}),
         serde_json::Value::Null,
     ] {
-        service.profile = Some(profile);
+        service.profile = serde_json::from_value(profile).ok();
         assert!(
             manifest_preview("https://images.test/manifest.json", &service, Some(&size)).is_none()
         );
     }
-    service.profile = Some(serde_json::json!("http://iiif.io/api/image/2/level1.json"));
+    service.profile = Some(tile_info::Profile::Reference(
+        "http://iiif.io/api/image/2/level1.json".into(),
+    ));
     let needle = crate::model::Size {
         width: 1,
         height: 100_000,
@@ -440,15 +438,6 @@ fn catalog_from_levels(mut levels: Vec<ResolvedLevel>) -> Result<DiscoveryCatalo
     ImagePlan::new(None, levels)
         .with_warnings(warnings)
         .compile("iiif")
-}
-
-fn manifest_type_warning(value: &serde_json::Value) -> Option<String> {
-    let type_name = value.as_str()?;
-    (!matches!(
-        type_name,
-        "Manifest" | "sc:Manifest" | "ImageService2" | "ImageService3" | "iiif:ImageProfile"
-    ))
-    .then(|| format!("IIIF manifest has unexpected type '{type_name}'; attempting lenient parsing"))
 }
 
 #[cfg(test)]
@@ -1024,7 +1013,7 @@ mod manifest_parsing_tests {
     use super::*;
 
     fn legacy_manifest_data() -> &'static [u8] {
-        r#"{"@context":"http://iiif.io/api/presentation/2/context.json","@type":"sc:Manifest","label":"Legacy Book","sequences":[{"canvases":[{"label":"Page 1","images":[{"resource":{"@type":"dctypes:Image","@id":"https://example.com/iiif/page1/full/843,/0/default.jpg","service":{"@id":"https://example.com/iiif/page1"}}}]}]}]}"#
+        r#"{"@context":"http://iiif.io/api/presentation/2/context.json","@type":"sc:Manifest","label":"Legacy Book","sequences":[{"canvases":[{"label":"Page 1","images":[{"resource":{"@type":"dctypes:Image","@id":"https://example.com/iiif/page1/full/843,/0/default.jpg","service":{"@context":"http://iiif.io/api/image/2/context.json","@id":"https://example.com/iiif/page1"}}}]}]}]}"#
             .as_bytes()
     }
 
@@ -1080,6 +1069,30 @@ mod manifest_parsing_tests {
     }
 
     #[test]
+    fn repeated_metadata_values_do_not_turn_a_manifest_thumbnail_into_a_service() {
+        let manifest = include_str!("../../../../fixtures/iiif/repeated-metadata/manifest.json")
+            .replace("{{origin}}", "https://library.test");
+        let (result, _) = crate::test_support::discover(
+            SPEC,
+            "https://library.test/manifest",
+            &[(manifest.as_bytes(), None)],
+        );
+        let catalog = result.unwrap();
+        let [DiscoveredEntry::Deferred(image)] = catalog.entries() else {
+            panic!("manifest should defer to the image service, not its static thumbnail");
+        };
+        assert_eq!(image.uri, "https://library.test/fixtures/iiif/v2/info.json");
+        assert_eq!(image.title.as_deref(), Some("Legacy manifest - Map"));
+        assert_eq!(
+            image.size,
+            Some(crate::model::Size {
+                width: 512,
+                height: 512
+            })
+        );
+    }
+
+    #[test]
     fn legacy_manifests_parse_and_label_images() {
         let infos = parse_iiif_manifest_from_bytes(
             legacy_manifest_data(),
@@ -1119,19 +1132,8 @@ mod manifest_parsing_tests {
     fn test_parse_json_not_a_manifest_type() {
         let manifest_url = "https://example.com/not_a_manifest.json";
         let json_data = r#"{"id": "test", "type": "NotAManifest", "items": [{"id":"canvas","type":"Canvas","items":[{"items":[{"motivation":"painting","body":{"id":"image.jpg","type":"Image","service":[{"id":"https://example.com/iiif/page1","type":"ImageService3"}]}}]}]}]}"#;
-        // The parser remains lenient, while the application-facing catalog carries the warning.
-        // The function itself should succeed if the structure is parsable into Manifest.
-        let infos = parse_iiif_manifest_from_bytes(json_data.as_bytes(), manifest_url).unwrap();
-        assert_eq!(infos.len(), 1);
-
-        let catalog = catalog(manifest_url, json_data.as_bytes()).unwrap();
-        let [DiscoveredEntry::Deferred(image)] = catalog.entries() else {
-            panic!("lenient manifest parsing should produce one deferred image");
-        };
-        assert_eq!(
-            image.warnings,
-            ["IIIF manifest has unexpected type 'NotAManifest'; attempting lenient parsing"]
-        );
+        assert!(parse_iiif_manifest_from_bytes(json_data.as_bytes(), manifest_url).is_err());
+        assert!(catalog(manifest_url, json_data.as_bytes()).is_err());
     }
 
     #[test]

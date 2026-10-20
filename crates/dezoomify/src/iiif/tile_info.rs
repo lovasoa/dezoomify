@@ -8,19 +8,78 @@ use serde::{Deserialize, Serialize};
 use crate::Vec2d;
 use crate::core::resolve_relative;
 
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
+#[serde(untagged)]
+pub enum StringOrArray {
+    String(String),
+    Array(Vec<String>),
+    #[default]
+    None,
+}
+
+impl StringOrArray {
+    pub(super) fn strings(&self) -> &[String] {
+        match self {
+            Self::String(value) => std::slice::from_ref(value),
+            Self::Array(values) => values,
+            Self::None => &[],
+        }
+    }
+
+    pub(super) fn matches(&self, predicate: impl Fn(&str) -> bool) -> bool {
+        self.strings().iter().any(|value| predicate(value))
+    }
+}
+
+impl From<&str> for StringOrArray {
+    fn from(value: &str) -> Self {
+        Self::String(value.into())
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
+#[serde(untagged)]
+pub enum Context {
+    Uri(String),
+    Array(Vec<Context>),
+    // JSON-LD extension definitions are arbitrary JSON, not IIIF properties.
+    Inline(std::collections::HashMap<String, serde_json::Value>),
+    #[default]
+    None,
+}
+
+impl Context {
+    fn matches(&self, predicate: impl Fn(&str) -> bool + Copy) -> bool {
+        match self {
+            Self::Uri(uri) => predicate(uri),
+            Self::Array(contexts) => contexts.iter().any(|context| context.matches(predicate)),
+            Self::Inline(_) | Self::None => false,
+        }
+    }
+}
+
+impl From<&str> for Context {
+    fn from(value: &str) -> Self {
+        Self::Uri(value.into())
+    }
+}
+
 #[derive(Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ImageInfo {
     #[serde(rename = "@context", skip_serializing_if = "Option::is_none")]
-    pub context: Option<String>,
+    pub context: Option<Context>,
     #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
     #[serde(alias = "@type")]
-    pub iiif_type: Option<String>,
+    pub iiif_type: Option<StringOrArray>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub protocol: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub profile: Option<Profile>,
     #[serde(rename = "@id", alias = "id", skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
+    // Image API 1.0 uses an unencoded identifier, not a service URL.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub identifier: Option<String>,
     pub width: u32,
     pub height: u32,
 
@@ -90,7 +149,28 @@ impl ImageInfo {
             .chain(pinfo.qualities.iter().flat_map(|x| x.iter()))
             .max_by_key(|&s| QUALITY_ORDER.iter().position(|&x| x == s))
             .cloned()
-            .unwrap_or_else(|| "default".into())
+            .unwrap_or_else(|| {
+                if self.iiif_type.as_ref().is_some_and(|value| {
+                    value.matches(|value| image_service_version(value) == Some(1))
+                }) || (self.identifier.is_some()
+                    && self.iiif_type.is_none()
+                    && self.context.is_none()
+                    && self.protocol.is_none())
+                    || self.context.as_ref().is_some_and(|context| {
+                        context.matches(|value| {
+                            matches!(
+                                without_scheme(value),
+                                "library.stanford.edu/iiif/image-api/1.1/context.json"
+                                    | "iiif.io/api/image/1/context.json"
+                            )
+                        })
+                    })
+                {
+                    "native".into()
+                } else {
+                    "default".into()
+                }
+            })
     }
 
     /// Best tile format, matching the deployed web behavior: prefer `png`
@@ -131,7 +211,9 @@ impl ImageInfo {
 
     #[must_use]
     pub fn supports_v3_size_upscaling(&self) -> bool {
-        self.iiif_type.as_deref() == Some("ImageService3")
+        self.iiif_type
+            .as_ref()
+            .is_some_and(|value| value.matches(|value| image_service_version(value) == Some(3)))
             && self
                 .extra_features
                 .as_ref()
@@ -183,45 +265,88 @@ impl ImageInfo {
         tiles
     }
 
-    /// Because our parser is so tolerant, we need to evaluate the probability
-    /// that this is not in fact a valid IIIF image
+    pub(super) fn has_presentation_signature(&self) -> bool {
+        self.iiif_type.as_ref().is_some_and(|value| {
+            value.matches(|value| {
+                matches!(value, "Manifest" | "sc:Manifest" | "Canvas" | "sc:Canvas")
+            })
+        }) || self.context.as_ref().is_some_and(|value| {
+            value.matches(|value| {
+                matches!(
+                    without_scheme(value),
+                    "iiif.io/api/presentation/2/context.json"
+                        | "iiif.io/api/presentation/3/context.json"
+                        | "www.shared-canvas.org/ns/context.json"
+                        | "shared-canvas.org/ns/context.json"
+                )
+            })
+        })
+    }
+
+    /// Minimal Image API 1.0 documents have no required IIIF marker. Only use
+    /// this compatibility check at an explicitly requested `info.json` URL.
+    pub(super) fn is_legacy_v1_info(&self) -> bool {
+        self.identifier
+            .as_ref()
+            .is_some_and(|identifier| !identifier.trim().is_empty())
+            && self.width > 0
+            && self.height > 0
+            && self.id.is_none()
+            && self.iiif_type.is_none()
+            && self.context.is_none()
+            && self.protocol.is_none()
+            && self.profile.is_none()
+            && self.tiles.is_none()
+    }
+
+    /// Embedded objects require evidence of an Image API service. An identifier,
+    /// dimensions or image formats also commonly describe ordinary web images.
     #[must_use]
     pub fn has_distinctive_iiif_properties(&self) -> bool {
-        let iiif_type = self.iiif_type.as_deref();
-        let schema_image_object = matches!(
-            iiif_type,
-            Some(
-                "ImageObject"
-                    | "schema:ImageObject"
-                    | "http://schema.org/ImageObject"
-                    | "https://schema.org/ImageObject"
-            )
-        );
-        let has_iiif_signature = self.protocol.as_deref() == Some("http://iiif.io/api/image")
-            || self.context.as_deref().is_some_and(|context| {
-                context.contains("iiif.io/api/image/")
-                    || context.contains("library.stanford.edu/iiif/image-api/")
+        if self.width == 0
+            || self.height == 0
+            || self.has_presentation_signature()
+            || self.iiif_type.as_ref().is_some_and(|value| {
+                value.matches(|value| {
+                    matches!(value, "ImageProfile" | "iiif:ImageProfile")
+                        || matches!(
+                            without_scheme(value),
+                            "iiif.io/api/image/2#ImageProfile" | "iiif.io/api/image/3#ImageProfile"
+                        )
+                })
             })
-            || self.tiles.is_some()
-            || self.formats.is_some()
-            || matches!(
-                iiif_type,
-                Some("iiif:Image" | "iiif:ImageProfile" | "ImageService2" | "ImageService3")
-            );
-
-        // Schema.org ImageObjects commonly carry an @id and dimensions, but
-        // those describe a static web image rather than a IIIF image service.
-        // Keep accepting them when the object also has an explicit IIIF field.
-        if schema_image_object && !has_iiif_signature {
+        {
             return false;
         }
-
-        self.id.is_some()
-            || self.protocol.is_some()
-            || self.context.is_some()
-            || self.tiles.is_some()
-            || self.formats.is_some()
-            || matches!(iiif_type, Some("iiif:ImageProfile" | "ImageService3"))
+        let explicit_signature = self
+            .protocol
+            .as_deref()
+            .is_some_and(|value| without_scheme(value) == "iiif.io/api/image")
+            || self.context.as_ref().is_some_and(image_context)
+            || self.iiif_type.as_ref().is_some_and(|value| {
+                value.matches(|value| {
+                    image_service_version(value).is_some() || value == "iiif:Image"
+                })
+            })
+            || self.profile.as_ref().is_some_and(Profile::is_image_profile);
+        if explicit_signature {
+            return true;
+        }
+        self.iiif_type.is_none()
+            && self.protocol.is_none()
+            && self.context.is_none()
+            && (self.tiles.as_ref().is_some_and(|tiles| {
+                tiles.iter().any(|tile| {
+                    tile.width > 0
+                        && tile.height != Some(0)
+                        && !tile.scale_factors.is_empty()
+                        && tile.scale_factors.iter().all(|&scale| scale > 0)
+                })
+            }) || (self.tile_width.is_some_and(|width| width > 0)
+                && self.tile_height != Some(0)
+                && self.scale_factors.as_ref().is_some_and(|scales| {
+                    !scales.is_empty() && scales.iter().all(|&scale| scale > 0)
+                })))
     }
 
     /// Some info.json files contain a an invalid value for "@id",
@@ -248,6 +373,43 @@ impl ImageInfo {
             .as_ref()
             .map_or_else(Vec::new, Profile::warnings)
     }
+}
+
+pub(super) fn image_service_version(value: &str) -> Option<u8> {
+    match value {
+        "ImageService1" => Some(1),
+        "ImageService2" => Some(2),
+        "ImageService3" => Some(3),
+        value => match without_scheme(value) {
+            "iiif.io/api/image/1#ImageService" => Some(1),
+            "iiif.io/api/image/2#ImageService" => Some(2),
+            "iiif.io/api/image/3#ImageService" => Some(3),
+            _ => None,
+        },
+    }
+}
+
+pub(super) fn image_context(value: &Context) -> bool {
+    value.matches(|value| {
+        matches!(
+            without_scheme(value),
+            "iiif.io/api/image/1/context.json"
+                | "iiif.io/api/image/2/context.json"
+                | "iiif.io/api/image/3/context.json"
+                | "library.stanford.edu/iiif/image-api/1.1/context.json"
+        )
+    })
+}
+
+fn image_profile_reference(reference: &str) -> bool {
+    !without_scheme(reference).is_empty() && profile_reference_info(reference).is_some()
+}
+
+fn without_scheme(value: &str) -> &str {
+    value
+        .strip_prefix("http://")
+        .or_else(|| value.strip_prefix("https://"))
+        .unwrap_or("")
 }
 
 fn rewrite_default_port_origin(resolved: &str, info_uri: &str, raw_id: &str) -> String {
@@ -366,9 +528,17 @@ fn update_max<T: Ord + Copy>(target: &mut Option<T>, new: Option<T>) {
 }
 
 impl Profile {
+    pub(super) fn is_image_profile(&self) -> bool {
+        match self {
+            Self::Reference(reference) => image_profile_reference(reference),
+            Self::Info(_) => false,
+            Self::Multiple(profiles) => profiles.iter().flatten().any(Self::is_image_profile),
+        }
+    }
+
     fn warnings(&self) -> Vec<String> {
         match self {
-            Self::Reference(reference) if !PROFILE_REFERENCES.contains_key(reference) => {
+            Self::Reference(reference) if profile_reference_info(reference).is_none() => {
                 vec![format!(
                     "Unknown IIIF profile reference '{reference}'; using default capabilities"
                 )]
@@ -383,8 +553,7 @@ impl Profile {
 
     fn profile_info(&self) -> Cow<'_, ProfileInfo> {
         match self {
-            Profile::Reference(s) => PROFILE_REFERENCES
-                .get(s)
+            Profile::Reference(s) => profile_reference_info(s)
                 .map_or_else(|| Cow::Owned(ProfileInfo::default()), Cow::Borrowed),
             Profile::Info(info) => Cow::Borrowed(info),
             Profile::Multiple(profiles) => {
@@ -420,6 +589,27 @@ impl Profile {
             }
         }
     }
+}
+
+fn profile_reference_info(reference: &str) -> Option<&'static ProfileInfo> {
+    let canonical = match reference {
+        "level0" => Cow::Borrowed("http://iiif.io/api/image/3/level0.json"),
+        "level1" => Cow::Borrowed("http://iiif.io/api/image/3/level1.json"),
+        reference if reference.starts_with("https://") => {
+            Cow::Owned(reference.replacen("https://", "http://", 1))
+        }
+        reference => Cow::Borrowed(reference),
+    };
+    let canonical =
+        if canonical.starts_with("http://library.stanford.edu/iiif/image-api/compliance.html#") {
+            Cow::Owned(canonical.replace(
+                "/image-api/compliance.html#",
+                "/image-api/1.1/compliance.html#",
+            ))
+        } else {
+            canonical
+        };
+    PROFILE_REFERENCES.get(canonical.as_ref())
 }
 
 impl Default for TileInfo {
@@ -489,12 +679,83 @@ fn schema_image_objects_need_an_explicit_iiif_signature() {
         assert!(image("ImageObject", context, None).has_distinctive_iiif_properties());
     }
 
-    // Existing lenient discovery for untyped service URLs remains intact.
+    // An untyped identifier and dimensions can equally describe a thumbnail.
     let legacy_service: ImageInfo = serde_json::from_str(
         r#"{"@id":"https://example.org/iiif/image","width":1785,"height":2560}"#,
     )
     .unwrap();
-    assert!(legacy_service.has_distinctive_iiif_properties());
+    assert!(!legacy_service.has_distinctive_iiif_properties());
+}
+
+#[test]
+fn json_ld_context_arrays_and_legacy_profiles_preserve_image_capabilities() {
+    for context in [
+        serde_json::json!([
+            "https://example.test/extension.json",
+            "http://iiif.io/api/image/3/context.json"
+        ]),
+        serde_json::json!([{"custom": "https://example.test/custom"}, "http://iiif.io/api/image/3/context.json"]),
+    ] {
+        let image: ImageInfo = serde_json::from_value(serde_json::json!({
+            "@context": context,
+            "id": "https://images.test/item",
+            "type": "ImageService3",
+            "protocol": "http://iiif.io/api/image",
+            "width": 1000, "height": 800, "profile": "level1"
+        }))
+        .unwrap();
+        assert!(image.has_distinctive_iiif_properties());
+        assert!(image.supports_custom_size());
+        assert!(image.warnings().is_empty());
+    }
+
+    for profile in [
+        "http://library.stanford.edu/iiif/image-api/compliance.html#level1",
+        "https://library.stanford.edu/iiif/image-api/1.1/compliance.html#level1",
+    ] {
+        let image: ImageInfo = serde_json::from_value(serde_json::json!({
+            "identifier": "item", "width": 1000, "height": 800, "profile": profile
+        }))
+        .unwrap();
+        assert!(image.has_distinctive_iiif_properties());
+        assert_eq!(image.best_quality(), "native");
+        assert_eq!(image.preferred_size_format(), TileSizeFormat::Width);
+        assert!(image.warnings().is_empty());
+    }
+    let image: ImageInfo = serde_json::from_value(serde_json::json!({
+        "@context": "http://library.stanford.edu/iiif/image-api/1.1/context.json",
+        "@id": "https://images.test/item", "width": 1000, "height": 800
+    }))
+    .unwrap();
+    assert_eq!(image.best_quality(), "native");
+}
+
+#[test]
+fn ordinary_images_and_lookalike_contexts_are_not_image_services() {
+    for fields in [
+        serde_json::json!({"id": "https://images.test/thumbnail.jpg"}),
+        serde_json::json!({"@context": "https://schema.org", "@type": ["ImageObject"]}),
+        serde_json::json!({"formats": ["jpg", "png"]}),
+        serde_json::json!({"protocol": "https://example.test/protocol"}),
+        serde_json::json!({"@context": "https://evil.test/iiif.io/api/image/3/context.json"}),
+        serde_json::json!({"@context": {"unrelated": "http://iiif.io/api/image/3/context.json"}}),
+        serde_json::json!({"@type": "iiif:ImageProfile"}),
+        serde_json::json!({"type": "ImageProfile", "@context": "http://iiif.io/api/image/3/context.json"}),
+        serde_json::json!({"type": "Canvas"}),
+        serde_json::json!({"tiles": []}),
+        serde_json::json!({"tiles": [{"width": 256, "scaleFactors": [0]}]}),
+        serde_json::json!({"type": "Product", "tiles": [{"width": 256, "scaleFactors": [1]}]}),
+        serde_json::json!({"type": "ImageObject", "tiles": [{"width": 256, "scaleFactors": [1]}]}),
+        serde_json::json!({"protocol": "dzi", "tiles": [{"width": 256, "scaleFactors": [1]}]}),
+        serde_json::json!({"@context": "https://schema.org", "tiles": [{"width": 256, "scaleFactors": [1]}]}),
+        serde_json::json!({"type": "Manifest", "tiles": [{"width": 256, "scaleFactors": [1]}]}),
+    ] {
+        let mut value = fields;
+        value["width"] = 1000.into();
+        value["height"] = 800.into();
+        let image: ImageInfo = serde_json::from_value(value.clone()).unwrap();
+        assert!(!image.has_distinctive_iiif_properties(), "{value}");
+    }
 }
 
 #[test]

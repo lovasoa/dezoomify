@@ -1,0 +1,14 @@
+{
+  "type": "Manifest", "label": {"fr": ["Image"]},
+  "metadata": [{"label": "Title", "value": "Four quadrants"}],
+  "items": [{"type": "Canvas", "label": {"en": ["", "ignored"], "fr": ["Page"]},
+    "items": [{"type": "AnnotationPage", "items": [{"type": "Annotation",
+      "body": [
+        {"type": "Video", "id": "trailer.mp4"},
+        {"type": "Choice", "items": [{"type": "Image", "service": [
+          {"id": "../auth", "type": "AuthCookieService1"},
+          {"id": "../v3", "type": "ImageService3"}
+        ]}]}
+      ]
+    }]}]}]
+}
