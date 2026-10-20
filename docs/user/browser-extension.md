@@ -55,6 +55,9 @@ artwork. Use Dezoomify when zooming stays sharp and the viewer loads many pieces
 If tiled discovery finds no source, the extension can download a large image
 already loaded on the page directly from its URL. The site may offer a
 larger version. Page-created blob URLs are not supported by this fallback.
+If no large image is loaded, it can also use an unambiguous image download link.
+If the result is not what you wanted, open **Technical details & logs** to report
+it with the original discovery diagnostics.
 
 ## If something goes wrong
 

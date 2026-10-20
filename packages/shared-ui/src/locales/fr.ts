@@ -164,6 +164,8 @@ export const fr = {
   "view.done.guidance":
     "Utilisez le bouton d’enregistrement pour télécharger votre image. Les couleurs peuvent varier légèrement, car les téléchargements dans le navigateur ne conservent pas le profil colorimétrique d’origine. Pour les formats qui préservent ces profils, utilisez l’application de bureau.",
   "view.done.summary": "{width} × {height} pixels ({mime})",
+  "view.done.fallback":
+    "Une image disponible sur cette page a été enregistrée. Si ce n’est pas celle que vous souhaitiez, vous pouvez le signaler dans les détails techniques ci-dessous.",
   "view.display.guidance":
     "Votre navigateur peut afficher cette image, mais le site d’origine ne l’autorise pas à créer un fichier téléchargeable. Essayez l’application de bureau ou l’extension de navigateur pour l’enregistrer.",
   // Failure section.

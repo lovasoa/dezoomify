@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { findLoadedImage } from "../../src/job/loaded-image.ts";
+import { parseHTML } from "linkedom";
+import { findImageDownloadLink, findLoadedImage } from "../../src/job/loaded-image.ts";
 
 test("selects a loaded image by intrinsic size, independent of CSS size or URL format", (t) => {
   const image = (width, height, src, complete = true) => ({
@@ -28,4 +29,34 @@ test("selects a loaded image by intrinsic size, independent of CSS size or URL f
   assert.equal(findLoadedImage().image.url, document.images[0].src);
   document.images = [image(512, 512, "https://gallery.example/tile")];
   assert.equal(findLoadedImage().image, undefined);
+});
+
+test("only an unambiguous explicit image download is used as a link fallback", (t) => {
+  const previous = { location: globalThis.location, document: globalThis.document };
+  t.after(() => Object.assign(globalThis, previous));
+  globalThis.location = { href: "https://gallery.example/" };
+  const url = "https://images.example/full.JPG?download=1";
+  const links = [
+    `<a href="https://images.example/unmarked.jpg">Ordinary link</a>`,
+    `<a download href="https://images.example/catalog.pdf">Catalog</a>`,
+    `<a download href="javascript:alert(1)">Invalid</a>`,
+  ];
+  const scan = (...extra) => {
+    globalThis.document = parseHTML(
+      `<html><body>${links.concat(extra).join("")}</body></html>`,
+    ).document;
+    return findImageDownloadLink().url;
+  };
+  assert.equal(scan(), undefined);
+  assert.equal(
+    scan(`<a download href="${url}">Full image</a>`, `<a download href="${url}">Again</a>`),
+    url,
+  );
+  assert.equal(
+    scan(
+      `<a download href="${url}">Full image</a>`,
+      `<a download href="https://images.example/other.png">Other image</a>`,
+    ),
+    undefined,
+  );
 });

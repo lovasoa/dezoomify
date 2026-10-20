@@ -5,6 +5,13 @@ import { plainMessageFor } from "./failure.ts";
 import { t } from "./i18n.ts";
 import type { ViewCallbacks } from "./view-types.ts";
 
+function attemptDescription(report: DiagnosticReport, product: string): string {
+  const version = report.context.version ? ` (${report.context.version})` : "";
+  return report.outcome?.event === "completed"
+    ? `Dezoomify ${product}${version} saved an image available on this page. Please describe any problem with the result below.`
+    : `I tried to download this zoomable image using the Dezoomify ${product}${version}, but the attempt failed.`;
+}
+
 export function diagnosticIssueUrl(report: DiagnosticReport, error?: JobError): string {
   const input = String(report.context.input ?? "unknown");
   const finalUrl =
@@ -39,13 +46,14 @@ export function diagnosticIssueUrl(report: DiagnosticReport, error?: JobError): 
       ),
     )
     .map(([key, value]) => `${key}: ${value}`);
+  const completed = report.outcome?.event === "completed";
   const intro = [
     input,
     ...(finalUrl && finalUrl !== input ? [`Resolved URL: ${finalUrl}`] : []),
     "",
     ...message.split("\n").map((line) => `> ${line}`),
     "",
-    `I tried to download this zoomable image using the Dezoomify ${product}${report.context.version ? ` (${report.context.version})` : ""}, but the attempt failed.`,
+    attemptDescription(report, product),
     ...summary.map((line) => `- ${line}`),
     "",
     "<!-- Please add what you expected, what happened, and any steps needed to reproduce the problem. -->",
@@ -54,7 +62,7 @@ export function diagnosticIssueUrl(report: DiagnosticReport, error?: JobError): 
   const failures = report.failures
     .map(({ count, first }) => `${count} × ${first.event}: ${JSON.stringify(first.fields)}`)
     .join("\n");
-  const details = `Error\n${JSON.stringify(error ?? facts, null, 2)}\n\n${failures}\n\n${formatDiagnosticReport(report)}`;
+  const details = `${completed ? "Diagnostics" : "Error"}\n${JSON.stringify(error ?? facts, null, 2)}\n\n${failures}\n\n${formatDiagnosticReport(report)}`;
   // A longer fence keeps server previews containing backticks inside the block.
   const fence = "`".repeat(
     Math.max(3, ...Array.from(details.matchAll(/`+/g), (match) => match[0].length + 1)),

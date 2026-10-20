@@ -16,3 +16,19 @@ export function findLoadedImage() {
   }
   return { documentUrl: location.href, image };
 }
+
+/** A second fallback: one explicit image download, without guessing its dimensions. */
+export function findImageDownloadLink() {
+  const urls = new Set<string>();
+  for (const link of document.querySelectorAll<HTMLAnchorElement>("a[download][href]")) {
+    const url = URL.parse(link.href);
+    if (
+      url &&
+      /^https?:$/.test(url.protocol) &&
+      url.href.length <= 2048 &&
+      /\.(jpe?g|png|webp|gif|avif|tiff?|bmp)$/i.test(url.pathname)
+    )
+      urls.add(url.href);
+  }
+  return { documentUrl: location.href, url: urls.size === 1 ? [...urls][0] : undefined };
+}

@@ -705,17 +705,34 @@ test("packaged browser format matrices", { concurrency: 2 }, async (matrix) => {
   );
 });
 
-for (const [browser, run] of [
-  ["chromium", runChromiumJob],
-  ["firefox", runFirefoxJob],
+for (const [browser, run, scenario] of [
+  ["chromium", runChromiumJob, "loaded-image"],
+  ["firefox", runFirefoxJob, "loaded-image-data"],
+  ["chromium", runChromiumJob, "loaded-image-link"],
+  ["firefox", runFirefoxJob, "loaded-image-link"],
 ]) {
-  test(`${browser}: a loaded ordinary image is saved after tiled discovery fails`, {
+  test(`${browser}: ${scenario} is saved after tiled discovery fails`, {
     timeout: 180000,
   }, async () => {
     const work = mkdtempSync(path.join(tmpdir(), "dezoomify-loaded-image-"));
     try {
       const bytes = await run(fixtureServer.base, work, {
-        scenario: browser === "chromium" ? "loaded-image" : "loaded-image-data",
+        scenario,
+        async afterSave(page) {
+          assert.match(
+            await page.locator(".dz-completed-section").innerText(),
+            /image available on this page/,
+          );
+          assert.equal(await page.locator(".dz-error-section").count(), 0);
+          assert.equal(await page.locator("details[open]").count(), 0);
+          const draft = new URL(
+            await page
+              .locator('a[href*="github.com/lovasoa/dezoomify/issues/new"]')
+              .getAttribute("href"),
+          );
+          assert.match(draft.searchParams.get("body"), /discovery-failed/);
+          assert.doesNotMatch(draft.searchParams.get("body"), /attempt failed/);
+        },
       });
       assert.deepEqual(bytes, readFileSync(path.join(fixtureWork, "static", "loaded-image.png")));
       const pixels = decodePngPixels(bytes);

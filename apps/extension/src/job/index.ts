@@ -183,13 +183,15 @@ const app = createBrowserApplication({
         if (!["discovery-failed", "malformed-metadata", "no-image-found"].includes(error.kind))
           return undefined;
         const image = await source?.loadedImage(context.signal);
-        if (!image) return undefined;
+        const url = image?.url ?? (await source?.imageDownloadLink(context.signal));
+        if (!url) return undefined;
         context.diagnostics.record("warn", "discovery-fallback", error);
-        context.diagnostics.record("info", "loaded-image", image);
-        downloadId = await saveExtensionUrl(api.downloads, image.url, undefined, context.signal);
+        context.diagnostics.record("info", "source-image", { url, ...image });
+        downloadId = await saveExtensionUrl(api.downloads, url, undefined, context.signal);
         context.view.outputKey = String(downloadId);
+        context.view.discoveryFallback = error;
         return {
-          canvas: { width: image.width, height: image.height },
+          canvas: image ? { width: image.width, height: image.height } : undefined,
           disposition: "browser-save-initiated",
         };
       },

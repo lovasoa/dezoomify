@@ -621,6 +621,7 @@ function CompletedView({
         </div>
       </div>
       <p className="dz-completed-guidance">{guidance}</p>
+      {ctx?.discoveryFallback ? <p>{t("view.done.fallback")}</p> : null}
       <div className="dz-actions-row">
         {callbacks.onOpenOutput ? (
           <button
@@ -864,7 +865,7 @@ function SharedView({
     <DiagnosticDetails
       key={ctx.diagnosticReport.id}
       report={ctx.diagnosticReport}
-      error={presentation.error}
+      error={presentation.error ?? ctx?.discoveryFallback}
       callbacks={callbacks}
     />
   ) : null;
