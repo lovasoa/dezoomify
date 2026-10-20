@@ -61,6 +61,18 @@ test("website navigation, preview controls, and save guidance follow the selecte
         t("page.preview.fitLabel"),
       );
       assert.equal(document.querySelector(".dz-brand svg").tagName.toLowerCase(), "svg");
+      assert.equal(
+        document.querySelector("#dz-legacy-notice-title").textContent,
+        t("page.legacy.title"),
+      );
+      assert.equal(
+        document.querySelector("#dz-legacy-notice-link").textContent,
+        t("page.legacy.link"),
+      );
+      assert.equal(
+        document.querySelector("#dz-legacy-notice-close").getAttribute("aria-label"),
+        t("view.modal.closeTitle"),
+      );
       render(
         el,
         presentOutput({

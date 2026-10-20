@@ -118,6 +118,8 @@ const en = {
   "page.footer.faq": "Frequently asked questions",
   "page.footer.privacy": "Privacy",
   "page.footer.terms": "Terms",
+  "page.legacy.title": "Looking for the old Dezoomify?",
+  "page.legacy.link": "Open the legacy site",
   "page.preview.zoomOut": "Zoom out",
   "page.preview.zoomIn": "Zoom in",
   "page.preview.reset": "Reset zoom to 100 percent",

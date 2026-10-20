@@ -28,6 +28,8 @@ export const fr = {
   "page.footer.faq": "Questions fréquentes",
   "page.footer.privacy": "Confidentialité",
   "page.footer.terms": "Conditions d’utilisation",
+  "page.legacy.title": "Vous cherchez l’ancien Dezoomify ?",
+  "page.legacy.link": "Ouvrir l’ancienne version",
   "page.preview.zoomOut": "Dézoomer",
   "page.preview.zoomIn": "Zoomer",
   "page.preview.reset": "Rétablir le zoom à 100 pour cent",

@@ -80,16 +80,19 @@ test("website saves a no-CORS ZIF URL through real public-data relay policies", 
 test("website notice links to the working legacy app and can be dismissed", async ({ page }) => {
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "languages", { get: () => ["fr-FR"] });
+  });
   await page.goto(`${ADDR}/`);
-  const notice = page.getByRole("complementary", { name: "Looking for the old Dezoomify?" });
+  const notice = page.getByRole("complementary", { name: "Vous cherchez l’ancien Dezoomify ?" });
   await expect(notice).toBeVisible();
-  await notice.getByRole("link", { name: "the legacy site" }).click();
+  await notice.getByRole("link", { name: "Ouvrir l’ancienne version" }).click();
   await expect(page).toHaveURL(`${ADDR}/legacy/`);
   await expect(page.locator("#url")).toBeVisible();
   await expect(page.getByText("Try the new Dezoomify")).toHaveCount(0);
   assert.deepEqual(errors, [], "legacy scripts still initialize from the relocated directory");
   await page.goto(`${ADDR}/`);
-  await notice.getByRole("button", { name: "Close", exact: true }).click();
+  await notice.getByRole("button", { name: "Fermer", exact: true }).click();
   await expect(notice).toBeHidden();
   await expect(page.locator("#dz-url-input")).toBeVisible();
 });
