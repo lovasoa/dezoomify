@@ -61,7 +61,7 @@ export async function chooseCatalogImage(
   async function loadPreviews(): Promise<void> {
     for (const [index, entry] of catalog.entries.entries()) {
       if (signal.aborted) return;
-      if (entry.kind !== "image" || !entry.preview) continue;
+      if (!entry.preview) continue;
       await loadPreview(index, entry.preview);
     }
   }

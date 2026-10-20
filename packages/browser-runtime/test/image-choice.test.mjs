@@ -13,7 +13,11 @@ test("the picker presents distinct slots, tolerates preview failure, and release
     released = [];
   let calls = 0;
   const catalog = {
-    entries: [image, image, { kind: "image-request", uri: "https://images.test/info.json" }],
+    entries: [
+      image,
+      { kind: "image-request", uri: "https://images.test/second/info.json", preview: tile },
+      { kind: "image-request", uri: "https://images.test/info.json" },
+    ],
   };
   const pending = chooseCatalogImage(catalog, {
     signal: controller.signal,

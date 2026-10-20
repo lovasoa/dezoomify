@@ -339,6 +339,86 @@ fn live_observations_win_before_blocked_http_access() {
 }
 
 #[test]
+fn source_catalog_precedes_the_loaded_page_without_resolving_its_entries() {
+    use dezoomify::model::DiscoveryInputKind;
+    let reads = RefCell::new(Vec::new());
+    let catalog = futures::executor::block_on(core::default_registry().discover(
+        vec![
+            DiscoveryInput::with_contents(
+                "https://viewer.onb.ac.at/1000ABD0",
+                "<html></html>",
+            ),
+            DiscoveryInput::with_contents(
+                "https://images.test/first/info.json",
+                include_str!("../../../fixtures/iiif/v3/info.json")
+                    .replace("{{origin}}/fixtures/iiif/v3", "https://images.test/first"),
+            )
+            .with_kind(DiscoveryInputKind::ObservedMetadata),
+        ],
+        Default::default(),
+        |request, interaction| {
+            assert_eq!(interaction, Interaction::Forbidden);
+            reads.borrow_mut().push(request.uri);
+            async {
+                Ok(response(include_str!(
+                    "../../../fixtures/iiif/catalog/manifest.json"
+                )))
+            }
+        },
+        support::parse_html,
+        |_| async { panic!("the explicit source declares the entire catalog") },
+    ))
+    .unwrap();
+    assert_eq!(catalog.len(), 2);
+    assert_eq!(
+        *reads.borrow(),
+        ["https://api.onb.ac.at/iiif/presentation/v3/manifest/1000ABD0"]
+    );
+    for entry in catalog.entries() {
+        let DiscoveredEntry::Deferred(image) = entry else {
+            panic!("image metadata stays deferred until selection")
+        };
+        assert!(image.preview.is_some());
+    }
+}
+
+#[test]
+fn loaded_page_survives_unavailable_or_single_image_source_metadata() {
+    use dezoomify::model::DiscoveryInputKind;
+    const INFO: &str = include_str!("../../../fixtures/iiif/v3/info.json");
+    for needs_access in [false, true] {
+        let catalog = futures::executor::block_on(core::default_registry().discover(
+            vec![
+                DiscoveryInput::with_contents(
+                    "https://viewer.test/?manifest=https://images.test/other/info.json",
+                    "<html></html>",
+                ),
+                DiscoveryInput::with_contents("https://images.test/loaded/info.json", INFO)
+                    .with_kind(DiscoveryInputKind::ObservedMetadata),
+            ],
+            Default::default(),
+            |_, interaction| async move {
+                assert_eq!(interaction, Interaction::Forbidden);
+                Ok(if needs_access {
+                    ResourceRead::NeedsAccess {
+                        origin: "https://images.test".into(),
+                    }
+                } else {
+                    response(INFO)
+                })
+            },
+            support::parse_html,
+            |_| async { panic!("loaded metadata requires no additional access") },
+        ))
+        .unwrap();
+        assert_eq!(
+            support::ready_image(catalog).source_url.as_deref(),
+            Some("https://images.test/loaded/info.json")
+        );
+    }
+}
+
+#[test]
 fn deferred_frame_observations_precede_permissions_for_unrelated_resources() {
     let observations = RefCell::new(Vec::new());
     let catalog = futures::executor::block_on(core::default_registry().discover(

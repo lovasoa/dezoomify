@@ -121,6 +121,14 @@ impl ImageInfo {
         }
     }
 
+    pub(super) fn supports_custom_size(&self) -> bool {
+        self.profile_info()
+            .supports
+            .iter()
+            .flatten()
+            .any(|feature| matches!(feature.as_str(), "sizeByW" | "sizeByWh"))
+    }
+
     #[must_use]
     pub fn supports_v3_size_upscaling(&self) -> bool {
         self.iiif_type.as_deref() == Some("ImageService3")

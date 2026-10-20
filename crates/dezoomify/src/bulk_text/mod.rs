@@ -27,6 +27,7 @@ fn decode_catalog(
             uri: image.uri,
             title: image.title,
             size: None,
+            preview: None,
             warnings: Vec::new(),
         }),
     )))

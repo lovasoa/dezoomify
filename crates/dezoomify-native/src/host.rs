@@ -1537,6 +1537,7 @@ mod tests {
                         CatalogEntry::ImageRequest(ImageRequest {
                             title: None,
                             size: None,
+                            preview: None,
                             uri: "info.json".into(),
                         }),
                         CatalogEntry::Image(image.clone()),

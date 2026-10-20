@@ -280,6 +280,7 @@ pub struct DeferredResource {
     pub uri: String,
     pub title: Option<String>,
     pub size: Option<Size>,
+    pub preview: Option<crate::model::Tile>,
     pub warnings: Vec<String>,
 }
 
@@ -298,6 +299,7 @@ impl DiscoveredEntry {
             uri: uri.into(),
             title,
             size: None,
+            preview: None,
             warnings,
         })
     }
@@ -354,6 +356,7 @@ impl DiscoveryCatalog {
                             title: image.title.clone(),
                             uri: image.uri.clone(),
                             size: image.size.clone(),
+                            preview: image.preview.clone(),
                         })
                     }
                 })
@@ -425,17 +428,23 @@ impl From<&ResolvedImage> for Image {
     }
 }
 
-fn image_preview(image: &ResolvedImage) -> Option<crate::model::Tile> {
+pub(crate) fn image_preview(image: &ResolvedImage) -> Option<crate::model::Tile> {
     let mut candidates: Vec<_> = image
         .levels
         .iter()
-        .filter_map(|level| match &level.source {
-            TileSource::Grid(grid) if grid.count() == 1 => {
+        .filter_map(|level| {
+            let grid = match &level.source {
+                TileSource::Grid(grid) => grid,
+                TileSource::Adaptive(source) => source.declared_grid()?,
+                _ => return None,
+            };
+            if grid.count() == 1 {
                 let size = grid.image_size();
                 (size.x > 0 && size.y > 0 && size.x <= 1024 && size.y <= 1024)
                     .then_some((size, grid))
+            } else {
+                None
             }
-            _ => None,
         })
         .collect();
     candidates.sort_by_key(|(size, _)| size.area());

@@ -336,6 +336,7 @@ fn index(index: Index, resource: DiscoveryResource<'_>) -> Result<ParsedResource
                 uri,
                 title,
                 size: None,
+                preview: None,
                 warnings: Vec::new(),
             });
         }

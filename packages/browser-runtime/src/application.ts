@@ -23,6 +23,8 @@ import type {
   Error as JobError,
   JobInput,
   Progress,
+  ResourceRead,
+  ResourceRequest,
   RetryChoice,
   TileAcquisition,
 } from "@dezoomify/wasm-bindings";
@@ -64,6 +66,7 @@ export interface BrowserApplicationContext {
 }
 export interface BrowserCapabilities
   extends Pick<BrowserHostDependencies, "fetchResource" | "loadDisplayImage" | "observe"> {
+  fetchPreview?(request: ResourceRequest, signal: AbortSignal): Promise<ResourceRead>;
   inputs(url: string): Promise<JobInput[]>;
   recoverDiscovery?(error: JobError): Promise<Completion | undefined>;
   canvas(): HTMLCanvasElement;
@@ -355,7 +358,9 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
           },
           async preview(tile, previewSignal) {
             const blob = await imageThumbnail(tile, previewSignal, {
-              fetch: (request, owned) => capabilities.fetchResource(request, owned, "forbidden"),
+              fetch:
+                capabilities.fetchPreview ??
+                ((request, owned) => capabilities.fetchResource(request, owned, "forbidden")),
               process: (recipe, bytes) =>
                 wasm.applyProcessing(recipe, new Uint8Array(bytes)).slice().buffer,
               decoder,

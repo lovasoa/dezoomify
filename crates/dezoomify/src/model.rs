@@ -463,6 +463,9 @@ pub struct ImageRequest {
     pub uri: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub size: Option<Size>,
+    /// A bounded preview declared by this catalog, without resolving `uri`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preview: Option<Tile>,
 }
 
 /// Desktop image-choice updates contain display thumbnails, never source pixels.

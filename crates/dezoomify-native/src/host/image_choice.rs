@@ -34,10 +34,11 @@ impl NativeHost<'_> {
 
     async fn image_previews(&self, catalog: &Catalog, changed: &mut dyn FnMut(u32, String)) {
         for (index, entry) in catalog.entries.iter().enumerate() {
-            let CatalogEntry::Image(image) = entry else {
-                continue;
+            let tile = match entry {
+                CatalogEntry::Image(image) => &image.preview,
+                CatalogEntry::ImageRequest(image) => &image.preview,
             };
-            let Some(tile) = &image.preview else { continue };
+            let Some(tile) = tile else { continue };
             match self.image_thumbnail(tile).await {
                 Ok(Some(thumbnail)) => changed(index as u32, thumbnail),
                 Ok(None) => {}
@@ -161,7 +162,12 @@ mod tests {
         let catalog = Catalog {
             entries: vec![
                 CatalogEntry::Image(image.clone()),
-                CatalogEntry::Image(image),
+                CatalogEntry::ImageRequest(ImageRequest {
+                    title: None,
+                    uri: "https://images.test/second/info.json".into(),
+                    size: None,
+                    preview: image.preview,
+                }),
             ],
         };
         assert_eq!(

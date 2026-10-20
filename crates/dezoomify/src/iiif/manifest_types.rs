@@ -170,8 +170,7 @@ pub struct ImageService {
     #[serde(alias = "@type")] // IIIF Image API 2 uses "@type"
     #[serde(default, rename = "type")]
     pub service_type: String, // e.g. "ImageService2", "ImageService3"
-    #[serde(default, skip_deserializing)]
-    pub profile: Option<String>,
+    pub profile: Option<serde_json::Value>,
     pub width: Option<u32>,
     pub height: Option<u32>,
 }
@@ -242,6 +241,7 @@ impl LegacyImageServices {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExtractedImageInfo {
     pub size: Option<crate::model::Size>,
+    pub preview: Option<crate::model::Tile>,
     /// The URI to be dezoomified (either an `info.json` or a direct image link).
     pub image_uri: String,
     /// The label of the manifest, if available.
@@ -357,12 +357,22 @@ impl Manifest {
                         });
 
                         if let Some(uri_to_add) = final_image_uri {
+                            let size = image_size(
+                                image_body.width,
+                                image_body.height,
+                                &image_body.service,
+                            );
                             infos.push(ExtractedImageInfo {
-                                size: image_size(
-                                    image_body.width,
-                                    image_body.height,
-                                    &image_body.service,
+                                preview: choose_image_service(&image_body.service).and_then(
+                                    |service| {
+                                        super::manifest_preview(
+                                            manifest_url,
+                                            service,
+                                            size.as_ref(),
+                                        )
+                                    },
                                 ),
+                                size,
                                 image_uri: uri_to_add,
                                 manifest_label: manifest_label.clone(),
                                 metadata_title: metadata_title.clone(),
@@ -420,12 +430,13 @@ impl LegacyManifest {
                     );
 
                 if let Some(uri_to_add) = final_image_uri {
+                    let size =
+                        image_size(resource.width, resource.height, resource.service.as_slice());
                     infos.push(ExtractedImageInfo {
-                        size: image_size(
-                            resource.width,
-                            resource.height,
-                            resource.service.as_slice(),
+                        preview: choose_image_service(resource.service.as_slice()).and_then(
+                            |service| super::manifest_preview(manifest_url, service, size.as_ref()),
                         ),
+                        size,
                         image_uri: uri_to_add,
                         manifest_label: manifest_label.clone(),
                         metadata_title: metadata_title.clone(),

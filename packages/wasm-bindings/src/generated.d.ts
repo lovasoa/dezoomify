@@ -59,6 +59,10 @@ export interface ImageRequest {
     title?: string;
     uri: string;
     size?: Size;
+    /**
+     * A bounded preview declared by this catalog, without resolving `uri`.
+     */
+    preview?: Tile;
 }
 
 /**

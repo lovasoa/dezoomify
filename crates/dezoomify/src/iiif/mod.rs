@@ -7,7 +7,7 @@ use url::Url;
 
 use crate::Vec2d;
 use crate::core::discovery::{
-    Metadata, any, html_matches, image_url, js_matches, json_metadata, metadata, url_matches,
+    Metadata, any, css, html_matches, image_url, js_matches, json_metadata, metadata, url_matches,
     url_suffix, viewer,
 };
 use crate::core::{
@@ -67,6 +67,11 @@ const ROUTES: &[DiscoveryRoute] = &[
         .resolve_metadata(manifest_parameter)
         .then_decode(decode),
     onb::ROUTE.then_decode(decode),
+    viewer(css(
+        "link[rel='alternate'][type^='application/ld+json'][href]",
+    ))
+    .follow_attribute("href")
+    .then_decode(decode),
     contentdm::RECORD_ROUTE.then_decode(contentdm::follow_info),
     contentdm::METADATA_ROUTE,
     micrio::ROUTE.then_decode(decode),
@@ -312,10 +317,120 @@ fn catalog_from_manifest_info(
             uri: image_info.image_uri,
             title,
             size: image_info.size,
+            preview: image_info.preview,
             warnings: warnings.clone(),
         }
     });
     CatalogPlan::deferred(resources)
+}
+
+/// Presentation metadata can declare enough capabilities for a small, complete
+/// image request. This never resolves the deferred info.json or probes a tile.
+fn manifest_preview(
+    manifest_url: &str,
+    service: &manifest_types::ImageService,
+    size: Option<&crate::model::Size>,
+) -> Option<crate::model::Tile> {
+    let size = size?;
+    let mut profile: tile_info::Profile = serde_json::from_value(service.profile.clone()?).ok()?;
+    if profile == tile_info::Profile::Reference("level1".into())
+        && service.service_type == "ImageService3"
+    {
+        profile = tile_info::Profile::Reference("http://iiif.io/api/image/3/level1.json".into());
+    }
+    let scale = (size.width.max(size.height) / 160).max(1);
+    let mut extent = Vec2d {
+        x: size.width,
+        y: size.height,
+    }
+    .ceil_div(scale);
+    let info = ImageInfo {
+        width: size.width,
+        height: size.height,
+        profile: Some(profile),
+        ..Default::default()
+    };
+    if !info.supports_custom_size() {
+        return None;
+    }
+    let size_format = info.preferred_size_format();
+    if size_format == TileSizeFormat::Width {
+        let height = u64::from(size.height) * u64::from(extent.x);
+        let width = u64::from(size.width);
+        if width == 0 || height.div_ceil(width) > 1024 {
+            return None;
+        }
+        // Width-only services may round the proportional height either way.
+        extent.y = u32::try_from((height / width).max(1)).ok()?;
+    }
+    // The body may describe a scaled image rather than native service pixels.
+    // Request the full region so those dimensions never become a crop.
+    let path = format!(
+        "full/{}/0/{}.jpg",
+        TileSizeFormatter {
+            w: extent.x,
+            h: extent.y,
+            format: size_format,
+            use_size_upscaling: false,
+            force_width_only: false,
+        },
+        info.best_quality(),
+    );
+    let uri = append_tile_path(&resolve_relative(manifest_url, &service.id), &path);
+    let grid = Grid::with_requests(extent, extent, Vec2d::default(), move |_| {
+        Request::new(&uri)
+    })
+    .ok()?;
+    crate::core::model::image_preview(&crate::core::ResolvedImage {
+        levels: vec![ResolvedLevel::new(grid)],
+        ..Default::default()
+    })
+}
+
+#[test]
+fn manifest_previews_use_declared_capabilities_and_image_dimensions() {
+    let mut service = manifest_types::ImageService {
+        id: "https://images.test/page".into(),
+        service_type: "ImageService3".into(),
+        profile: Some(serde_json::json!("level2")),
+        ..Default::default()
+    };
+    let size = crate::model::Size {
+        width: 764,
+        height: 1664,
+    };
+    let preview =
+        manifest_preview("https://images.test/manifest.json", &service, Some(&size)).unwrap();
+    assert_eq!(
+        preview.request.uri,
+        "https://images.test/page/full/77,167/0/default.jpg"
+    );
+    assert_eq!(
+        preview.placement.canvas,
+        Some(crate::model::Size {
+            width: 77,
+            height: 167
+        })
+    );
+    assert!(manifest_preview("https://images.test/manifest.json", &service, None).is_none());
+    for profile in [
+        serde_json::json!("level0"),
+        serde_json::json!({"unknown": true}),
+        serde_json::Value::Null,
+    ] {
+        service.profile = Some(profile);
+        assert!(
+            manifest_preview("https://images.test/manifest.json", &service, Some(&size)).is_none()
+        );
+    }
+    service.profile = Some(serde_json::json!("http://iiif.io/api/image/2/level1.json"));
+    let needle = crate::model::Size {
+        width: 1,
+        height: 100_000,
+    };
+    assert!(
+        manifest_preview("https://images.test/manifest.json", &service, Some(&needle)).is_none()
+    );
 }
 
 fn catalog_from_levels(mut levels: Vec<ResolvedLevel>) -> Result<DiscoveryCatalog, DiscoveryError> {
