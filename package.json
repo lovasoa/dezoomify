@@ -27,9 +27,6 @@
   "pnpm": {
     "overrides": {
       "sharp": "0.35.5",
-      "@playwright/test": "1.64.0",
-      "playwright": "1.64.0",
-      "playwright-core": "1.64.0",
       "undici": "7.29.1"
     }
   },
