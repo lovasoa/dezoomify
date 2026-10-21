@@ -53,8 +53,9 @@ After changing Rust boundary types, run `cargo xtask bindings generate` and
 inspect the generated diff. `cargo xtask bindings check` verifies the contract
 and WASM portability. Do not hand-edit generated declarations.
 
-The root pnpm lockfile owns active JavaScript dependencies. Playwright is pinned
-through `pnpm.overrides`; update the override and workspace specs together.
+The root pnpm lockfile owns active JavaScript dependencies. Keep Playwright pinned
+in its consuming workspace packages; Dependabot updates them together. Duplicating
+those pins in root overrides can leave Dependabot's lockfile out of sync.
 Install browser binaries separately. Direct Cargo and pnpm commands are useful
 for component debugging; `cargo xtask --help` is the command reference.
 
