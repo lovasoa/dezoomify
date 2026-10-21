@@ -7,7 +7,7 @@ settings:
 overrides:
   sharp: 0.35.5
   '@playwright/test': 1.64.0
-  playwright: 1.64.0
+  playwright: 1.64.1
   playwright-core: 1.64.0
   undici: 7.29.1
 
@@ -28,11 +28,11 @@ importers:
         specifier: 15.0.3
         version: 15.0.3
       react:
-        specifier: ^19.3.0
-        version: 19.3.0
+        specifier: ^19.3.1
+        version: 19.3.1
       react-dom:
-        specifier: ^19.3.0
-        version: 19.3.0(react@19.3.0)
+        specifier: ^19.3.1
+        version: 19.3.1(react@19.3.1)
     devDependencies:
       '@biomejs/biome':
         specifier: 2.5.15
@@ -65,8 +65,8 @@ importers:
         specifier: ^8.3.4
         version: 8.3.4(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1)
       wrangler:
-        specifier: 4.149.0
-        version: 4.149.0(@types/node@26.6.5)
+        specifier: 4.151.1
+        version: 4.151.1(@types/node@26.6.5)
 
   apps/desktop:
     dependencies:
@@ -80,21 +80,21 @@ importers:
         specifier: workspace:*
         version: link:../../packages/wasm-bindings
       '@tauri-apps/api':
-        specifier: 2.12.3
-        version: 2.12.3
+        specifier: 2.12.4
+        version: 2.12.4
       '@tauri-apps/plugin-opener':
-        specifier: 2.7.1
-        version: 2.7.1
+        specifier: 2.7.2
+        version: 2.7.2
       react:
-        specifier: ^19.3.0
-        version: 19.3.0
+        specifier: ^19.3.1
+        version: 19.3.1
       react-dom:
-        specifier: ^19.3.0
-        version: 19.3.0(react@19.3.0)
+        specifier: ^19.3.1
+        version: 19.3.1(react@19.3.1)
     devDependencies:
       '@tauri-apps/cli':
-        specifier: 2.12.2
-        version: 2.12.2
+        specifier: 2.12.3
+        version: 2.12.3
       '@types/react':
         specifier: ^19.3.0
         version: 19.3.0
@@ -132,11 +132,11 @@ importers:
         specifier: workspace:*
         version: link:../../packages/wasm-bindings
       react:
-        specifier: ^19.3.0
-        version: 19.3.0
+        specifier: ^19.3.1
+        version: 19.3.1
       react-dom:
-        specifier: ^19.3.0
-        version: 19.3.0(react@19.3.0)
+        specifier: ^19.3.1
+        version: 19.3.1(react@19.3.1)
     devDependencies:
       '@types/react':
         specifier: ^19.3.0
@@ -163,8 +163,8 @@ importers:
         specifier: 6.1.1
         version: 6.1.1
       playwright:
-        specifier: 1.64.0
-        version: 1.64.0
+        specifier: 1.64.1
+        version: 1.64.1
       selenium-webdriver:
         specifier: ^4.51.0
         version: 4.51.0
@@ -184,8 +184,8 @@ importers:
         specifier: workspace:*
         version: link:../wasm-bindings
       react:
-        specifier: ^19.3.0
-        version: 19.3.0
+        specifier: ^19.3.1
+        version: 19.3.1
 
   packages/shared-ui:
     dependencies:
@@ -200,11 +200,11 @@ importers:
         specifier: ^19.3.0
         version: 19.3.0(@types/react@19.3.0)
       react:
-        specifier: ^19.3.0
-        version: 19.3.0
+        specifier: ^19.3.1
+        version: 19.3.1
       react-dom:
-        specifier: ^19.3.0
-        version: 19.3.0(react@19.3.0)
+        specifier: ^19.3.1
+        version: 19.3.1(react@19.3.1)
 
   packages/wasm-bindings: {}
 
@@ -314,32 +314,32 @@ packages:
       workerd:
         optional: true
 
-  '@cloudflare/workerd-darwin-64@1.20261006.1':
-    resolution: {integrity: sha512-lCX6avJO2It9AyDEYitjmOtJRVp/xmaW0TziyoLAnfxlzozyyRbSFfIIMMCiDx/sTP1++E4VLbV+7BHSD33f0Q==}
+  '@cloudflare/workerd-darwin-64@1.20261012.1':
+    resolution: {integrity: sha512-dkTL9aY3V4D40b+jBpGPCistWUPFQ/M61wlWi6i1o8MvHFFgEw7EQkcaYEv6Yd3bkPDD/3TFT4hRsMb2xVZSwQ==}
     engines: {node: '>=16'}
     cpu: [x64]
     os: [darwin]
 
-  '@cloudflare/workerd-darwin-arm64@1.20261006.1':
-    resolution: {integrity: sha512-PyFGjOaldtppnLuKsdkoYWXfLVpDjuf8u+uoykX+1Xvxo2EPmCVViq0iDKm+U7c7PRno85ehS3/MPVXyk2HwHw==}
+  '@cloudflare/workerd-darwin-arm64@1.20261012.1':
+    resolution: {integrity: sha512-2/nVGcKXjNNI+DhxKSepTKvFng9H7aN2WXv6Zu67iqgI6JrxypNt5kTPv4ZHosxrcfyKMci/2RfN7GIrN0BitQ==}
     engines: {node: '>=16'}
     cpu: [arm64]
     os: [darwin]
 
-  '@cloudflare/workerd-linux-64@1.20261006.1':
-    resolution: {integrity: sha512-Ntf9S8eesmVufdjaT2kzWlz6Ng9XGYTc6cHQVRKAg59lFufwsIabGeMT6U4KkrpEeSIxgHq8aPtuLbZXE19tCA==}
+  '@cloudflare/workerd-linux-64@1.20261012.1':
+    resolution: {integrity: sha512-uMe7ONHnLxStD1Ye0YFHBO36uj4cStv5P53rW+5GVWXFT8BRjqVixlH0IqCAHe1Pmcwyd1+7fVoGde89MZSCJg==}
     engines: {node: '>=16'}
     cpu: [x64]
     os: [linux]
 
-  '@cloudflare/workerd-linux-arm64@1.20261006.1':
-    resolution: {integrity: sha512-JyeDBymVWw5tVRebSsVE8ojDYxd6UlZrAseHU8G+NpIyd5wF61tXlF/axLeCUqu0pOhBFHb8I5QKi0jwrCK41Q==}
+  '@cloudflare/workerd-linux-arm64@1.20261012.1':
+    resolution: {integrity: sha512-I0VMdcXk7ygG5vYDce0ePTBFdnBXC0i9WiBY5mWiv0iTinbfea6/rHqSQ7B1UMpjgrYVs9E0m4bZ9ufsk5GCFA==}
     engines: {node: '>=16'}
     cpu: [arm64]
     os: [linux]
 
-  '@cloudflare/workerd-windows-64@1.20261006.1':
-    resolution: {integrity: sha512-nWP0URNqOBN9fa/gZ7eh/w051DwjOXN8j4lDZDYVXyQPsux6sV3DfyYZT+CjR/rt9nKBSmJT9QE9/bWT18+84w==}
+  '@cloudflare/workerd-windows-64@1.20261012.1':
+    resolution: {integrity: sha512-c5hQvNx574UEoknaCFvMa/NdLrrYiALNbe6sx1okW8uOiRYWxrFuA8WpXFnBJ5XJypm0TEAHYaUTGv3rRLpY7Q==}
     engines: {node: '>=16'}
     cpu: [x64]
     os: [win32]
@@ -789,82 +789,82 @@ packages:
   '@speed-highlight/core@1.2.24':
     resolution: {integrity: sha512-qeW2e1l78afw8VhRPfPQ1Gjj+KU5XFQ/OFV5ti6eTa9bruO7mJyZtA4vw0ofqmA3tKCkROE9xLk3VZoeRc98nw==}
 
-  '@tauri-apps/api@2.12.3':
-    resolution: {integrity: sha512-9s0PKw0p4r3kFq92jhpivYSp+cSht15o0gXpZxuQd0+dV9KCexEVkNaLELVoLdJWyoH4KlfQo5h3W2LIM8siJg==}
+  '@tauri-apps/api@2.12.4':
+    resolution: {integrity: sha512-pVmfis+4zT8H0Qhp3xPZx9Ju7kpzvA6rr/PSJPyuwfvucTQ8sVt61NYU9KMkK703UFlYadFmjKA4HhybOtN0gg==}
 
-  '@tauri-apps/cli-darwin-arm64@2.12.2':
-    resolution: {integrity: sha512-Lk3zaBTfzNvA7670Al5PNgo2M/95uaDPe1yp+ILJeDOmol87XiYuK5E5+FUbK5e6U6OORx9qpZdOo2U+5tETtQ==}
+  '@tauri-apps/cli-darwin-arm64@2.12.3':
+    resolution: {integrity: sha512-xmVNoJOOKzKLj7GLHXmXLimRby9M42aBIJa0sB80N7o24eKV5JiVmToKTRLVH9yhL05GZ/B6rSSOmbzNFJwBAA==}
     engines: {node: '>= 10'}
     cpu: [arm64]
     os: [darwin]
 
-  '@tauri-apps/cli-darwin-x64@2.12.2':
-    resolution: {integrity: sha512-2CyYjJ833JB3sKRz4B0W/Tv4oOVC16ws1bxdSCWj1XvrmanWwvZi99e5tNIoCHwHhcOm0jh+sh0PCGQyls6Z+w==}
+  '@tauri-apps/cli-darwin-x64@2.12.3':
+    resolution: {integrity: sha512-URd+0usfmUQQyb5kNPiKt2OT8gp7oGU7QR+qOppB6e35mpVBFFVNhWc9oWb3p0u71fDJ09DpF4T6m9xYxoIB8g==}
     engines: {node: '>= 10'}
     cpu: [x64]
     os: [darwin]
 
-  '@tauri-apps/cli-linux-arm-gnueabihf@2.12.2':
-    resolution: {integrity: sha512-uvt2xbone4JftKarelssi86Kqnl7JiG1Smh5+Ae+nZmtM+JUhTGmqkcqfUPXRW8Ygwog92POZvd4oGDN9j8eXQ==}
+  '@tauri-apps/cli-linux-arm-gnueabihf@2.12.3':
+    resolution: {integrity: sha512-0kwUVx2LbmOoTRlwF1oDww7th4/NSluv4ZBQ6KRZsFKg4g0TlTcIiJ0VehqkQYUeC9xIT1Mk6XtF52mI155VSQ==}
     engines: {node: '>= 10'}
     cpu: [arm]
     os: [linux]
 
-  '@tauri-apps/cli-linux-arm64-gnu@2.12.2':
-    resolution: {integrity: sha512-DZlDJ24u3tlocKOYqzR+b2M+Qr+5WFcoMBZ7EfdhHN5j3ZXwBBpms4G4gyNvPCrak5vMzmdZ65ecBXPJcC+5sA==}
+  '@tauri-apps/cli-linux-arm64-gnu@2.12.3':
+    resolution: {integrity: sha512-gKSGDx6fx+HBLQmG6guChFdisbrCSdx9Yli+j5teOa64gm1CeM+C6NLru5Pj3ZkkEep05BmCFjxvX+cjqAycZQ==}
     engines: {node: '>= 10'}
     cpu: [arm64]
     os: [linux]
 
-  '@tauri-apps/cli-linux-arm64-musl@2.12.2':
-    resolution: {integrity: sha512-pb+RTZUYH/p0gR4j4ecCCq+FNfz3W3eKuUQvVEBn7MQZx6DzfLO7FaYzt2NyDKWpdNN3lP10mdzOvw3R5P5aAQ==}
+  '@tauri-apps/cli-linux-arm64-musl@2.12.3':
+    resolution: {integrity: sha512-Yr59qMy/gcvAfBuFdCGlAmGiLsYWMFDbsP4bAI6iNBzcJTGrYWZGeiQhGDo29MQwfF/NUBqyM2qljXu5tZ6wjQ==}
     engines: {node: '>= 10'}
     cpu: [arm64]
     os: [linux]
 
-  '@tauri-apps/cli-linux-riscv64-gnu@2.12.2':
-    resolution: {integrity: sha512-nidEvDUJyHYNbIv9MUk6KiEix8IXfRh4Wj2G2SA5g8nFmgbBCwazUNWYiG/LhNeNbfZpBMLerRBUtoQ5K0GidA==}
+  '@tauri-apps/cli-linux-riscv64-gnu@2.12.3':
+    resolution: {integrity: sha512-jKr0/REBMnLKC0OwPQZkyge0mKDaNZ0b/AbfGwVyCgFfwS730EVLfVDo3nt7MUu6jJaytRq08+xSj5qfy+U1+Q==}
     engines: {node: '>= 10'}
     cpu: [riscv64]
     os: [linux]
 
-  '@tauri-apps/cli-linux-x64-gnu@2.12.2':
-    resolution: {integrity: sha512-gkXyYn3w+Xfc8nz/DleEbkm1M7bBuU2cejqUXNmI98cA2P5kp+oPmS4ALTorb1FaNWjpsKoYZBWsbS9BXxYFkQ==}
+  '@tauri-apps/cli-linux-x64-gnu@2.12.3':
+    resolution: {integrity: sha512-gTkEqJAGCMROGanxHnzaJzQ+/rXl39HWVg0/hDODS1wDWBGqoceqGC6Qm1+mQbyT11xnsB8mKu/gyVID/YpFIw==}
     engines: {node: '>= 10'}
     cpu: [x64]
     os: [linux]
 
-  '@tauri-apps/cli-linux-x64-musl@2.12.2':
-    resolution: {integrity: sha512-MrjgoZ09s8Hsn99XvxSNvK8NQTZxi7XiyK3FxxytzfHgz2jb3qUT69CZtsokRkN/zdi9rCgrMtq+w9XNICjcfQ==}
+  '@tauri-apps/cli-linux-x64-musl@2.12.3':
+    resolution: {integrity: sha512-T2dTxL1svRym71fZtaW4pZYXbthbfFsEJr1NeOUg/p7laWXZbUt/8DMSZf8recu9f7+1F/Lv00HtzsEu6vDO9w==}
     engines: {node: '>= 10'}
     cpu: [x64]
     os: [linux]
 
-  '@tauri-apps/cli-win32-arm64-msvc@2.12.2':
-    resolution: {integrity: sha512-BR+CYM7iF3lkfyTtVkwMQU/s9hwegLpj3UqDjaxKCPmixQCa1csBBPy3C75V+FhLtOjIXNna4Gt6Vm9oxbV+qA==}
+  '@tauri-apps/cli-win32-arm64-msvc@2.12.3':
+    resolution: {integrity: sha512-eoiQwpEZWbpsVHcM9BAzqqe4TCHszvr3rsM7pUQ4ofLK0lF1i1d/jX0Qo5DYMqcrUtwQuDdDuOCbcT0Izf1VwQ==}
     engines: {node: '>= 10'}
     cpu: [arm64]
     os: [win32]
 
-  '@tauri-apps/cli-win32-ia32-msvc@2.12.2':
-    resolution: {integrity: sha512-zODJo9l3TbNBM+GrO/yPqGeELNMK5cjIc+QHh1WQc3l8tD+jDZGTQyYuAxViCsM6Uh5uWJ//RnCZG9LXrvsXww==}
+  '@tauri-apps/cli-win32-ia32-msvc@2.12.3':
+    resolution: {integrity: sha512-kE+KUg6Dbbkgvcw0m99wJVIToFQzJqpMBAXah74WqxaLzssNwSTUccrHp6+QVzMhjQP330tvekFmnQF+0NbE6Q==}
     engines: {node: '>= 10'}
     cpu: [ia32]
     os: [win32]
 
-  '@tauri-apps/cli-win32-x64-msvc@2.12.2':
-    resolution: {integrity: sha512-cQXI2ZaZmwBDt0XATCqASVanYizxkEE3ceQVlVHXaQ51HzsQUWA04c9Nz7LrrY2lgAu3jFMyat+8Yz3Z2R2qBA==}
+  '@tauri-apps/cli-win32-x64-msvc@2.12.3':
+    resolution: {integrity: sha512-L7wndWAgX2mLW7alswpL3d1R0P9FN2WYBgHaQkAYEBxHHGkY4vFX9CjcRQ1LAxDAMIJxrY7/aDziFJeChS84NQ==}
     engines: {node: '>= 10'}
     cpu: [x64]
     os: [win32]
 
-  '@tauri-apps/cli@2.12.2':
-    resolution: {integrity: sha512-PMSppzAnlT+BvZtRKuidxjRSm2r5t8kDpJ/czmmQUa0AtDNTwrjLE8vApK3phCWGg7isfnYL46Dl1jB4ArI0hA==}
+  '@tauri-apps/cli@2.12.3':
+    resolution: {integrity: sha512-f7/LsY74SVb1ChmOPw1ajOpxii0GSzDAgmWHRci8JUYuuai04rXsSbFobpmB0sP2DdlvMD/B5ZotEn8GOGMRUg==}
     engines: {node: '>= 10'}
     hasBin: true
 
-  '@tauri-apps/plugin-opener@2.7.1':
-    resolution: {integrity: sha512-XkXdt30rontti9TII/gBBxFRXWfj8DiprFW7RgBFRBj1OhdfjBNVcFqSEWkkZ4hXafHnuEnB7F1sFsmu6uyywQ==}
+  '@tauri-apps/plugin-opener@2.7.2':
+    resolution: {integrity: sha512-LyybP1VSzTMQiaFYcsbAse47KpivlyXdLZMQzGLEnkgQacGESnpjAfFoQ6h5sqWgAdZDH9szYjPzHMpv0Sz+TQ==}
 
   '@topcli/prompts@4.0.0':
     resolution: {integrity: sha512-kkKYPb4k/6kRdnESt77B5vJrrYnYHIYczwv0P1c+tfN/IWEx3KZeKEHoUq7sImIyBEXWdA2uakIroD9pmRJziQ==}
@@ -1441,8 +1441,8 @@ packages:
   mdurl@2.1.0:
     resolution: {integrity: sha512-1+HBaOx0zi/dQWht8rNv9MYf9qqpqL/kxI0hXImU6Y547zM6Sni8BQibt7ifgMcYtQg41ao3Ivd6cnSM86inpg==}
 
-  miniflare@5.20261006.1-alpha:
-    resolution: {integrity: sha512-6ylv8tamkrspDI2R/cAYfv+YWmfGNdXe76Pi9TauEUWsFVXn3LNF9Yk8oduzf1a+TYsSRYTqlOE7+nGGRsMHdw==}
+  miniflare@5.20261012.1-beta:
+    resolution: {integrity: sha512-8Canhy6g9+vAhqMc0o80YphqYIwpiA3aAp8aX+uDXU7J/qbUeoZzcII9c2V1P4uT/eHD4SB93qet1o1bRY3BuQ==}
     engines: {node: '>=22.0.0'}
 
   mlly@1.8.2:
@@ -1510,8 +1510,8 @@ packages:
     engines: {node: '>=20'}
     hasBin: true
 
-  playwright@1.64.0:
-    resolution: {integrity: sha512-kVzTnYFYEyQ9RGzBjNCd2+yEqWmVbxl3AHPynv3qQ6JTjv4a+kwRcnqQwIpuP3NnrnIrE/Q6wWAIAvMfIE2/Yg==}
+  playwright@1.64.1:
+    resolution: {integrity: sha512-HCrVhHr5QQuwYoswEUGTb7gGp522yflbv/ST8nF4sFWGuLjQCt17Q/EubpGGSNKYn1tsTCPZxqHhHCfVURu7UA==}
     engines: {node: '>=20'}
     hasBin: true
 
@@ -1537,13 +1537,13 @@ packages:
   rc9@3.1.0:
     resolution: {integrity: sha512-ufjkNVzbRHKcCOmTahZkmVsyc3W+MSk3jY03m+a7tGHkIsdVMG9l10/3HvFbWkkKzY5VFp3pkRsIo/UYgmFL7Q==}
 
-  react-dom@19.3.0:
-    resolution: {integrity: sha512-JDk8dgif51OjFoDE70+OT9ICyYr+69HlmihNwp1+Nsfbna3t5sIiCa9ZJktDmQ4/1b/rn26hIAR2uYXDMr5r0Q==}
+  react-dom@19.3.1:
+    resolution: {integrity: sha512-Y0bARz53lhEC1NMCASs0/j+faB/zqt3R8hpvg1e8+61ZVJ4UL0UdC4cBbXfZMcIuhrfgeILTLe+ZeBCavQPtKQ==}
     peerDependencies:
-      react: ^19.3.0
+      react: ^19.3.1
 
-  react@19.3.0:
-    resolution: {integrity: sha512-E8LUcbtBWt20bbl2YoHfx4ZDBdxVTfOKtCZn9cDSJ4l6/nuoApcpIBcj47t2wZoVX8g2ZHuMHbiShgCR1T5Sog==}
+  react@19.3.1:
+    resolution: {integrity: sha512-QNhWdt7nrgVWWQG58QuGsAR3jv3Hbe4mb4vz7w2csnHavciZJgda1CPNaldF6eVxv90ud3jUXpKlHL69gO38yw==}
     engines: {node: '>=0.10.0'}
 
   readable-stream@2.3.8:
@@ -1785,13 +1785,13 @@ packages:
   webpack-virtual-modules@0.6.2:
     resolution: {integrity: sha512-66/V2i5hQanC51vBQKPH4aI8NMAcBW59FVBs+rC7eGHupMyfn34q7rZIE+ETlJ+XTevqfUhVVBgSUNSW2flEUQ==}
 
-  workerd@1.20261006.1:
-    resolution: {integrity: sha512-8MadBuffZ5NdpLwZjUmsqT5QlaKXq4gjgT6wzcKeynZTICNXyePhc+5QVoKiK7+MMhFTLNrRO2KXLlpk8Q6BkA==}
+  workerd@1.20261012.1:
+    resolution: {integrity: sha512-tEHoMPsMga0seVjxfsR8Pd3f8IRqYwkq++dTUKI5Gdgj6zuSDluYwisydq+dn90SsIACwBquJUQ1nBpcOqaWTA==}
     engines: {node: '>=16'}
     hasBin: true
 
-  wrangler@4.149.0:
-    resolution: {integrity: sha512-OzK7xmB5r5iLKb3cIT3783g13fe6T7xyeKu9LEdUyl+DKAM2KP/jkjnE0OUhyw+mB/XJM9ycjgF3MWm8PR9amg==}
+  wrangler@4.151.1:
+    resolution: {integrity: sha512-OAsa9UAHZshM6mq2PXcVoyxXgWThAanZMBc/IirtqEWd/BauRtmUKzAniOu/pU0pd3pxKuMZ2vsbF4eo6RiNDA==}
     engines: {node: '>=22.0.0'}
     hasBin: true
     peerDependencies:
@@ -1936,25 +1936,25 @@ snapshots:
 
   '@cloudflare/kv-asset-handler@0.5.0': {}
 
-  '@cloudflare/unenv-preset@2.16.2(unenv@2.0.0-rc.24)(workerd@1.20261006.1)':
+  '@cloudflare/unenv-preset@2.16.2(unenv@2.0.0-rc.24)(workerd@1.20261012.1)':
     dependencies:
       unenv: 2.0.0-rc.24
     optionalDependencies:
-      workerd: 1.20261006.1
+      workerd: 1.20261012.1
 
-  '@cloudflare/workerd-darwin-64@1.20261006.1':
+  '@cloudflare/workerd-darwin-64@1.20261012.1':
     optional: true
 
-  '@cloudflare/workerd-darwin-arm64@1.20261006.1':
+  '@cloudflare/workerd-darwin-arm64@1.20261012.1':
     optional: true
 
-  '@cloudflare/workerd-linux-64@1.20261006.1':
+  '@cloudflare/workerd-linux-64@1.20261012.1':
     optional: true
 
-  '@cloudflare/workerd-linux-arm64@1.20261006.1':
+  '@cloudflare/workerd-linux-arm64@1.20261012.1':
     optional: true
 
-  '@cloudflare/workerd-windows-64@1.20261006.1':
+  '@cloudflare/workerd-windows-64@1.20261012.1':
     optional: true
 
   '@cspotcode/source-map-support@0.8.1':
@@ -2178,7 +2178,7 @@ snapshots:
 
   '@playwright/test@1.64.0':
     dependencies:
-      playwright: 1.64.0
+      playwright: 1.64.1
 
   '@poppinss/colors@4.1.6':
     dependencies:
@@ -2243,58 +2243,58 @@ snapshots:
 
   '@speed-highlight/core@1.2.24': {}
 
-  '@tauri-apps/api@2.12.3': {}
+  '@tauri-apps/api@2.12.4': {}
 
-  '@tauri-apps/cli-darwin-arm64@2.12.2':
+  '@tauri-apps/cli-darwin-arm64@2.12.3':
     optional: true
 
-  '@tauri-apps/cli-darwin-x64@2.12.2':
+  '@tauri-apps/cli-darwin-x64@2.12.3':
     optional: true
 
-  '@tauri-apps/cli-linux-arm-gnueabihf@2.12.2':
+  '@tauri-apps/cli-linux-arm-gnueabihf@2.12.3':
     optional: true
 
-  '@tauri-apps/cli-linux-arm64-gnu@2.12.2':
+  '@tauri-apps/cli-linux-arm64-gnu@2.12.3':
     optional: true
 
-  '@tauri-apps/cli-linux-arm64-musl@2.12.2':
+  '@tauri-apps/cli-linux-arm64-musl@2.12.3':
     optional: true
 
-  '@tauri-apps/cli-linux-riscv64-gnu@2.12.2':
+  '@tauri-apps/cli-linux-riscv64-gnu@2.12.3':
     optional: true
 
-  '@tauri-apps/cli-linux-x64-gnu@2.12.2':
+  '@tauri-apps/cli-linux-x64-gnu@2.12.3':
     optional: true
 
-  '@tauri-apps/cli-linux-x64-musl@2.12.2':
+  '@tauri-apps/cli-linux-x64-musl@2.12.3':
     optional: true
 
-  '@tauri-apps/cli-win32-arm64-msvc@2.12.2':
+  '@tauri-apps/cli-win32-arm64-msvc@2.12.3':
     optional: true
 
-  '@tauri-apps/cli-win32-ia32-msvc@2.12.2':
+  '@tauri-apps/cli-win32-ia32-msvc@2.12.3':
     optional: true
 
-  '@tauri-apps/cli-win32-x64-msvc@2.12.2':
+  '@tauri-apps/cli-win32-x64-msvc@2.12.3':
     optional: true
 
-  '@tauri-apps/cli@2.12.2':
+  '@tauri-apps/cli@2.12.3':
     optionalDependencies:
-      '@tauri-apps/cli-darwin-arm64': 2.12.2
-      '@tauri-apps/cli-darwin-x64': 2.12.2
-      '@tauri-apps/cli-linux-arm-gnueabihf': 2.12.2
-      '@tauri-apps/cli-linux-arm64-gnu': 2.12.2
-      '@tauri-apps/cli-linux-arm64-musl': 2.12.2
-      '@tauri-apps/cli-linux-riscv64-gnu': 2.12.2
-      '@tauri-apps/cli-linux-x64-gnu': 2.12.2
-      '@tauri-apps/cli-linux-x64-musl': 2.12.2
-      '@tauri-apps/cli-win32-arm64-msvc': 2.12.2
-      '@tauri-apps/cli-win32-ia32-msvc': 2.12.2
-      '@tauri-apps/cli-win32-x64-msvc': 2.12.2
+      '@tauri-apps/cli-darwin-arm64': 2.12.3
+      '@tauri-apps/cli-darwin-x64': 2.12.3
+      '@tauri-apps/cli-linux-arm-gnueabihf': 2.12.3
+      '@tauri-apps/cli-linux-arm64-gnu': 2.12.3
+      '@tauri-apps/cli-linux-arm64-musl': 2.12.3
+      '@tauri-apps/cli-linux-riscv64-gnu': 2.12.3
+      '@tauri-apps/cli-linux-x64-gnu': 2.12.3
+      '@tauri-apps/cli-linux-x64-musl': 2.12.3
+      '@tauri-apps/cli-win32-arm64-msvc': 2.12.3
+      '@tauri-apps/cli-win32-ia32-msvc': 2.12.3
+      '@tauri-apps/cli-win32-x64-msvc': 2.12.3
 
-  '@tauri-apps/plugin-opener@2.7.1':
+  '@tauri-apps/plugin-opener@2.7.2':
     dependencies:
-      '@tauri-apps/api': 2.12.3
+      '@tauri-apps/api': 2.12.4
 
   '@topcli/prompts@4.0.0': {}
 
@@ -2761,12 +2761,12 @@ snapshots:
 
   mdurl@2.1.0: {}
 
-  miniflare@5.20261006.1-alpha(@types/node@26.6.5):
+  miniflare@5.20261012.1-beta(@types/node@26.6.5):
     dependencies:
       '@cspotcode/source-map-support': 0.8.1
       sharp: 0.35.5(@types/node@26.6.5)
       undici: 7.29.1
-      workerd: 1.20261006.1
+      workerd: 1.20261012.1
       ws: 8.21.0
       youch: 4.1.0-beta.10
     transitivePeerDependencies:
@@ -2833,7 +2833,7 @@ snapshots:
 
   playwright-core@1.64.0: {}
 
-  playwright@1.64.0:
+  playwright@1.64.1:
     dependencies:
       playwright-core: 1.64.0
 
@@ -2860,12 +2860,12 @@ snapshots:
       defu: 6.1.7
       destr: 2.0.5
 
-  react-dom@19.3.0(react@19.3.0):
+  react-dom@19.3.1(react@19.3.1):
     dependencies:
-      react: 19.3.0
+      react: 19.3.1
       scheduler: 0.28.0
 
-  react@19.3.0: {}
+  react@19.3.1: {}
 
   readable-stream@2.3.8:
     dependencies:
@@ -3114,24 +3114,24 @@ snapshots:
 
   webpack-virtual-modules@0.6.2: {}
 
-  workerd@1.20261006.1:
+  workerd@1.20261012.1:
     optionalDependencies:
-      '@cloudflare/workerd-darwin-64': 1.20261006.1
-      '@cloudflare/workerd-darwin-arm64': 1.20261006.1
-      '@cloudflare/workerd-linux-64': 1.20261006.1
-      '@cloudflare/workerd-linux-arm64': 1.20261006.1
-      '@cloudflare/workerd-windows-64': 1.20261006.1
+      '@cloudflare/workerd-darwin-64': 1.20261012.1
+      '@cloudflare/workerd-darwin-arm64': 1.20261012.1
+      '@cloudflare/workerd-linux-64': 1.20261012.1
+      '@cloudflare/workerd-linux-arm64': 1.20261012.1
+      '@cloudflare/workerd-windows-64': 1.20261012.1
 
-  wrangler@4.149.0(@types/node@26.6.5):
+  wrangler@4.151.1(@types/node@26.6.5):
     dependencies:
       '@cloudflare/kv-asset-handler': 0.5.0
-      '@cloudflare/unenv-preset': 2.16.2(unenv@2.0.0-rc.24)(workerd@1.20261006.1)
+      '@cloudflare/unenv-preset': 2.16.2(unenv@2.0.0-rc.24)(workerd@1.20261012.1)
       blake3-wasm: 2.1.5
       esbuild: 0.28.2
-      miniflare: 5.20261006.1-alpha(@types/node@26.6.5)
+      miniflare: 5.20261012.1-beta(@types/node@26.6.5)
       path-to-regexp: 6.3.0
       unenv: 2.0.0-rc.24
-      workerd: 1.20261006.1
+      workerd: 1.20261012.1
     optionalDependencies:
       fsevents: 2.3.3
     transitivePeerDependencies:

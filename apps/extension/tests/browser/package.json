@@ -10,7 +10,7 @@
   "devDependencies": {
     "geckodriver": "^8.0.0",
     "openseadragon": "6.1.1",
-    "playwright": "1.64.0",
+    "playwright": "1.64.1",
     "selenium-webdriver": "^4.51.0"
   },
   "license": "GPL-3.0-or-later"
