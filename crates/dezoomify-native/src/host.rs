@@ -47,7 +47,7 @@ pub struct Instrumentation {
     pub failed_transient: u64,
     /// Failures classified permanent by the algorithm.
     pub failed_permanent: u64,
-    /// Explicit retry timers the algorithm scheduled.
+    /// Retry attempts admitted by the algorithm.
     pub retries_scheduled: u64,
     /// Total timer wait served (ms).
     pub timer_wait_ms: u64,
@@ -260,6 +260,7 @@ pub struct NativeHost<'a> {
     inflight: Cell<usize>,
     decode_tails: Arc<DecodeTails>,
     throttle: tokio::sync::Mutex<Option<Instant>>,
+    clock_start: Instant,
     progress: RefCell<Box<dyn FnMut(Progress) + 'a>>,
     last_progress: RefCell<Progress>,
     retry: RefCell<Option<RetryCallback<'a>>>,
@@ -336,6 +337,7 @@ impl<'a> NativeHost<'a> {
             inflight: Cell::new(0),
             decode_tails: Arc::default(),
             throttle: tokio::sync::Mutex::new(None),
+            clock_start: Instant::now(),
             progress: RefCell::new(Box::new(|_| {})),
             last_progress: RefCell::new(Progress::default()),
             retry: RefCell::new(None),
@@ -352,6 +354,17 @@ impl<'a> NativeHost<'a> {
 
     pub fn on_progress(&self, callback: impl FnMut(Progress) + 'a) {
         *self.progress.borrow_mut() = Box::new(callback);
+    }
+
+    /// Sample monotonic milliseconds since this Host was created.
+    fn timing(&self) -> HostTiming {
+        HostTiming {
+            time_ms: self
+                .clock_start
+                .elapsed()
+                .as_millis()
+                .min(u128::from(u64::MAX)) as u64,
+        }
     }
 
     pub fn on_retry(&self, callback: impl FnMut(TileAcquisition) -> RetryAnswer<'a> + 'a) {
@@ -419,6 +432,7 @@ impl<'a> NativeHost<'a> {
             max_bytes: self.options.max_bytes,
             max_deferred_follows: 10,
             retry_base_delay_ms: self.options.retry_base_delay.as_millis().min(300_000) as u64,
+            initial_tile_interval_ms: 0,
         }
     }
 
@@ -1160,6 +1174,9 @@ impl Host for NativeHost<'_> {
     }
 
     async fn acquire_tile(&self, request: TileAcquisition) -> Result<(), Error> {
+        if request.attempt > 0 {
+            self.instrumentation.borrow_mut().retries_scheduled += 1;
+        }
         self.approve_retry(&request).await?;
         self.controls.checkpoint(true).await?;
         let tile = request.tile;
@@ -1343,7 +1360,7 @@ impl Host for NativeHost<'_> {
         index.map(|i| i as u32).ok_or(Error::PlanEmpty)
     }
 
-    async fn checkpoint(&self, gate: Gate) -> Result<(), Error> {
+    async fn checkpoint(&self, gate: Gate) -> Result<HostTiming, Error> {
         if let Some(error) = self
             .raster
             .borrow()
@@ -1354,17 +1371,18 @@ impl Host for NativeHost<'_> {
         }
         self.controls
             .checkpoint(matches!(gate, Gate::Acquisition))
-            .await
+            .await?;
+        Ok(self.timing())
     }
 
-    async fn sleep(&self, delay_ms: u32) -> Result<(), Error> {
-        self.instrumentation.borrow_mut().retries_scheduled += 1;
+    async fn sleep(&self, delay_ms: u32) -> Result<HostTiming, Error> {
         self.instrumentation.borrow_mut().timer_wait_ms += u64::from(delay_ms);
         self.controlled(async {
             tokio::time::sleep(Duration::from_millis(u64::from(delay_ms))).await;
             Ok(())
         })
-        .await
+        .await?;
+        Ok(self.timing())
     }
 
     fn report(&self, mut progress: Progress) {

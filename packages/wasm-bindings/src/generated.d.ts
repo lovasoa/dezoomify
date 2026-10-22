@@ -321,6 +321,19 @@ export interface Failure {
 export type DiscoveryInputKind = "source" | "observed-document" | "observed-resource" | "observed-metadata";
 
 /**
+ * Timing observed when a Host operation completes. Readings must be
+ * nondecreasing with time and share a stable origin within one invocation.
+ * Differences represent elapsed milliseconds; equal readings are allowed at
+ * the clock's resolution. Timestamps are allowed, but dates are not required.
+ */
+export interface HostTiming {
+    /**
+     * Completion reading in milliseconds from the invocation's shared origin.
+     */
+    time_ms: number;
+}
+
+/**
  * Unit progress for the active phase (totals stay unknown until the plan
  * resolves).
  */
@@ -401,8 +414,8 @@ export interface Host {
     finish(request: FinishRequest,): Promise<Output>;
     chooseImage(catalog: Catalog,): Promise<number>;
     chooseLevel(image: Image,): Promise<number>;
-    checkpoint(gate: Gate,): Promise<void>;
-    sleep(delay_ms: number,): Promise<void>;
+    checkpoint(gate: Gate,): Promise<HostTiming>;
+    sleep(delay_ms: number,): Promise<HostTiming>;
     report(progress: Progress): void;
     warn(message: string): void;
     settle(): Promise<void>;
@@ -434,6 +447,11 @@ export interface Options {
     max_bytes?: number;
     max_deferred_follows?: number;
     retry_base_delay_ms?: number;
+    /**
+     * Initial per-origin tile spacing. Zero leaves admission unpaced until
+     * throttling is observed; a positive value enables adaptive pacing.
+     */
+    initial_tile_interval_ms?: number;
 }
 
 export interface OutputPreparation {

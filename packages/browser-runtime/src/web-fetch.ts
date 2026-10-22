@@ -145,7 +145,6 @@ export interface WebFetchDeps {
   hooks: WebFetchHooks;
   sleepFn?: (ms: number) => Promise<void>;
   nowFn?: () => number;
-  throttle?: (url: string) => Promise<void>;
   timeouts?: { requestMs?: number; metadataMs?: number };
 }
 
@@ -494,7 +493,6 @@ export function createWebFetcher(deps: WebFetchDeps): WebFetcher {
     if (signal?.aborted) throw cancelledFailure();
     const metadata = request.purpose === "metadata";
     const maxBytes = metadata ? DIRECT_METADATA_MAX_BYTES : DIRECT_TILE_MAX_BYTES;
-    if (!metadata && deps.throttle) await deps.throttle(request.uri);
     if (signal?.aborted) throw cancelledFailure();
     activeTransport = "direct";
     const direct = await fetchDirect(request, signal, metadata ? metadataMs : requestMs, maxBytes);

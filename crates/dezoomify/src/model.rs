@@ -1329,6 +1329,17 @@ pub enum Gate {
     Acquisition,
 }
 
+/// Timing observed when a Host operation completes. Readings must be
+/// nondecreasing with time and share a stable origin within one invocation.
+/// Differences represent elapsed milliseconds; equal readings are allowed at
+/// the clock's resolution. Timestamps are allowed, but dates are not required.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub struct HostTiming {
+    /// Completion reading in milliseconds from the invocation's shared origin.
+    pub time_ms: u64,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
@@ -1426,6 +1437,9 @@ pub struct Options {
     pub max_bytes: u64,
     pub max_deferred_follows: u32,
     pub retry_base_delay_ms: u64,
+    /// Initial per-origin tile spacing. Zero leaves admission unpaced until
+    /// throttling is observed; a positive value enables adaptive pacing.
+    pub initial_tile_interval_ms: u32,
 }
 
 impl Default for Options {
@@ -1440,6 +1454,7 @@ impl Default for Options {
             max_bytes: 67_108_864,
             max_deferred_follows: 8,
             retry_base_delay_ms: 1000,
+            initial_tile_interval_ms: 0,
         }
     }
 }

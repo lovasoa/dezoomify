@@ -47,7 +47,8 @@ without clearing the viewer's queue. GUI Hosts await Retry or Cancel
 inside optional acquisitions, pausing new work while in-flight operations settle.
 Retry approval retains successful tiles. Every required tile must succeed before
 finalization; permanent tile and output failures stop the job. Exact policies
-live in the [core implementation](../crates/dezoomify/src/run.rs).
+live in [acquisition](../crates/dezoomify/src/acquisition.rs) and its
+[per-origin scheduler](../crates/dezoomify/src/pacing.rs).
 
 ## Bindings and errors
 
