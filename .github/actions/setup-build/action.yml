@@ -1,4 +1,4 @@
-name: setup-rust
+name: setup-build
 description: Install the repository Rust toolchain and cache its dependencies
 inputs:
   key:
@@ -8,6 +8,15 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Use HTTPS Ubuntu mirrors
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        for file in /etc/apt/apt-mirrors.txt /etc/apt/sources.list.d/ubuntu.sources; do
+          if [ -f "$file" ]; then
+            sudo sed -i 's|http://azure.archive.ubuntu.com|https://archive.ubuntu.com|g' "$file"
+          fi
+        done
     - name: Read the repository toolchain
       id: toolchain
       shell: bash

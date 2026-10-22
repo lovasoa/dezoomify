@@ -28,7 +28,7 @@ on:
       - .github/actions/setup-windows-bundlers/action.yml
       - .github/actions/setup-nasm/action.yml
       - .github/actions/setup-pnpm/action.yml
-      - .github/actions/setup-rust/action.yml
+      - .github/actions/setup-build/action.yml
   push:
     branches: [main]
     paths: *desktop-paths
@@ -59,7 +59,7 @@ jobs:
       - uses: ./.github/actions/setup-pnpm
         with:
           install: true
-      - uses: ./.github/actions/setup-rust
+      - uses: ./.github/actions/setup-build
       - uses: ./.github/actions/setup-nasm
       - name: Install Linux webview packages
         if: runner.os == 'Linux'
@@ -93,7 +93,7 @@ jobs:
       - uses: ./.github/actions/setup-pnpm
         with:
           install: true
-      - uses: ./.github/actions/setup-rust
+      - uses: ./.github/actions/setup-build
       - uses: ./.github/actions/setup-nasm
       - name: Install Linux webview packages
         if: runner.os == 'Linux'
@@ -187,7 +187,7 @@ jobs:
       - uses: ./.github/actions/setup-pnpm
         with:
           install: true
-      - uses: ./.github/actions/setup-rust
+      - uses: ./.github/actions/setup-build
       - uses: ./.github/actions/setup-wasm-bindgen
       - name: Freeze the checked-out branch's release plan
         id: plan

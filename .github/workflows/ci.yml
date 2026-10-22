@@ -15,10 +15,6 @@ jobs:
     # Keep the same lanes as `cargo xtask ci local`, with parallel feedback.
     name: deterministic (${{ matrix.lane-group }})
     runs-on: ubuntu-latest
-    container: ${{ matrix.image }}
-    defaults:
-      run:
-        shell: bash
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -31,30 +27,19 @@ jobs:
           - browser+web
           - extension
           - bindings+security
-        include:
-          - lane-group: browser+web
-            image: &playwright mcr.microsoft.com/playwright:v1.64.1-noble@sha256:7852dc5a7d72f5fe458a597d690f6c42fbc8e9e26ddfa95f8e6ef552558d9bbf
-          - lane-group: extension
-            image: *playwright
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - name: Install Rust build tools in the browser image
-        if: matrix.image
-        run: |
-          sed -i 's/azure.archive.ubuntu.com/archive.ubuntu.com/g' /etc/apt/sources.list.d/ubuntu.sources
-          apt-get update
-          apt-get install -y --no-install-recommends gcc libc6-dev xz-utils
       - uses: ./.github/actions/setup-pnpm
         with:
           # Native AVIF tests independently decode with the existing Sharp dependency.
           install: ${{ matrix.lane-group != 'wasm' }}
-      - uses: ./.github/actions/setup-nasm
-        if: matrix.lane-group == 'check' || matrix.lane-group == 'rust'
-      - uses: ./.github/actions/setup-rust
+      - uses: ./.github/actions/setup-build
         with:
           key: ${{ matrix.lane-group }}
+      - uses: ./.github/actions/setup-nasm
+        if: matrix.lane-group == 'check' || matrix.lane-group == 'rust'
       - if: matrix.lane-group != 'rust'
         uses: ./.github/actions/setup-wasm-bindgen
       - name: Install cargo-deny 0.20.2
@@ -62,11 +47,19 @@ jobs:
         uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
         with:
           tool: cargo-deny@0.20.2
-      - name: Ensure the pinned browser revisions
-        if: matrix.image
-        # The image supplies browsers and OS libraries. This is normally a no-op;
-        # package updates can install new revisions without an image-version lockstep.
-        run: pnpm --filter webapp-e2e --filter dezoomify-extension-headless exec playwright install chromium firefox
+      - name: Cache Playwright browsers
+        if: matrix.lane-group == 'browser+web' || matrix.lane-group == 'extension'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('crates/fixture-server/tests/webapp-e2e/package.json', 'apps/extension/tests/browser/package.json') }}
+      - name: Ensure browser dependencies and pinned revisions
+        if: matrix.lane-group == 'browser+web' || matrix.lane-group == 'extension'
+        # Both jobs populate the same complete cache. Install is idempotent;
+        # one OS dependency pass serves both packages, even on a cache hit.
+        run: |
+          pnpm --filter webapp-e2e exec playwright install-deps chromium firefox
+          pnpm --filter webapp-e2e --filter dezoomify-extension-headless exec playwright install chromium firefox
       - name: Install pinned Firefox driver
         if: matrix.lane-group == 'extension'
         run: pnpm --filter dezoomify-extension-headless install:driver
@@ -75,5 +68,7 @@ jobs:
           LANES: ${{ matrix.lane-group }}
         run: |
           for lane in ${LANES//+/ }; do
+            echo "::group::CI lane ($lane)"
             cargo xtask ci "$lane"
+            echo "::endgroup::"
           done

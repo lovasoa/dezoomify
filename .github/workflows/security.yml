@@ -16,7 +16,7 @@ jobs:
       - uses: ./.github/actions/setup-pnpm
         with:
           install: true
-      - uses: ./.github/actions/setup-rust
+      - uses: ./.github/actions/setup-build
       - uses: ./.github/actions/setup-wasm-bindgen
       - uses: ./.github/actions/setup-nasm
       - name: Install cargo-deny 0.20.2

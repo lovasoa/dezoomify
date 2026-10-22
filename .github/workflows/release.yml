@@ -35,7 +35,7 @@ jobs:
         with:
           ref: ${{ env.SOURCE_REF }}
           fetch-depth: 0
-      - uses: ./.github/actions/setup-rust
+      - uses: ./.github/actions/setup-build
       - name: Require green CI for a numbered release
         if: github.event_name == 'workflow_dispatch'
         env:
@@ -90,7 +90,7 @@ jobs:
       - uses: ./.github/actions/setup-pnpm
         with:
           install: true
-      - uses: ./.github/actions/setup-rust
+      - uses: ./.github/actions/setup-build
         with:
           key: ${{ matrix.target }}
       - uses: ./.github/actions/setup-wasm-bindgen
@@ -157,7 +157,7 @@ jobs:
         with:
           ref: ${{ needs.prepare.outputs.commit }}
           fetch-depth: 0
-      - uses: ./.github/actions/setup-rust
+      - uses: ./.github/actions/setup-build
       - name: Reassemble artifacts
         env:
           GH_TOKEN: ${{ github.token }}
@@ -188,7 +188,7 @@ jobs:
         with:
           ref: ${{ needs.prepare.outputs.commit }}
           fetch-depth: 0
-      - uses: ./.github/actions/setup-rust
+      - uses: ./.github/actions/setup-build
       - name: Download verified artifacts
         env:
           GH_TOKEN: ${{ github.token }}

@@ -52,7 +52,7 @@ jobs:
       - uses: ./.github/actions/setup-pnpm
         with:
           install: true
-      - uses: ./.github/actions/setup-rust
+      - uses: ./.github/actions/setup-build
       - uses: ./.github/actions/setup-wasm-bindgen
       - name: Package store payload without submitting
         env:
