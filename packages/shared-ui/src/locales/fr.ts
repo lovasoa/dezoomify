@@ -180,7 +180,7 @@ export const fr = {
   // Failure section.
   "view.fail.title": "Impossible de dézoomifier l’image",
   "view.fail.deskDescLimits":
-    "Enregistrez de plus grandes images ou utilisez votre propre connexion lorsqu’un site bloque notre serveur.",
+    "Enregistrez de plus grandes images directement depuis le site d’origine avec votre propre connexion internet.",
   "view.fail.helpTitle": "Aide pour trouver une image",
   "view.fail.helpDesc":
     "Comment trouver l’adresse de l’image sur les sites de musées et d’archives, et quoi essayer quand rien n’est trouvé.",
@@ -238,7 +238,9 @@ export const fr = {
   // Fetch-failure family (see failure.ts plainMessageFor).
   "view.fail.httpNotFound": "Cette page est introuvable. Vérifiez l’adresse et réessayez.",
   "view.fail.httpRefused":
-    "Le site a refusé de partager ce fichier (HTTP {http}). Il bloque peut-être les serveurs partagés ; l’extension de navigateur ou l’application de bureau peuvent peut-être encore fonctionner.",
+    "Le site a refusé de partager ce fichier (HTTP {http}). Ouvrez la page d’origine pour vérifier que vous avez toujours accès à l’image, puis réessayez.",
+  "view.fail.httpRefusedProxy":
+    "Le site a refusé d’envoyer ce fichier au serveur de Dezoomify (HTTP {http}). Essayez l’extension de navigateur ou l’application de bureau pour télécharger directement avec votre propre connexion internet.",
   "view.fail.httpSiteProblem":
     "Le site a rencontré un problème pour ouvrir cette page. Réessayez bientôt.",
   "view.fail.httpNotOpened": "Cette page n’a pas pu être ouverte. Vérifiez l’adresse et réessayez.",

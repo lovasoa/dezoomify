@@ -182,7 +182,7 @@ export const de = {
   // Failure section.
   "view.fail.title": "Bild konnte nicht dezoomifiziert werden",
   "view.fail.deskDescLimits":
-    "Größere Bilder speichern oder die eigene Verbindung nutzen, wenn eine Website unseren Server blockiert.",
+    "Größere Bilder direkt von der Quellwebsite über Ihre eigene Internetverbindung speichern.",
   "view.fail.helpTitle": "Hilfe bei der Bildsuche",
   "view.fail.helpDesc":
     "So finden Sie die Bildadresse auf Museums- und Archivseiten, und was Sie versuchen können, wenn nichts gefunden wird.",
@@ -241,7 +241,9 @@ export const de = {
   "view.fail.httpNotFound":
     "Diese Seite wurde nicht gefunden. Prüfen Sie die Adresse und versuchen Sie es erneut.",
   "view.fail.httpRefused":
-    "Die Website hat die Freigabe dieser Datei verweigert (HTTP {http}). Sie blockiert möglicherweise gemeinsam genutzte Server; die Browser-Erweiterung oder die Desktop-App funktionieren möglicherweise trotzdem.",
+    "Die Website hat die Freigabe dieser Datei verweigert (HTTP {http}). Öffnen Sie die ursprüngliche Seite, um zu prüfen, ob Sie noch auf das Bild zugreifen können, und versuchen Sie es erneut.",
+  "view.fail.httpRefusedProxy":
+    "Die Website hat sich geweigert, diese Datei an den Server von Dezoomify zu senden (HTTP {http}). Versuchen Sie es mit der Browser-Erweiterung oder Desktop-App, um sie direkt über Ihre eigene Internetverbindung herunterzuladen.",
   "view.fail.httpSiteProblem":
     "Die Website hatte ein Problem beim Öffnen dieser Seite. Versuchen Sie es in Kürze erneut.",
   "view.fail.httpNotOpened":

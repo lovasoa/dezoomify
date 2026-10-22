@@ -268,7 +268,7 @@ const en = {
   // Failure section.
   "view.fail.title": "Could not dezoomify image",
   "view.fail.deskDescLimits":
-    "Save larger images or use your own connection when a site blocks our server.",
+    "Save larger images directly from the source site using your own internet connection.",
   "view.fail.helpTitle": "Help finding an image",
   "view.fail.helpDesc":
     "How to find the image address on museum & archive sites, and what to try when nothing is found.",
@@ -328,12 +328,13 @@ const en = {
     "The source site is limiting downloads from our server. Wait a few minutes, or try the desktop app or browser extension to download using your own internet connection.",
   "view.fail.rateDirect":
     "The source site is limiting downloads from your own connection. Wait a few minutes before trying again. Switching to the desktop app or extension uses the same connection and may not help.",
-  // Fetch-failure family, rendered from the typed facts at display time
-  // (see `plainMessageFor` in failure.ts): every observed cause names its
-  // own next fix, so identical causes read identically everywhere.
+  // Fetch-failure family, rendered from typed facts and product context
+  // at display time (see `plainMessageFor` in failure.ts).
   "view.fail.httpNotFound": "This page could not be found. Check the address and try again.",
   "view.fail.httpRefused":
-    "The site refused to share this file (HTTP {http}). It may block shared servers; the browser extension or the desktop app may still work.",
+    "The site refused to share this file (HTTP {http}). Open the original page to check that you can still access the image, then try again.",
+  "view.fail.httpRefusedProxy":
+    "The site refused to send this file to Dezoomify’s server (HTTP {http}). Try the browser extension or desktop app to download directly using your own internet connection.",
   "view.fail.httpSiteProblem": "The site had a problem opening this page. Try again shortly.",
   "view.fail.httpNotOpened": "This page could not be opened. Check the address and try again.",
   "view.fail.policyBlocked":
