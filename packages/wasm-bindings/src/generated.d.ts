@@ -91,6 +91,13 @@ export interface HtmlQuery {
 }
 
 /**
+ * Checkpoints always check cancellation; `acquisition` also waits for pause or
+ * retry approval. Neither gate stops in-flight work; cancellation still requires
+ * awaiting job settlement.
+ */
+export type Gate = "cancellation" | "acquisition";
+
+/**
  * Compact coverage for a regular, row-major tile plan. Requests remain lazy.
  */
 export interface OutputGrid {
@@ -591,16 +598,10 @@ export interface DiagnosticReport {
 }
 
 /**
- * Whether a capability may ask the user for access. Existing granted access
- * remains usable under either policy; allowing interaction does not grant permission.
+ * Whether a capability may ask for access: `forbidden` uses only existing access;
+ * `allowed` may prompt but does not itself grant permission.
  */
 export type Interaction = "forbidden" | "allowed";
-
-/**
- * Which control conditions a checkpoint must wait for. Neither gate stops work
- * already in flight; cancellation still requires awaiting job settlement.
- */
-export type Gate = "cancellation" | "acquisition";
 
 /**
  * Which output limit refused the job. Structured limit facts live in

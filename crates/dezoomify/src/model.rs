@@ -1322,27 +1322,24 @@ pub enum ResourceRead {
     NeedsAccess { origin: String },
 }
 
-/// Whether a capability may ask the user for access. Existing granted access
-/// remains usable under either policy; allowing interaction does not grant permission.
+/// Whether a capability may ask for access: `forbidden` uses only existing access;
+/// `allowed` may prompt but does not itself grant permission.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub enum Interaction {
-    /// Use only access already available; do not prompt.
     Forbidden,
-    /// May request access as needed for this operation.
     Allowed,
 }
 
-/// Which control conditions a checkpoint must wait for. Neither gate stops work
-/// already in flight; cancellation still requires awaiting job settlement.
+/// Checkpoints always check cancellation; `acquisition` also waits for pause or
+/// retry approval. Neither gate stops in-flight work; cancellation still requires
+/// awaiting job settlement.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub enum Gate {
-    /// Check cancellation without waiting for pause or retry approval.
     Cancellation,
-    /// Also wait while paused or waiting for retry approval.
     Acquisition,
 }
 
