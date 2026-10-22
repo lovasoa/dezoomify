@@ -76,7 +76,14 @@ function Logo() {
   );
 }
 
-function ExtensionGuideButton({ onOpen }: { onOpen(): void }) {
+function ExtensionGuideButton({
+  onOpen,
+  product,
+}: {
+  onOpen(): void;
+  product?: ViewContext["product"];
+}) {
+  if (product === "extension") return null;
   return (
     <button type="button" className="dz-guidance-item" id="dz-card-extension" onClick={onOpen}>
       <div className="dz-guidance-item-header">
@@ -536,7 +543,10 @@ function DisplayOnlyView({
       <div className="dz-guidance-section">
         <h3 className="dz-guidance-title">{t("view.display.waysTitle")}</h3>
         <div className="dz-guidance-grid">
-          <ExtensionGuideButton onOpen={() => showExtensionGuidance(hostDocument)} />
+          <ExtensionGuideButton
+            onOpen={() => showExtensionGuidance(hostDocument)}
+            product={ctx?.product}
+          />
           <DesktopGuideButton
             onOpen={() => showDesktopAppGuidance(hostDocument, ctx?.platformHints)}
             description={t("view.display.deskDescClean")}
@@ -772,7 +782,10 @@ function FailedView({
             ) : null
           ) : (
             <>
-              <ExtensionGuideButton onOpen={() => showExtensionGuidance(hostDocument)} />
+              <ExtensionGuideButton
+                onOpen={() => showExtensionGuidance(hostDocument)}
+                product={ctx?.product}
+              />
               <DesktopGuideButton
                 onOpen={() => showDesktopAppGuidance(hostDocument, ctx?.platformHints)}
                 description={t("view.fail.deskDescLimits")}

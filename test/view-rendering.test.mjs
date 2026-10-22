@@ -381,6 +381,32 @@ test("website discovery failure keeps the extension suggestion and opens its gui
   click(modal.querySelector(".dz-modal-close"));
 });
 
+test("access refusals explain the failed connection without recommending the extension to itself", () => {
+  const el = container();
+  const scenarios = [
+    { product: "extension", transport: "browser-session", message: "view.fail.httpRefused" },
+    { product: "website", transport: "metadata-proxy", message: "view.fail.httpRefusedProxy" },
+    { product: "website", transport: "direct", message: "view.fail.httpRefused" },
+    { product: "desktop", transport: "native", message: "view.fail.httpRefused" },
+  ];
+  try {
+    for (const locale of SUPPORTED_LOCALES) {
+      setLocale(locale);
+      for (const { product, transport, message } of scenarios) {
+        const error = {
+          kind: "discovery-failed",
+          cause: { kind: "http-error", status: 403, transport },
+        };
+        render(el, failurePresentation(error), callbacks, { product });
+        assert.equal(el.querySelector("#dz-error-message").textContent, t(message, { http: 403 }));
+        assert.equal(el.querySelector("#dz-card-extension") !== null, product !== "extension");
+      }
+    }
+  } finally {
+    setLocale("en");
+  }
+});
+
 test("extension discovery failure offers a diagnostic issue draft and the hosted URL guide", () => {
   const el = container();
   const input = "https://museum.example/viewer?item=123";
