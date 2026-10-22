@@ -16,10 +16,7 @@ jobs:
       - uses: ./.github/actions/setup-pnpm
         with:
           install: true
-      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # pinned
-        with:
-          toolchain: 1.98.1 # must match rust-toolchain.toml
-          targets: wasm32-unknown-unknown
+      - uses: ./.github/actions/setup-rust
       - uses: ./.github/actions/setup-wasm-bindgen
       - uses: ./.github/actions/setup-nasm
       - name: Install cargo-deny 0.20.2

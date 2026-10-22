@@ -27,6 +27,8 @@ on:
       - .github/workflows/desktop.yml
       - .github/actions/setup-windows-bundlers/action.yml
       - .github/actions/setup-nasm/action.yml
+      - .github/actions/setup-pnpm/action.yml
+      - .github/actions/setup-rust/action.yml
   push:
     branches: [main]
     paths: *desktop-paths
@@ -57,10 +59,7 @@ jobs:
       - uses: ./.github/actions/setup-pnpm
         with:
           install: true
-      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # pinned
-        with:
-          toolchain: 1.98.1
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: ./.github/actions/setup-rust
       - uses: ./.github/actions/setup-nasm
       - name: Install Linux webview packages
         if: runner.os == 'Linux'
@@ -94,10 +93,7 @@ jobs:
       - uses: ./.github/actions/setup-pnpm
         with:
           install: true
-      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # pinned
-        with:
-          toolchain: 1.98.1
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: ./.github/actions/setup-rust
       - uses: ./.github/actions/setup-nasm
       - name: Install Linux webview packages
         if: runner.os == 'Linux'
@@ -191,12 +187,8 @@ jobs:
       - uses: ./.github/actions/setup-pnpm
         with:
           install: true
-      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # pinned
-        with:
-          toolchain: 1.98.1
-          targets: wasm32-unknown-unknown
+      - uses: ./.github/actions/setup-rust
       - uses: ./.github/actions/setup-wasm-bindgen
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Freeze the checked-out branch's release plan
         id: plan
         run: |

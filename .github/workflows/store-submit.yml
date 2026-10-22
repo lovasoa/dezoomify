@@ -52,16 +52,8 @@ jobs:
       - uses: ./.github/actions/setup-pnpm
         with:
           install: true
-      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # pinned
-        with:
-          toolchain: 1.98.1
-          targets: wasm32-unknown-unknown
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: ./.github/actions/setup-rust
       - uses: ./.github/actions/setup-wasm-bindgen
-      - name: Build wasm glue
-        run: |
-          cargo build -p dezoomify-wasm --profile wasm-release --target wasm32-unknown-unknown
-          wasm-bindgen --remove-name-section --target web --out-dir wasm --out-name dezoomify-wasm target/wasm32-unknown-unknown/wasm-release/dezoomify_wasm.wasm
       - name: Package store payload without submitting
         env:
           BROWSER: ${{ inputs.browser || 'chromium' }}

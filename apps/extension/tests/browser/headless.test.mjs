@@ -20,7 +20,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test, { after, before } from "node:test";
 import { fileURLToPath } from "node:url";
-import { chromium } from "playwright";
+import { chromium, firefox as playwrightFirefox } from "playwright";
 import webdriver from "selenium-webdriver";
 import firefox from "selenium-webdriver/firefox.js";
 import sharp from "sharp";
@@ -494,7 +494,11 @@ async function retireChromiumFixture(context, onPage, downloadSession, shared) {
 
 function findFirefoxBinary() {
   if (process.env.DEZOOMIFY_FIREFOX_BIN) return process.env.DEZOOMIFY_FIREFOX_BIN;
-  for (const candidate of ["/usr/bin/firefox-esr", "/usr/bin/firefox"]) {
+  for (const candidate of [
+    playwrightFirefox.executablePath(),
+    "/usr/bin/firefox-esr",
+    "/usr/bin/firefox",
+  ]) {
     if (existsSync(candidate)) return candidate;
   }
   return null;
