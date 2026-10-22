@@ -17,6 +17,8 @@ jobs:
         with:
           install: true
       - uses: ./.github/actions/setup-build
+        with:
+          key: check
       - uses: ./.github/actions/setup-wasm-bindgen
       - uses: ./.github/actions/setup-nasm
       - name: Install cargo-deny 0.20.2

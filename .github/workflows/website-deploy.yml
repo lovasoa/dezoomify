@@ -42,6 +42,8 @@ jobs:
         with:
           install: true
       - uses: ./.github/actions/setup-build
+        with:
+          key: web
       - id: bindgen
         uses: ./.github/actions/setup-wasm-bindgen
       - name: Build the site (Vite app, help, wasm glue, dist/)

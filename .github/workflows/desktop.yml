@@ -60,6 +60,8 @@ jobs:
         with:
           install: true
       - uses: ./.github/actions/setup-build
+        with:
+          key: window-e2e
       - uses: ./.github/actions/setup-nasm
       - name: Install Linux webview packages
         if: runner.os == 'Linux'
@@ -94,6 +96,8 @@ jobs:
         with:
           install: true
       - uses: ./.github/actions/setup-build
+        with:
+          key: bundle-smoke
       - uses: ./.github/actions/setup-nasm
       - name: Install Linux webview packages
         if: runner.os == 'Linux'
@@ -188,6 +192,8 @@ jobs:
         with:
           install: true
       - uses: ./.github/actions/setup-build
+        with:
+          key: bundle-smoke
       - uses: ./.github/actions/setup-wasm-bindgen
       - name: Freeze the checked-out branch's release plan
         id: plan

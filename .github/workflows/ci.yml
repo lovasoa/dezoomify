@@ -37,7 +37,7 @@ jobs:
           install: ${{ matrix.lane-group != 'wasm' }}
       - uses: ./.github/actions/setup-build
         with:
-          key: ${{ matrix.lane-group }}
+          key: ${{ (matrix.lane-group == 'browser+web' || matrix.lane-group == 'extension') && 'web' || matrix.lane-group }}
       - uses: ./.github/actions/setup-nasm
         if: matrix.lane-group == 'check' || matrix.lane-group == 'rust'
       - if: matrix.lane-group != 'rust'

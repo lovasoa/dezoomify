@@ -72,16 +72,22 @@ jobs:
         include:
           - target: cli-linux-x86_64
             runner: ubuntu-latest
+            cache: cli-release
           - target: desktop-linux-x86_64
             runner: ubuntu-latest
+            cache: bundle-smoke
           - target: desktop-windows-x86_64
             runner: windows-latest
+            cache: bundle-smoke
           - target: desktop-macos-aarch64
             runner: macos-latest
+            cache: bundle-smoke
           - target: extension-chromium
             runner: ubuntu-latest
+            cache: web
           - target: extension-firefox
             runner: ubuntu-latest
+            cache: web
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -92,7 +98,7 @@ jobs:
           install: true
       - uses: ./.github/actions/setup-build
         with:
-          key: ${{ matrix.target }}
+          key: ${{ matrix.cache }}
       - uses: ./.github/actions/setup-wasm-bindgen
       - name: Install Linux desktop tools
         if: matrix.target == 'desktop-linux-x86_64'

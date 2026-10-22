@@ -2,9 +2,9 @@ name: setup-build
 description: Install the repository Rust toolchain and cache its dependencies
 inputs:
   key:
-    description: Partition caches for matrix jobs that build different artifacts
+    description: Dependency group shared by jobs that build the same profiles and features
     required: false
-    default: ""
+    default: xtask
 runs:
   using: composite
   steps:
@@ -17,16 +17,20 @@ runs:
             sudo sed -i 's|http://azure.archive.ubuntu.com|https://archive.ubuntu.com|g' "$file"
           fi
         done
-    - name: Read the repository toolchain
-      id: toolchain
+    - name: Use only the repository toolchain
       shell: bash
-      run: echo "version=$(sed -n 's/^channel = "\([^"]*\)"/\1/p' rust-toolchain.toml)" >> "$GITHUB_OUTPUT"
-    - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # pinned
-      with:
-        toolchain: ${{ steps.toolchain.outputs.version }}
-    - name: Install repository targets and components
-      shell: bash
-      run: rustup show
+      run: |
+        rustup show
+        active="$(rustup show active-toolchain | cut -d ' ' -f1)"
+        rustup default "$active"
+        # rust-cache hashes every installed toolchain, including unused runner defaults.
+        while read -r toolchain; do
+          if [ "$toolchain" != "$active" ]; then
+            rustup toolchain uninstall "$toolchain"
+          fi
+        done < <(rustup toolchain list --quiet)
     - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       with:
-        key: ${{ inputs.key }}
+        shared-key: ${{ inputs.key }}
+        # PRs read main's caches; multi-GB private copies otherwise evict them.
+        save-if: ${{ github.ref == 'refs/heads/main' }}
