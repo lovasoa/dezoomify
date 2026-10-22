@@ -9,6 +9,7 @@ or solve a download problem. They also generate the website help.
 
 - [Development](development.md): setup, builds, and local development.
 - [Architecture](architecture.md): the shared algorithm and ownership boundaries.
+- [Caller contracts](code-quality.md): clear interfaces and source documentation.
 - [Contributing a format](CONTRIBUTING-format.md): add a parser and fixture.
 - [Testing](testing.md): choose useful coverage.
 - [Security](security.md): credentials and trust boundaries.

@@ -3,6 +3,9 @@
 Implement a pure parser and tile plan in `crates/dezoomify`, then register its
 stable id in `core/registry.rs`. Parsing uses supplied bytes and injected Host
 capabilities, per [Architecture](architecture.md).
+Follow [Caller contracts](code-quality.md): state parser input assumptions,
+URL/base handling, pixel/grid coordinate conventions, and malformed-input behavior
+at the owning declarations. Reuse shared geometry contracts where they apply.
 
 Decoding and metadata parsing designate the decoded resource as canonical by
 default. That URL must be able to reconstruct the image or catalog on its own.

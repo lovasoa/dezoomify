@@ -14,9 +14,8 @@ pub const RETRY_MAX_DELAY_MS: u64 = 30_000;
 ///
 /// Doubling from `base_ms` (the job's configured base, defaulting to
 /// [`RETRY_BASE_DELAY_MS`]) up to [`RETRY_MAX_DELAY_MS`];
-/// an explicit `retry_after_ms` hint overrides the computed backoff when
-/// it is larger (hosts that observed `retry-after` wait at least that
-/// long).
+/// an explicit `retry_after_ms` hint, clamped to [`MAX_RETRY_AFTER_MS`],
+/// overrides the computed backoff when it is larger.
 #[must_use]
 pub fn retry_delay_ms(attempt: u32, retry_after_ms: Option<u64>, base_ms: u64) -> u64 {
     let shift = attempt.saturating_sub(1).min(5);

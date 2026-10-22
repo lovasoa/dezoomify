@@ -1,10 +1,10 @@
 use super::{ImageSelection, NativeHost};
 use base64::Engine as _;
-use dezoomify::model::{Catalog, CatalogEntry, DiagnosticLevel, Error, Tile};
+use dezoomify::model::{Catalog, CatalogEntry, DiagnosticLevel, Error, Gate, Tile};
 
 impl NativeHost<'_> {
     pub(super) async fn select_image(&self, catalog: Catalog) -> Result<u32, Error> {
-        self.controls.checkpoint(false).await?;
+        self.controls.checkpoint(Gate::Cancellation).await?;
         let last = catalog
             .entries
             .len()

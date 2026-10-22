@@ -1,6 +1,10 @@
 /* tslint:disable */
 /* eslint-disable */
 
+/** Discover and save one selected image from a batch of source/observation inputs.
+ * Validates inputs and Options before I/O; awaits Host.settle on success or error.
+ * Use a fresh Host and keep its dependencies alive until this promise settles.
+ */
 export function dezoomify(inputs: JobInput[], options: Options, host: Host): Promise<Output>;
 export function applyProcessing(recipe: ProcessingRecipe, bytes: Uint8Array): Uint8Array;
 
@@ -37,6 +41,12 @@ export interface Point {
 }
 
 /**
+ * A probe's decoded pixel dimensions, or absence of a usable tile. Availability
+ * also means output was retained when the requested `TileRole` includes output.
+ */
+export type ProbeOutcome = { status: "missing" } | { status: "available"; width: number; height: number };
+
+/**
  * A resolved image: declared geometry and selectable levels.
  */
 export interface Image {
@@ -50,6 +60,13 @@ export interface Image {
     size?: Size;
     levels: Level[];
 }
+
+/**
+ * A resource read or a request for access the current policy could not provide.
+ * Discovery may revisit `needs-access` with interaction allowed; it is not a
+ * successful empty response or a transport failure.
+ */
+export type ResourceRead = { kind: "response"; response: ResourceResponse } | { kind: "needs-access"; origin: string };
 
 /**
  * A still-deferred catalog entry: the resource to acquire before an image
@@ -88,6 +105,55 @@ export interface OutputGrid {
 }
 
 /**
+ * Core discovery/acquisition policy, validated by `dezoomify` before host I/O.
+ * Hosts separately enforce transport, decode, and output resource limits.
+ * Omitted serialized fields use core defaults; out-of-range limits fail the job.
+ */
+export interface Options {
+    /**
+     * Restrict discovery to a registered format id; absent or `auto` searches all.
+     */
+    format?: string | undefined;
+    /**
+     * Issue approval-required attempts after the automatic retry allowance.
+     */
+    interactive_retries?: boolean;
+    output?: OutputFormat;
+    /**
+     * Maximum overlapping metadata reads or tile attempts; positive and no
+     * greater than `max_tiles`.
+     */
+    max_concurrent?: number;
+    /**
+     * Positive limit applied separately to geometry probe calls and the final
+     * tile plan (including reused probes and any reusable lower source levels).
+     */
+    max_tiles?: number;
+    /**
+     * Automatic retries per tile after attempt zero, including origin recovery.
+     */
+    max_retries?: number;
+    /**
+     * Byte limit for each fetched metadata body and initial supplied document.
+     * Discovery also has an aggregate budget; hosts own tile/output limits.
+     */
+    max_bytes?: number;
+    /**
+     * Maximum selected deferred catalog entries followed before a ready image.
+     */
+    max_deferred_follows?: number;
+    /**
+     * First retry's backoff in milliseconds; see `retry_delay_ms` for clamping.
+     */
+    retry_base_delay_ms?: number;
+    /**
+     * Initial per-origin tile spacing. Zero leaves admission unpaced until
+     * throttling is observed; a positive value enables adaptive pacing.
+     */
+    initial_tile_interval_ms?: number;
+}
+
+/**
  * Current filesystem availability, queried separately from job completion.
  */
 export type SavedOutputState = "available" | "deleted";
@@ -119,6 +185,18 @@ export interface SavedOutput {
 export interface ReusedTile {
     index: number;
     position: Point;
+}
+
+/**
+ * Finalization after successful preflight and all required acquisitions.
+ * Probe output is already retained; `reused_tiles` assigns its final plan indices
+ * by output position. A host may infer undeclared canvas dimensions from tiles.
+ */
+export interface FinishRequest {
+    canvas: Size | undefined;
+    format: OutputFormat;
+    title: string | undefined;
+    reused_tiles: ReusedTile[];
 }
 
 /**
@@ -181,20 +259,36 @@ export interface OutputCodec {
 /**
  * One acquisition attempt. The core owns retries; Hosts await approval for
  * optional attempts before performing I/O. Attempt zero is the initial request.
+ * The core handles retry delays and origin pacing before calling the host.
  */
 export interface TileAcquisition {
     tile: Tile;
     attempt: number;
+    /**
+     * This attempt exceeds the automatic allowance; acquire approval or return
+     * a typed error (user cancellation is `cancelled`) before acquiring the tile.
+     */
     requires_approval: boolean;
+    /**
+     * The preceding attempt's error, absent only on the initial attempt.
+     */
     previous_failure: Error | undefined;
 }
 
 /**
  * One discovery input. An omitted kind is a user-supplied source for
  * products that have no browser observations.
+ * A batch supplies evidence for one image selection, not independent jobs.
  */
 export interface JobInput {
+    /**
+     * Source address and base for relative references; native hosts may accept paths.
+     */
     url: string;
+    /**
+     * Supplied UTF-8 document instead of fetching `url`. Initial inputs must be
+     * nonempty and within `Options.max_bytes`; observed metadata never follows links.
+     */
     contents?: string;
     kind?: DiscoveryInputKind;
 }
@@ -219,6 +313,17 @@ export interface ResourceRequest {
 }
 
 /**
+ * One request with placement and an index scoped to its probe sequence or final
+ * plan. Probe indices need not match final indices; `FinishRequest.reused_tiles`
+ * maps retained output by position. The index is not a source zoom identifier.
+ */
+export interface Tile {
+    index: number;
+    request: ResourceRequest;
+    placement: TilePlacement;
+}
+
+/**
  * One typed failure. Grouped by domain: transport and fetch, discovery,
  * job and planning, tiles, output, control, internals, and the composable
  * [`Error::Resource`] context wrapper that preserves the exact URI and
@@ -228,9 +333,13 @@ export type Error = ({ kind: "http-error" } & { status: number; retry_after_ms?:
 
 /**
  * Output preflight after geometry probes and before ordinary acquisitions.
- * Positioned or unresolved coverage has no grid and must finalize safely.
+ * Retain output from successful probes. Without a grid, use individual tile
+ * placements rather than assuming complete regular coverage.
  */
 export interface OutputPlan {
+    /**
+     * Selected image dimensions in pixels; absent when geometry is undeclared.
+     */
     canvas: Size | undefined;
     grid: OutputGrid | undefined;
     /**
@@ -238,6 +347,10 @@ export interface OutputPlan {
      * Their tiles use level-local coordinates and `TilePlacement::canvas`.
      */
     source_levels?: Size[];
+    /**
+     * Final tile count across the selected and source levels, including reused
+     * output probes but excluding missing and probe-only observations.
+     */
     tile_count: number;
     format: OutputFormat;
     title: string | undefined;
@@ -251,6 +364,113 @@ export interface Output {
     format: OutputFormat;
     disposition: OutputDisposition;
 }
+
+/**
+ * Platform resources and interactions for one `dezoomify` invocation.
+ *
+ * Discovery and selection precede geometry probes, then output preflight,
+ * ordinary tile acquisitions, and finalization. Probes may already retain
+ * output. Acquisitions and metadata reads can overlap; completion order
+ * is unspecified. The core owns retries, pacing, and backoff; hosts perform
+ * individual attempts and own I/O, decoding, and output resources.
+ *
+ * On success or error, the core awaits `settle` after its other calls
+ * have returned or their futures have been dropped. Hosts must track
+ * work that outlives those futures. Signal cancellation through the host
+ * and await the job; dropping a Rust job future skips this cleanup.
+ * Keep the host and its dependencies alive until settlement completes;
+ * use a fresh host for each job. Fallible methods return typed `Error`
+ * values (TypeScript promises reject with the same serialized shapes).
+ */
+export interface Host {
+    /**
+     * Supply more discovery evidence under the interaction policy.
+     * Return new or improved evidence; an empty batch exhausts the current
+     * policy. The core may ask again, including with interaction allowed.
+     */
+    observe(interaction: Interaction,): Promise<JobInput[]>;
+    /**
+     * Read one resource, preserving its redirected base URI. Honor the
+     * interaction policy and `ResourceRequest` range/credential rules.
+     * Return the `needs-access` outcome when permission is unavailable.
+     */
+    fetch(request: ResourceRequest,interaction: Interaction,): Promise<ResourceRead>;
+    /**
+     * Query supplied HTML without executing scripts or loading resources.
+     * Return selector-keyed matches in document order, excluding
+     * template/noscript subtrees. Leave URLs for the core to resolve.
+     */
+    parseHtml(query: HtmlQuery,): Promise<HtmlDocument>;
+    /**
+     * Measure one geometry probe before output preflight. `missing` is a
+     * search observation, not a failed output tile. Propagate cancellation
+     * and output errors. On availability, retain the tile at its placement
+     * for reuse if its role includes output.
+     */
+    probe(tile: Tile,): Promise<ProbeOutcome>;
+    /**
+     * Announce the resolved plan once, before ordinary acquisitions.
+     * Preserve probe output. Hosts may preflight destinations and resource
+     * requirements here; acceptance does not guarantee later allocation
+     * or publication will succeed.
+     */
+    beginOutput(plan: OutputPlan,): Promise<void>;
+    /**
+     * Perform one tile attempt, awaiting any required approval before I/O.
+     * Success means the tile has joined output; retain resources as needed
+     * until finish/settlement. Calls for different tiles can overlap;
+     * retries of the same tile are sequential and must not duplicate output.
+     */
+    acquireTile(request: TileAcquisition,): Promise<void>;
+    /**
+     * Finalize after all required tiles succeeded, including reused probes.
+     * Called at most once; report the actual save disposition, which need
+     * not mean a browser download has finished. Failure still leads to settle.
+     */
+    finish(request: FinishRequest,): Promise<Output>;
+    /**
+     * Return a zero-based index into `catalog.entries`, even for a single
+     * entry. Selecting a deferred entry can lead to another catalog choice.
+     * The core rejects out-of-range indices with `invalid-state`.
+     */
+    chooseImage(catalog: Catalog,): Promise<number>;
+    /**
+     * Return a zero-based index into `image.levels` in its supplied order,
+     * not a source format's zoom identifier. The core checks the range.
+     */
+    chooseLevel(image: Image,): Promise<number>;
+    /**
+     * Check cancellation at either gate; the acquisition gate also waits
+     * for pause/retry approval to clear. Pausing does not cancel work that
+     * is already running. Return `cancelled` when cancellation is signalled.
+     * Sample `HostTiming` after the gate opens, on the invocation's shared scale.
+     */
+    checkpoint(gate: Gate,): Promise<HostTiming>;
+    /**
+     * Wait at least `delay_ms` milliseconds for core-owned pacing or backoff,
+     * or return `cancelled`. Return completion timing on the `HostTiming` scale.
+     * Calls may overlap; leave scheduling and retries to the core.
+     */
+    sleep(delay_ms: number,): Promise<HostTiming>;
+    /**
+     * Deliver a progress snapshot synchronously. Totals may be unknown
+     * during discovery/planning; completion is the job result, not a count.
+     */
+    report(progress: Progress): void;
+    /**
+     * Deliver a nonfatal discovery warning synchronously. Diagnostic
+     * prose is for presentation, never a machine-readable failure kind.
+     */
+    warn(message: string): void;
+    /**
+     * Stop and drain remaining host work and release invocation resources,
+     * including on validation failure before any other capability was called.
+     * Preserve independently owned saved output. Cleanup must not fail or
+     * replace the job result; after it completes, no job work may use resources.
+     */
+    settle(): Promise<void>;
+}
+
 
 /**
  * Presentation data derived from the codec registry, including automatic output.
@@ -371,6 +591,18 @@ export interface DiagnosticReport {
 }
 
 /**
+ * Whether a capability may ask the user for access. Existing granted access
+ * remains usable under either policy; allowing interaction does not grant permission.
+ */
+export type Interaction = "forbidden" | "allowed";
+
+/**
+ * Which control conditions a checkpoint must wait for. Neither gate stops work
+ * already in flight; cancellation still requires awaiting job settlement.
+ */
+export type Gate = "cancellation" | "acquisition";
+
+/**
  * Which output limit refused the job. Structured limit facts live in
  * [`LimitContext`]; `message` prose is presentation only and is never a
  * data channel between languages.
@@ -392,35 +624,10 @@ export interface DiagnosticRecord {
     fields: Record<string, DiagnosticValue>;
 }
 
-export interface FinishRequest {
-    canvas: Size | undefined;
-    format: OutputFormat;
-    title: string | undefined;
-    reused_tiles: ReusedTile[];
-}
-
 export interface Header {
     name: string;
     value: string;
 }
-
-export interface Host {
-    observe(interaction: Interaction,): Promise<JobInput[]>;
-    fetch(request: ResourceRequest,interaction: Interaction,): Promise<ResourceRead>;
-    parseHtml(query: HtmlQuery,): Promise<HtmlDocument>;
-    probe(tile: Tile,): Promise<ProbeOutcome>;
-    beginOutput(plan: OutputPlan,): Promise<void>;
-    acquireTile(request: TileAcquisition,): Promise<void>;
-    finish(request: FinishRequest,): Promise<Output>;
-    chooseImage(catalog: Catalog,): Promise<number>;
-    chooseLevel(image: Image,): Promise<number>;
-    checkpoint(gate: Gate,): Promise<HostTiming>;
-    sleep(delay_ms: number,): Promise<HostTiming>;
-    report(progress: Progress): void;
-    warn(message: string): void;
-    settle(): Promise<void>;
-}
-
 
 export interface HtmlElement {
     name: string;
@@ -434,35 +641,9 @@ export interface Level {
     tileSize?: Size;
 }
 
-export interface Options {
-    format?: string | undefined;
-    /**
-     * Issue approval-required attempts after the automatic retry allowance.
-     */
-    interactive_retries?: boolean;
-    output?: OutputFormat;
-    max_concurrent?: number;
-    max_tiles?: number;
-    max_retries?: number;
-    max_bytes?: number;
-    max_deferred_follows?: number;
-    retry_base_delay_ms?: number;
-    /**
-     * Initial per-origin tile spacing. Zero leaves admission unpaced until
-     * throttling is observed; a positive value enables adaptive pacing.
-     */
-    initial_tile_interval_ms?: number;
-}
-
 export interface OutputPreparation {
     completed_pixels: number;
     total_pixels: number;
-}
-
-export interface Tile {
-    index: number;
-    request: ResourceRequest;
-    placement: TilePlacement;
 }
 
 export type BlockedReason = "access-required" | "blocked-ipv4" | "blocked-ipv6" | "cancelled" | "content-type" | "dns-rebinding" | "dns-rebinding-v6" | "forbidden" | "invalid-url" | "limit-exceeded" | "loopback-host" | "malformed" | "malformed-body" | "method" | "network" | "non-standard-port" | "origin" | "private-host" | "protocol-version" | "redirect-limit" | "redirect-target" | "scheme" | "signed-query" | "source-document-lost" | "throttled" | "userinfo";
@@ -473,21 +654,13 @@ export type DiagnosticValue = string | number | boolean;
 
 export type ErrorTransport = "direct" | "metadata-proxy" | "browser-session" | "native" | "display-only";
 
-export type Gate = "cancellation" | "acquisition";
-
-export type Interaction = "forbidden" | "allowed";
-
 export type OutputFormat = "png" | "jpeg" | "tiff" | "webp" | "avif" | "zif" | "iiif-dir";
 
 export type OutputPreference = "auto" | "png" | "jpeg" | "tiff" | "webp" | "avif" | "zif" | "iiif-dir";
 
-export type ProbeOutcome = { status: "missing" } | { status: "available"; width: number; height: number };
-
 export type ProgressPhase = "discovery" | "planning" | "acquisition" | "output";
 
 export type ResourceKind = "metadata" | "tile" | "probe" | "output";
-
-export type ResourceRead = { kind: "response"; response: ResourceResponse } | { kind: "needs-access"; origin: string };
 
 export type RetryChoice = "retry" | "cancel";
 
