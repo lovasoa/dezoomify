@@ -29,7 +29,6 @@ async fn acquire(
     let mut attempt = 0;
     let mut previous_failure = None;
     loop {
-        host.checkpoint(Gate::Acquisition).await?;
         let ticket = scheduler.admit(host, &tile.request.uri, tile.index).await?;
         let request = TileAcquisition {
             tile: tile.clone(),
@@ -61,7 +60,7 @@ async fn acquire(
                 attempt += 1;
                 host.checkpoint(Gate::Acquisition).await?;
                 if !shared {
-                    host.sleep(delay as u32).await?
+                    scheduler.sleep(host, delay as u32).await?
                 }
             }
         }

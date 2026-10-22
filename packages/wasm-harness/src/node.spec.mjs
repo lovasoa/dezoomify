@@ -66,13 +66,13 @@ function host(overrides = {}) {
     async chooseLevel(image) {
       return image.levels.length - 1;
     },
-    async checkpoint() {},
-    async nowMs() {
-      return clock;
+    async checkpoint() {
+      return { time_ms: clock };
     },
     async sleep(delay) {
       observed.delays.push(delay);
       clock += delay;
+      return { time_ms: clock };
     },
     report(progress) {
       observed.progress.push(progress);
@@ -101,6 +101,45 @@ test("async Host reads binary metadata and saves the full selected image", async
   assert.equal(platform.observed.settled, 1);
   assert.ok(platform.observed.reads.every((request) => request.uri === url));
   assert.ok(platform.observed.progress.some((progress) => progress.completed === 4));
+});
+
+test("pacing and throttling work with arbitrary clock origins", async () => {
+  for (const origin of [0, 1700000000000]) {
+    let elapsed = 0;
+    let refusedAt;
+    const timing = () => ({ time_ms: origin + elapsed });
+    const platform = host({
+      async checkpoint() {
+        return timing();
+      },
+      async sleep(delay) {
+        elapsed += delay;
+        platform.observed.delays.push(delay);
+        return timing();
+      },
+      async acquireTile({ tile }) {
+        if (tile.index === 0 && refusedAt === undefined) {
+          refusedAt = elapsed;
+          throw { kind: "http-error", status: 429, retry_after_ms: 3000, transport: "direct" };
+        }
+        if (tile.index === 0) assert.ok(elapsed >= refusedAt + 3000);
+        platform.observed.tiles.push(tile);
+      },
+    });
+    const output = await wasm.dezoomify(
+      [{ url }],
+      {
+        ...options,
+        max_retries: 1,
+        initial_tile_interval_ms: 250,
+      },
+      platform,
+    );
+    assert.equal(output.disposition, "browser-save-ready");
+    assert.equal(platform.observed.tiles.length, 4);
+    assert.equal(new Set(platform.observed.tiles.map((tile) => tile.index)).size, 4);
+    assert.equal(platform.observed.settled, 1);
+  }
 });
 
 test("additional observations finish the same WASM invocation after inert discovery fails", async () => {
@@ -363,6 +402,7 @@ test("cancelled invocation settles late reads before returning and never saves",
     },
     async checkpoint() {
       if (cancelled) throw { kind: "cancelled" };
+      return { time_ms: 0 };
     },
     async finish() {
       assert.fail("cancelled invocation cannot save");

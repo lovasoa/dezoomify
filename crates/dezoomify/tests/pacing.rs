@@ -1,6 +1,7 @@
 mod support;
 
 use dezoomify::{dezoomify, model::*};
+use futures::FutureExt;
 use std::{cell::RefCell, collections::VecDeque, rc::Rc};
 use support::MemoryHost;
 
@@ -256,4 +257,54 @@ height: 256
     );
     assert_eq!(host.acquired.borrow().len(), 4);
     assert_eq!(host.outputs.borrow().len(), 1);
+}
+
+#[test]
+fn overlapping_waits_do_not_burst_with_arbitrary_clock_origins() {
+    for origin in [0, 1_700_000_000_000] {
+        let host = MemoryHost::default();
+        host.manual_clock.set(true);
+        host.time_origin_ms.set(origin);
+        let starts = Rc::new(RefCell::new(Vec::new()));
+        let recorded = starts.clone();
+        *host.acquire_hook.borrow_mut() = Some(Box::new(move |_, now| {
+            recorded.borrow_mut().push(now);
+            Ok(())
+        }));
+        let mut job = Box::pin(dezoomify(
+            image(1024, 256),
+            Options {
+                initial_tile_interval_ms: 250,
+                ..Default::default()
+            },
+            &host,
+        ));
+        for now in [0, 250, 500, 750] {
+            host.clock_ms.set(now);
+            for (deadline, send) in host.pending_sleeps.take() {
+                if deadline <= now {
+                    send.send(()).unwrap();
+                } else {
+                    host.pending_sleeps.borrow_mut().push((deadline, send));
+                }
+            }
+            let result = job.as_mut().now_or_never();
+            if now == 750 {
+                assert_eq!(
+                    result.unwrap().unwrap().canvas,
+                    Some(Size {
+                        width: 1024,
+                        height: 256
+                    })
+                );
+            } else {
+                assert!(result.is_none());
+            }
+            assert_eq!(
+                &*starts.borrow(),
+                &(0..=now / 250).map(|step| step * 250).collect::<Vec<_>>()
+            );
+        }
+        assert_eq!(host.outputs.borrow().len(), 1);
+    }
 }

@@ -30,6 +30,9 @@ pub struct MemoryHost {
     pub requests: RefCell<Vec<TileAcquisition>>,
     pub sleeps: RefCell<Vec<u32>>,
     pub clock_ms: Cell<u64>,
+    pub time_origin_ms: Cell<u64>,
+    pub manual_clock: Cell<bool>,
+    pub pending_sleeps: RefCell<Vec<(u64, futures::channel::oneshot::Sender<()>)>>,
     pub cancel_on_sleep: Cell<bool>,
     pub acquire_hook: RefCell<Option<AcquireHook>>,
     pub progress: RefCell<Vec<Progress>>,
@@ -54,6 +57,16 @@ pub struct MemoryHost {
     pub display_only: Cell<bool>,
 }
 type AcquireHook = Box<dyn FnMut(&Tile, u64) -> Result<(), Error>>;
+impl MemoryHost {
+    fn timing(&self) -> HostTiming {
+        HostTiming {
+            time_ms: self
+                .time_origin_ms
+                .get()
+                .saturating_add(self.clock_ms.get()),
+        }
+    }
+}
 struct Active<'a>(&'a Cell<u32>);
 impl Drop for Active<'_> {
     fn drop(&mut self) {
@@ -195,7 +208,7 @@ impl Host for MemoryHost {
             .get()
             .unwrap_or(image.levels.len().saturating_sub(1) as u32))
     }
-    async fn checkpoint(&self, gate: Gate) -> Result<(), Error> {
+    async fn checkpoint(&self, gate: Gate) -> Result<HostTiming, Error> {
         if self.cancelled.get() {
             Err(Error::Cancelled)
         } else if gate == Gate::Acquisition && self.paused.get() {
@@ -204,22 +217,27 @@ impl Host for MemoryHost {
                 .expect("test must install a resume barrier")
                 .await
                 .unwrap();
-            Ok(())
+            Ok(self.timing())
         } else {
-            Ok(())
+            Ok(self.timing())
         }
     }
-    async fn now_ms(&self) -> Result<u64, Error> {
-        Ok(self.clock_ms.get())
-    }
-    async fn sleep(&self, delay_ms: u32) -> Result<(), Error> {
+    async fn sleep(&self, delay_ms: u32) -> Result<HostTiming, Error> {
         self.sleeps.borrow_mut().push(delay_ms);
         if self.cancel_on_sleep.get() {
             self.cancelled.set(true);
             return Err(Error::Cancelled);
         }
-        self.clock_ms.set(self.clock_ms.get() + u64::from(delay_ms));
-        Ok(())
+        if self.manual_clock.get() {
+            let (send, receive) = futures::channel::oneshot::channel();
+            self.pending_sleeps
+                .borrow_mut()
+                .push((self.clock_ms.get() + u64::from(delay_ms), send));
+            receive.await.unwrap();
+        } else {
+            self.clock_ms.set(self.clock_ms.get() + u64::from(delay_ms));
+        }
+        Ok(self.timing())
     }
     fn report(&self, progress: Progress) {
         self.progress.borrow_mut().push(progress);

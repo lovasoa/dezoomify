@@ -356,6 +356,16 @@ impl<'a> NativeHost<'a> {
         *self.progress.borrow_mut() = Box::new(callback);
     }
 
+    fn timing(&self) -> HostTiming {
+        HostTiming {
+            time_ms: self
+                .clock_start
+                .elapsed()
+                .as_millis()
+                .min(u128::from(u64::MAX)) as u64,
+        }
+    }
+
     pub fn on_retry(&self, callback: impl FnMut(TileAcquisition) -> RetryAnswer<'a> + 'a) {
         *self.retry.borrow_mut() = Some(Box::new(callback));
     }
@@ -1349,7 +1359,7 @@ impl Host for NativeHost<'_> {
         index.map(|i| i as u32).ok_or(Error::PlanEmpty)
     }
 
-    async fn checkpoint(&self, gate: Gate) -> Result<(), Error> {
+    async fn checkpoint(&self, gate: Gate) -> Result<HostTiming, Error> {
         if let Some(error) = self
             .raster
             .borrow()
@@ -1360,24 +1370,18 @@ impl Host for NativeHost<'_> {
         }
         self.controls
             .checkpoint(matches!(gate, Gate::Acquisition))
-            .await
+            .await?;
+        Ok(self.timing())
     }
 
-    async fn now_ms(&self) -> Result<u64, Error> {
-        Ok(self
-            .clock_start
-            .elapsed()
-            .as_millis()
-            .min(u128::from(u64::MAX)) as u64)
-    }
-
-    async fn sleep(&self, delay_ms: u32) -> Result<(), Error> {
+    async fn sleep(&self, delay_ms: u32) -> Result<HostTiming, Error> {
         self.instrumentation.borrow_mut().timer_wait_ms += u64::from(delay_ms);
         self.controlled(async {
             tokio::time::sleep(Duration::from_millis(u64::from(delay_ms))).await;
             Ok(())
         })
-        .await
+        .await?;
+        Ok(self.timing())
     }
 
     fn report(&self, mut progress: Progress) {

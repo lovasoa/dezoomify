@@ -3,12 +3,12 @@ mod controller;
 
 use crate::{
     Host,
-    model::{Error, Gate},
+    model::{Error, Gate, HostTiming},
 };
 use controller::{Admission, Controller, Feedback};
 use futures_util::future::poll_fn;
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     collections::HashMap,
     task::{Poll, Waker},
 };
@@ -28,6 +28,7 @@ pub(crate) struct Ticket {
 pub(crate) struct Scheduler {
     origins: RefCell<HashMap<String, Origin>>,
     initial_interval_ms: u32,
+    observed_ms: Cell<u64>,
 }
 
 impl Scheduler {
@@ -35,6 +36,7 @@ impl Scheduler {
         Self {
             origins: RefCell::default(),
             initial_interval_ms,
+            observed_ms: Cell::new(0),
         }
     }
 
@@ -44,12 +46,11 @@ impl Scheduler {
         uri: &str,
         tile: u32,
     ) -> Result<Option<Ticket>, Error> {
+        let mut now = self.checkpoint(host, Gate::Acquisition).await?;
         let Some(origin) = http_origin(uri) else {
             return Ok(None);
         };
         loop {
-            host.checkpoint(Gate::Acquisition).await?;
-            let now = host.now_ms().await?;
             let admission = self.with_origin(&origin, |state| state.admit(now, tile));
             match admission {
                 Admission::Ready(generation) => {
@@ -59,9 +60,10 @@ impl Scheduler {
                         tile,
                     }));
                 }
-                Admission::Wait(delay) => host.sleep(delay).await?,
+                Admission::Wait(delay) => self.sleep(host, delay).await?,
                 Admission::Blocked => self.changed(&origin, tile).await,
             }
+            now = self.checkpoint(host, Gate::Acquisition).await?;
         }
     }
 
@@ -71,7 +73,7 @@ impl Scheduler {
         ticket: Option<Ticket>,
     ) -> Result<(), Error> {
         if let Some(ticket) = ticket {
-            let now = host.now_ms().await?;
+            let now = self.checkpoint(host, Gate::Cancellation).await?;
             self.with_origin(&ticket.origin, |state| {
                 state.succeeded(ticket.generation, ticket.tile, now);
             });
@@ -92,7 +94,7 @@ impl Scheduler {
         let Some(ticket) = ticket else {
             return Ok(false);
         };
-        let now = host.now_ms().await?;
+        let now = self.checkpoint(host, Gate::Cancellation).await?;
         let feedback = self.with_origin(&ticket.origin, |state| {
             state.failed(ticket.generation, ticket.tile, error, now, delay_ms)
         });
@@ -109,6 +111,22 @@ impl Scheduler {
                 Ok(true)
             }
         }
+    }
+
+    pub(crate) async fn sleep(&self, host: &impl Host, delay_ms: u32) -> Result<(), Error> {
+        self.observe(host.sleep(delay_ms).await?);
+        Ok(())
+    }
+
+    async fn checkpoint(&self, host: &impl Host, gate: Gate) -> Result<u64, Error> {
+        Ok(self.observe(host.checkpoint(gate).await?))
+    }
+
+    fn observe(&self, timing: HostTiming) -> u64 {
+        // Concurrent operations can deliver older observations after newer ones.
+        let now = self.observed_ms.get().max(timing.time_ms);
+        self.observed_ms.set(now);
+        now
     }
 
     fn with_origin<T>(&self, key: &str, action: impl FnOnce(&mut Controller) -> T) -> T {

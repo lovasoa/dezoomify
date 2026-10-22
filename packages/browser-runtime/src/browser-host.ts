@@ -4,6 +4,7 @@ import type {
   FinishRequest,
   Gate,
   Host,
+  HostTiming,
   HtmlDocument,
   HtmlQuery,
   Image,
@@ -395,12 +396,13 @@ export class BrowserHost implements Host {
     this.updatePauseGate();
   }
 
-  async checkpoint(gate: Gate): Promise<void> {
+  async checkpoint(gate: Gate): Promise<HostTiming> {
     try {
       this.signal.throwIfAborted();
       while (gate === "acquisition" && (this.paused || this.retryWaiting) && this.pauseWait)
         await this.wait(this.pauseWait);
       this.signal.throwIfAborted();
+      return { time_ms: Math.floor(performance.now()) };
     } catch (error) {
       throw this.failure(error);
     }
@@ -416,11 +418,7 @@ export class BrowserHost implements Host {
     });
   }
 
-  async nowMs(): Promise<number> {
-    return Math.floor(performance.now());
-  }
-
-  async sleep(delay: number): Promise<void> {
+  async sleep(delay: number): Promise<HostTiming> {
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       await this.wait(
@@ -428,6 +426,7 @@ export class BrowserHost implements Host {
           timer = setTimeout(resolve, delay);
         }),
       );
+      return { time_ms: Math.floor(performance.now()) };
     } finally {
       clearTimeout(timer);
     }

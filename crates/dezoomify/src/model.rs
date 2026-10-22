@@ -1329,6 +1329,16 @@ pub enum Gate {
     Acquisition,
 }
 
+/// Timing observed when a Host operation completes. Readings must be
+/// nondecreasing with time and share a stable origin within one invocation.
+/// Differences represent elapsed milliseconds; equal readings are allowed at
+/// the clock's resolution. Timestamps are allowed, but dates are not required.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub struct HostTiming {
+    pub time_ms: u64,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
