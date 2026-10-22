@@ -55,7 +55,7 @@ mod bindings {
 
     // The member list also declares the native Rust trait.
     macro_rules! bind_host {
-        (async { $( $method:ident => $js:ident( $( $arg:ident: $ty:tt ),* ) -> $out:tt; )* }
+        (async { $( $(#[$doc:meta])* $method:ident => $js:ident( $( $arg:ident: $ty:tt ),* ) -> $out:tt; )* }
          sync { $( $notify:ident($value:ident: $value_ty:tt); )* } settle();) => {
             #[wasm_bindgen]
             extern "C" {
@@ -75,6 +75,7 @@ mod bindings {
 
             impl dezoomify::Host for JsHost {
                 $(
+                    $(#[$doc])*
                     async fn $method(&self, $( $arg: $ty ),*) -> Result<$out, Error> {
                         let value = JsHost::$method(self, $( encode(&$arg)? ),*)
                             .await.map_err(rejected)?;

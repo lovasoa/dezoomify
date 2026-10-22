@@ -1,7 +1,6 @@
 // Browser tile policy: politeness, resilience, and timeouts.
 //
-// Request limits, per-host spacing, timeout signals, and proxy retry delays.
-// Tile retries belong to the Rust algorithm. Tests inject the throttle clock.
+// Request timeouts and proxy retry delays. Rust owns tile pacing and retries.
 
 /** Per-request timeout applied to every individual HTTP request (30 s). */
 export const REQUEST_TIMEOUT_MS = 30000;
@@ -14,68 +13,11 @@ export const REQUEST_TIMEOUT_MS = 30000;
  */
 export const DIRECT_METADATA_TIMEOUT_MS = 1500;
 
-/** Space request starts by at least 200 ms per host. Rust owns tile retries. */
-export const TILE_MAX_REQUESTS_PER_SECOND = 5;
-export const TILE_MIN_INTERVAL_MS = 1000 / TILE_MAX_REQUESTS_PER_SECOND;
-
 /** Maximum concurrent tile requests in browser products. */
 export const BROWSER_MAX_CONCURRENCY = 6;
 
-export function tileHostOf(url: string): string {
-  try {
-    return new URL(url).host.toLowerCase();
-  } catch {
-    return "";
-  }
-}
-
 export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-export interface ThrottleClock {
-  now(): number;
-  sleep(ms: number): Promise<void>;
-}
-
-/**
- * Stagger tile request starts per host to <=5/s. Chained per host so the
- * concurrent requests share one spacing clock: each starter waits for the
- * previous starter for that host, enforces the 200 ms gap, then releases
- * the next waiter. The clock is injectable so tests assert spacing without
- * wall-clock waits.
- */
-export function createTileThrottle(clock?: ThrottleClock): {
-  throttle(url: string): Promise<void>;
-  reset(): void;
-} {
-  const now = clock?.now ?? Date.now;
-  const wait = clock?.sleep ?? sleep;
-  const last = new Map<string, number>();
-  const queue = new Map<string, Promise<void>>();
-  function throttle(url: string): Promise<void> {
-    const host = tileHostOf(url) || "global";
-    const prev = queue.get(host) ?? Promise.resolve();
-    let release!: () => void;
-    const current = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    queue.set(host, current);
-    const run = (async () => {
-      await prev;
-      const at = now();
-      const previous = last.get(host) ?? 0;
-      const gap = TILE_MIN_INTERVAL_MS - (at - previous);
-      if (gap > 0) await wait(gap);
-      last.set(host, now());
-    })();
-    return run.finally(release);
-  }
-  function reset(): void {
-    last.clear();
-    queue.clear();
-  }
-  return { throttle, reset };
 }
 
 /**

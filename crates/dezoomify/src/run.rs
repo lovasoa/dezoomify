@@ -6,7 +6,6 @@ use crate::{
     model::*,
 };
 use core::discovery::{DiscoveryInput, DiscoveryLimits};
-use futures_util::{StreamExt, stream};
 use std::{cell::RefCell, collections::HashSet};
 
 /// Dezoom one input using the platform capabilities owned by `host`.
@@ -185,6 +184,7 @@ async fn acquire_plan(
     options: &Options,
     progress: &mut Progress,
 ) -> Result<Vec<ReusedTile>, Error> {
+    let scheduler = crate::pacing::Scheduler::new(options.initial_tile_interval_ms);
     let AcquisitionPlan {
         source,
         previous,
@@ -225,12 +225,12 @@ async fn acquire_plan(
             tile.map(|tile| tile.into_tile(canvas.clone()))
                 .map_err(Error::from)
         });
-    acquire_tiles(tiles, host, options, progress).await?;
+    crate::acquisition::acquire_tiles(tiles, host, options, progress, &scheduler).await?;
     let mut offset = base_count as u32;
     for grid in lower {
         let dimensions = Some(size(grid.image_size()));
         let count = grid.count() as u32;
-        acquire_tiles(
+        crate::acquisition::acquire_tiles(
             grid.tiles_row_major().map(|tile| {
                 let mut tile = tile.map_err(Error::from)?.into_tile(dimensions.clone());
                 tile.index += offset;
@@ -239,6 +239,7 @@ async fn acquire_plan(
             host,
             options,
             progress,
+            &scheduler,
         )
         .await?;
         offset += count;
@@ -490,62 +491,6 @@ pub(crate) async fn probe(
                     .map_err(|_| core::TileSourceError::InvalidDimensions)?,
             },
         }),
-    }
-}
-
-async fn acquire_tiles(
-    tiles: impl Iterator<Item = Result<Tile, Error>>,
-    host: &impl Host,
-    options: &Options,
-    progress: &mut Progress,
-) -> Result<(), Error> {
-    let acquisitions =
-        stream::iter(tiles.map(|tile| async { acquire(host, tile?, options).await }));
-    let mut pending = acquisitions.buffer_unordered(options.max_concurrent as usize);
-    while let Some(result) = pending.next().await {
-        result?;
-        progress.completed += 1;
-        host.report(progress.clone());
-    }
-    Ok(())
-}
-
-async fn acquire(host: &impl Host, tile: Tile, options: &Options) -> Result<(), Error> {
-    let mut attempt = 0;
-    let mut previous_failure = None;
-    loop {
-        host.checkpoint(Gate::Acquisition).await?;
-        let request = TileAcquisition {
-            tile: tile.clone(),
-            attempt,
-            requires_approval: attempt > options.max_retries,
-            previous_failure,
-        };
-        match host.acquire_tile(request).await {
-            Ok(()) => return Ok(()),
-            Err(error) if error.is_terminal() || error.is_output() => return Err(error),
-            Err(error) => {
-                if !error.retryable()
-                    || (!options.interactive_retries && attempt >= options.max_retries)
-                    || attempt == u32::MAX
-                {
-                    return Err(Error::TileFailed {
-                        tile: tile.index,
-                        attempts: attempt.saturating_add(1),
-                        cause: Box::new(error),
-                    });
-                }
-                let delay = crate::retry::retry_delay_ms(
-                    attempt + 1,
-                    error.retry_after_ms(),
-                    options.retry_base_delay_ms,
-                );
-                previous_failure = Some(Box::new(error));
-                attempt += 1;
-                host.checkpoint(Gate::Acquisition).await?;
-                host.sleep(delay as u32).await?;
-            }
-        }
     }
 }
 

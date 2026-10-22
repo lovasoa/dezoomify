@@ -29,6 +29,16 @@ pub struct MemoryHost {
     pub approvals: RefCell<Vec<TileAcquisition>>,
     pub requests: RefCell<Vec<TileAcquisition>>,
     pub sleeps: RefCell<Vec<u32>>,
+    /// Synthetic elapsed milliseconds; automatic sleeps advance this value.
+    pub clock_ms: Cell<u64>,
+    /// Arbitrary offset added to elapsed time in Host timing responses.
+    pub time_origin_ms: Cell<u64>,
+    /// Tests advance the clock and release `pending_sleeps` themselves when enabled.
+    pub manual_clock: Cell<bool>,
+    /// Manual sleepers as (elapsed-time deadline, completion sender).
+    pub pending_sleeps: RefCell<Vec<(u64, futures::channel::oneshot::Sender<()>)>>,
+    pub cancel_on_sleep: Cell<bool>,
+    pub acquire_hook: RefCell<Option<AcquireHook>>,
     pub progress: RefCell<Vec<Progress>>,
     pub warnings: RefCell<Vec<String>>,
     pub outputs: RefCell<Vec<FinishRequest>>,
@@ -49,6 +59,19 @@ pub struct MemoryHost {
     pub level: Cell<Option<u32>>,
     pub catalogs: RefCell<Vec<Catalog>>,
     pub display_only: Cell<bool>,
+}
+/// Override an attempt's outcome using its tile and request-start elapsed milliseconds.
+type AcquireHook = Box<dyn FnMut(&Tile, u64) -> Result<(), Error>>;
+impl MemoryHost {
+    /// Return completion timing on the test's chosen millisecond origin.
+    fn timing(&self) -> HostTiming {
+        HostTiming {
+            time_ms: self
+                .time_origin_ms
+                .get()
+                .saturating_add(self.clock_ms.get()),
+        }
+    }
 }
 struct Active<'a>(&'a Cell<u32>);
 impl Drop for Active<'_> {
@@ -113,6 +136,7 @@ impl Host for MemoryHost {
             }
         }
         let tile = request.tile;
+        let started = self.clock_ms.get();
         self.active.set(self.active.get() + 1);
         self.peak.set(self.peak.get().max(self.active.get()));
         let _active = Active(&self.active);
@@ -151,6 +175,9 @@ impl Host for MemoryHost {
         {
             return Err(error);
         }
+        if let Some(hook) = &mut *self.acquire_hook.borrow_mut() {
+            hook(&tile, started)?;
+        }
         self.acquired.borrow_mut().push(tile);
         if self
             .cancel_after
@@ -187,7 +214,7 @@ impl Host for MemoryHost {
             .get()
             .unwrap_or(image.levels.len().saturating_sub(1) as u32))
     }
-    async fn checkpoint(&self, gate: Gate) -> Result<(), Error> {
+    async fn checkpoint(&self, gate: Gate) -> Result<HostTiming, Error> {
         if self.cancelled.get() {
             Err(Error::Cancelled)
         } else if gate == Gate::Acquisition && self.paused.get() {
@@ -196,14 +223,27 @@ impl Host for MemoryHost {
                 .expect("test must install a resume barrier")
                 .await
                 .unwrap();
-            Ok(())
+            Ok(self.timing())
         } else {
-            Ok(())
+            Ok(self.timing())
         }
     }
-    async fn sleep(&self, delay_ms: u32) -> Result<(), Error> {
+    async fn sleep(&self, delay_ms: u32) -> Result<HostTiming, Error> {
         self.sleeps.borrow_mut().push(delay_ms);
-        Ok(())
+        if self.cancel_on_sleep.get() {
+            self.cancelled.set(true);
+            return Err(Error::Cancelled);
+        }
+        if self.manual_clock.get() {
+            let (send, receive) = futures::channel::oneshot::channel();
+            self.pending_sleeps
+                .borrow_mut()
+                .push((self.clock_ms.get() + u64::from(delay_ms), send));
+            receive.await.unwrap();
+        } else {
+            self.clock_ms.set(self.clock_ms.get() + u64::from(delay_ms));
+        }
+        Ok(self.timing())
     }
     fn report(&self, progress: Progress) {
         self.progress.borrow_mut().push(progress);

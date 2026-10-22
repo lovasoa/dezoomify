@@ -222,6 +222,7 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
           max_bytes: 64 * 1024 * 1024,
           max_deferred_follows: 8,
           retry_base_delay_ms: 1000,
+          initial_tile_interval_ms: 250,
         },
         host,
       );

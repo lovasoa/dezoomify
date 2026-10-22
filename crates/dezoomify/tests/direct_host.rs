@@ -266,7 +266,7 @@ fn transient_failures_honor_exact_budget_and_retry_after() {
         host.attempts.borrow().iter().filter(|i| **i == 0).count(),
         3
     );
-    assert_eq!(*host.sleeps.borrow(), [7000, 2000]);
+    assert_eq!(&host.sleeps.borrow()[..2], [7000, 2000]);
     assert!(host.approvals.borrow().is_empty());
 }
 #[test]
@@ -820,7 +820,7 @@ fn failed_tiles_preserve_the_complete_original_host_error() {
             detail: Some("original diagnostic context".into()),
         },
     };
-    fail(&host, 0, [error.clone()]);
+    fail(&host, 0, [error.clone(), error.clone()]);
     let result = invoke(&host, options()).unwrap_err();
     let Error::TileFailed {
         tile,
@@ -830,7 +830,7 @@ fn failed_tiles_preserve_the_complete_original_host_error() {
     else {
         panic!("tile context is retained")
     };
-    assert_eq!((tile, attempts), (0, 1));
+    assert_eq!((tile, attempts), (0, 2));
     assert_eq!(*cause, error);
     assert!(!cause.retryable());
     assert_eq!(cause.retry_after_ms(), Some(5000));
