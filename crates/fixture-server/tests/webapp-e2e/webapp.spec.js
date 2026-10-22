@@ -307,7 +307,8 @@ test("metadata proxy failure reaches the error UI with its complete typed contex
   assert.match(diagnostics, /proxy-example/);
   assert.match(diagnostics, /Cloudflare challenge/);
   assert.doesNotMatch(diagnostics, /binding\.invalid-value/);
-  await expect(page.locator("#app")).toContainText(/The site refused to share this file \(HTTP 406\)/i);
+  await expect(page.locator("#dz-error-message")).toContainText(/The site refused to send this file to Dezoomify’s server \(HTTP 406\)/i);
+  await expect(page.locator("#dz-error-message")).toContainText(/your own internet connection/i);
 });
 
 // Production topology of a Google Arts & Culture asset page: the page is

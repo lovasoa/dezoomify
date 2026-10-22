@@ -327,7 +327,7 @@ export function plainMessageFor(
     case "rate-limited":
       return t(rateKey(cause.transport));
     case "http-error": {
-      const message = httpMessage(cause.status, cause.transport);
+      const message = httpMessage(cause.status, cause.transport, product);
       if (message) return message;
       break;
     }
@@ -379,11 +379,19 @@ function limitMessage(
   });
 }
 
-function httpMessage(status: number, transport: string): string | undefined {
+function httpMessage(
+  status: number,
+  transport: string,
+  product: ViewContext["product"],
+): string | undefined {
   if (status === 429) return t(rateKey(transport));
   if (status === 404) return t("view.fail.httpNotFound");
   if (status === 401 || status === 403 || status === 406) {
-    return t("view.fail.httpRefused", { http: String(status) });
+    const key =
+      product === "website" && transport === "metadata-proxy"
+        ? "view.fail.httpRefusedProxy"
+        : "view.fail.httpRefused";
+    return t(key, { http: String(status) });
   }
   if (status >= 500) return t("view.fail.httpSiteProblem");
   return undefined;
