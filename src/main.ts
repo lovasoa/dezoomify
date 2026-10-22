@@ -1,6 +1,5 @@
 import {
   createPreviewControls,
-  createTileThrottle,
   createWebFetcher,
   isProxyEligible,
   loadTileImage,
@@ -91,7 +90,6 @@ const app = root
         document.title = presentation.phase === "job" ? jobPageTitle(url) : "Dezoomify";
       },
       capabilities(context) {
-        const throttle = createTileThrottle();
         const hooks = {
           onRequestStart: () => context.activity.noteRequestStart(),
           onRequestEnd: (id: number, ok: boolean) => context.activity.noteRequestEnd(id, ok),
@@ -102,7 +100,6 @@ const app = root
           proxyTransport,
           isProxyEligible,
           hooks,
-          throttle: (url) => throttle.throttle(url),
         });
         let blobUrl: string | undefined;
         let saveName: string | undefined;

@@ -28,6 +28,7 @@ const options = {
 
 function host(overrides = {}) {
   const observed = { reads: [], tiles: [], progress: [], warnings: [], delays: [], settled: 0 };
+  let clock = 0;
   return {
     observed,
     async observe() {
@@ -66,8 +67,12 @@ function host(overrides = {}) {
       return image.levels.length - 1;
     },
     async checkpoint() {},
+    async nowMs() {
+      return clock;
+    },
     async sleep(delay) {
       observed.delays.push(delay);
+      clock += delay;
     },
     report(progress) {
       observed.progress.push(progress);
@@ -282,7 +287,7 @@ test("Rust classifies raw Host errors while retaining exact failure context", as
     { ...options, interactive_retries: true, max_retries: 1 },
     platform,
   );
-  assert.deepEqual(platform.observed.delays, [300000, 300000]);
+  assert.deepEqual(platform.observed.delays.slice(0, 2), [300000, 300000]);
   assert.deepEqual(
     attempts.map((request) => request.requires_approval),
     [false, false, true],

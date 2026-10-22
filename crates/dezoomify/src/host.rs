@@ -17,6 +17,8 @@ macro_rules! host_members {
                 choose_image => chooseImage(catalog: Catalog) -> u32;
                 choose_level => chooseLevel(image: Image) -> u32;
                 checkpoint => checkpoint(gate: Gate) -> ();
+                // Monotonic milliseconds in this Host's arbitrary epoch.
+                now_ms => nowMs() -> u64;
                 sleep => sleep(delay_ms: u32) -> ();
             }
             sync {

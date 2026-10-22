@@ -29,6 +29,9 @@ pub struct MemoryHost {
     pub approvals: RefCell<Vec<TileAcquisition>>,
     pub requests: RefCell<Vec<TileAcquisition>>,
     pub sleeps: RefCell<Vec<u32>>,
+    pub clock_ms: Cell<u64>,
+    pub cancel_on_sleep: Cell<bool>,
+    pub acquire_hook: RefCell<Option<AcquireHook>>,
     pub progress: RefCell<Vec<Progress>>,
     pub warnings: RefCell<Vec<String>>,
     pub outputs: RefCell<Vec<FinishRequest>>,
@@ -50,6 +53,7 @@ pub struct MemoryHost {
     pub catalogs: RefCell<Vec<Catalog>>,
     pub display_only: Cell<bool>,
 }
+type AcquireHook = Box<dyn FnMut(&Tile, u64) -> Result<(), Error>>;
 struct Active<'a>(&'a Cell<u32>);
 impl Drop for Active<'_> {
     fn drop(&mut self) {
@@ -113,6 +117,7 @@ impl Host for MemoryHost {
             }
         }
         let tile = request.tile;
+        let started = self.clock_ms.get();
         self.active.set(self.active.get() + 1);
         self.peak.set(self.peak.get().max(self.active.get()));
         let _active = Active(&self.active);
@@ -150,6 +155,9 @@ impl Host for MemoryHost {
             .and_then(VecDeque::pop_front)
         {
             return Err(error);
+        }
+        if let Some(hook) = &mut *self.acquire_hook.borrow_mut() {
+            hook(&tile, started)?;
         }
         self.acquired.borrow_mut().push(tile);
         if self
@@ -201,8 +209,16 @@ impl Host for MemoryHost {
             Ok(())
         }
     }
+    async fn now_ms(&self) -> Result<u64, Error> {
+        Ok(self.clock_ms.get())
+    }
     async fn sleep(&self, delay_ms: u32) -> Result<(), Error> {
         self.sleeps.borrow_mut().push(delay_ms);
+        if self.cancel_on_sleep.get() {
+            self.cancelled.set(true);
+            return Err(Error::Cancelled);
+        }
+        self.clock_ms.set(self.clock_ms.get() + u64::from(delay_ms));
         Ok(())
     }
     fn report(&self, progress: Progress) {

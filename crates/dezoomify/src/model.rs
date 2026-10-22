@@ -1426,6 +1426,9 @@ pub struct Options {
     pub max_bytes: u64,
     pub max_deferred_follows: u32,
     pub retry_base_delay_ms: u64,
+    /// Initial per-origin tile spacing. Zero leaves admission unpaced until
+    /// throttling is observed; a positive value enables adaptive pacing.
+    pub initial_tile_interval_ms: u32,
 }
 
 impl Default for Options {
@@ -1440,6 +1443,7 @@ impl Default for Options {
             max_bytes: 67_108_864,
             max_deferred_follows: 8,
             retry_base_delay_ms: 1000,
+            initial_tile_interval_ms: 0,
         }
     }
 }

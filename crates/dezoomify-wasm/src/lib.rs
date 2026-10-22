@@ -42,6 +42,9 @@ mod bindings {
         (u32) => {
             "number"
         };
+        (u64) => {
+            "number"
+        };
         (()) => {
             "void"
         };

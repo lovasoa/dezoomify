@@ -402,6 +402,7 @@ export interface Host {
     chooseImage(catalog: Catalog,): Promise<number>;
     chooseLevel(image: Image,): Promise<number>;
     checkpoint(gate: Gate,): Promise<void>;
+    nowMs(): Promise<number>;
     sleep(delay_ms: number,): Promise<void>;
     report(progress: Progress): void;
     warn(message: string): void;
@@ -434,6 +435,11 @@ export interface Options {
     max_bytes?: number;
     max_deferred_follows?: number;
     retry_base_delay_ms?: number;
+    /**
+     * Initial per-origin tile spacing. Zero leaves admission unpaced until
+     * throttling is observed; a positive value enables adaptive pacing.
+     */
+    initial_tile_interval_ms?: number;
 }
 
 export interface OutputPreparation {

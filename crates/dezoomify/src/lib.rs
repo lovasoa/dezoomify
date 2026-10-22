@@ -35,7 +35,9 @@ pub mod zoomify;
 /// Canonical public values shared by discovery and hosts.
 pub mod model;
 
+mod acquisition;
 pub mod host;
+mod pacing;
 pub mod retry;
 mod run;
 pub use host::Host;

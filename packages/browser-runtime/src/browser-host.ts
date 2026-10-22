@@ -416,6 +416,10 @@ export class BrowserHost implements Host {
     });
   }
 
+  async nowMs(): Promise<number> {
+    return Math.floor(performance.now());
+  }
+
   async sleep(delay: number): Promise<void> {
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
