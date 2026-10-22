@@ -1336,6 +1336,7 @@ pub enum Gate {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub struct HostTiming {
+    /// Completion reading in milliseconds from the invocation's shared origin.
     pub time_ms: u64,
 }
 

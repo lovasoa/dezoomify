@@ -16,7 +16,11 @@ macro_rules! host_members {
                 finish => finish(request: FinishRequest) -> Output;
                 choose_image => chooseImage(catalog: Catalog) -> u32;
                 choose_level => chooseLevel(image: Image) -> u32;
+                /// Check cancellation; acquisition gates also wait for permission to proceed.
+                /// Return timing sampled after the gate opens, on the shared `HostTiming` scale.
                 checkpoint => checkpoint(gate: Gate) -> HostTiming;
+                /// Wait at least `delay_ms` milliseconds, aborting on cancellation, then
+                /// return completion timing on the same scale as `checkpoint`.
                 sleep => sleep(delay_ms: u32) -> HostTiming;
             }
             sync {
@@ -29,11 +33,11 @@ macro_rules! host_members {
 }
 
 macro_rules! declare_host {
-    (async { $( $method:ident => $js:ident( $( $arg:ident: $ty:ty ),* ) -> $out:ty; )* }
+    (async { $( $(#[$doc:meta])* $method:ident => $js:ident( $( $arg:ident: $ty:ty ),* ) -> $out:ty; )* }
      sync { $( $notify:ident($value:ident: $value_ty:ty); )* } settle();) => {
         #[allow(async_fn_in_trait)]
         pub trait Host {
-            $( async fn $method(&self, $( $arg: $ty ),*) -> Result<$out, Error>; )*
+            $( $(#[$doc])* async fn $method(&self, $( $arg: $ty ),*) -> Result<$out, Error>; )*
             $( fn $notify(&self, $value: $value_ty); )*
             async fn settle(&self);
         }

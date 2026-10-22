@@ -13,18 +13,22 @@ use std::{
     task::{Poll, Waker},
 };
 
+/// One origin's controller and tasks awaiting a recovery-state change.
 struct Origin {
     controller: Controller,
     waiters: Vec<Waker>,
 }
 
-/// One attempt's admission generation. Late completions cannot reopen a cooldown.
+/// Identifies one admitted HTTP attempt. Report it once through
+/// [`Scheduler::succeeded`] or [`Scheduler::failed`], unless aborting the job.
 pub(crate) struct Ticket {
     origin: String,
     generation: u64,
     tile: u32,
 }
 
+/// Job-scoped pacing and recovery shared across tiles and pyramid levels.
+/// All calls must use the same Host timing origin.
 pub(crate) struct Scheduler {
     origins: RefCell<HashMap<String, Origin>>,
     initial_interval_ms: u32,
@@ -32,6 +36,8 @@ pub(crate) struct Scheduler {
 }
 
 impl Scheduler {
+    /// Set the initial per-origin start gap in milliseconds; zero defers pacing
+    /// until throttling is observed.
     pub(crate) fn new(initial_interval_ms: u32) -> Self {
         Self {
             origins: RefCell::default(),
@@ -40,6 +46,8 @@ impl Scheduler {
         }
     }
 
+    /// Wait to admit one attempt, using a job-unique `tile` index kept stable across retries.
+    /// Non-HTTP URIs return `None` after passing the Host acquisition checkpoint.
     pub(crate) async fn admit(
         &self,
         host: &impl Host,
@@ -67,6 +75,7 @@ impl Scheduler {
         }
     }
 
+    /// Consume the attempt's ticket after acquisition succeeds; `None` skips feedback.
     pub(crate) async fn succeeded(
         &self,
         host: &impl Host,
@@ -82,8 +91,9 @@ impl Scheduler {
         Ok(())
     }
 
-    /// Returns whether this failure uses the shared recovery gate. The error
-    /// itself is preserved, including ambiguous HTTP 403 responses.
+    /// Consume a failed attempt's ticket before retrying, preserving its error.
+    /// `delay_ms` is the proposed retry wait; `true` means the origin gate owns
+    /// that wait, while `false` leaves retry policy and sleeping to the caller.
     pub(crate) async fn failed(
         &self,
         host: &impl Host,
@@ -113,22 +123,25 @@ impl Scheduler {
         }
     }
 
+    /// Perform a cancellable Host wait and record its completion timing.
     pub(crate) async fn sleep(&self, host: &impl Host, delay_ms: u32) -> Result<(), Error> {
         self.observe(host.sleep(delay_ms).await?);
         Ok(())
     }
 
+    /// Apply the Host gate and return the latest observed completion milliseconds.
     async fn checkpoint(&self, host: &impl Host, gate: Gate) -> Result<u64, Error> {
         Ok(self.observe(host.checkpoint(gate).await?))
     }
 
+    /// Record completion timing without moving backward on out-of-order delivery.
     fn observe(&self, timing: HostTiming) -> u64 {
-        // Concurrent operations can deliver older observations after newer ones.
         let now = self.observed_ms.get().max(timing.time_ms);
         self.observed_ms.set(now);
         now
     }
 
+    /// Update a normalized HTTP origin's controller, creating it on first use.
     fn with_origin<T>(&self, key: &str, action: impl FnOnce(&mut Controller) -> T) -> T {
         let mut origins = self.origins.borrow_mut();
         let origin = origins.entry(key.into()).or_insert_with(|| Origin {
@@ -138,6 +151,7 @@ impl Scheduler {
         action(&mut origin.controller)
     }
 
+    /// Wait until an existing origin's recovery permits `tile`; recheck admission afterward.
     async fn changed(&self, key: &str, tile: u32) {
         poll_fn(|cx| {
             let mut origins = self.origins.borrow_mut();
@@ -159,6 +173,7 @@ impl Scheduler {
         .await;
     }
 
+    /// Wake and remove all recovery waiters for this origin.
     fn wake(&self, key: &str) {
         let waiters = self
             .origins
@@ -172,6 +187,7 @@ impl Scheduler {
     }
 }
 
+/// Normalize an HTTP(S) origin; invalid URIs and other schemes return `None`.
 fn http_origin(uri: &str) -> Option<String> {
     let url = url::Url::parse(uri).ok()?;
     matches!(url.scheme(), "http" | "https").then(|| url.origin().ascii_serialization())

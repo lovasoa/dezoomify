@@ -356,6 +356,7 @@ impl<'a> NativeHost<'a> {
         *self.progress.borrow_mut() = Box::new(callback);
     }
 
+    /// Sample monotonic milliseconds since this Host was created.
     fn timing(&self) -> HostTiming {
         HostTiming {
             time_ms: self

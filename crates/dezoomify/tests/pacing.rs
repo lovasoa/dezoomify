@@ -5,6 +5,7 @@ use futures::FutureExt;
 use std::{cell::RefCell, collections::VecDeque, rc::Rc};
 use support::MemoryHost;
 
+/// Supply a DZI with the requested dimensions without fetching metadata.
 fn image(width: u32, height: u32) -> Vec<JobInput> {
     vec![JobInput {
         url: "https://images.test/image.dzi".into(),
@@ -15,6 +16,7 @@ fn image(width: u32, height: u32) -> Vec<JobInput> {
     }]
 }
 
+/// Build a tile refusal whose structured context must survive recovery.
 fn forbidden() -> Error {
     Error::HttpError {
         status: 403,

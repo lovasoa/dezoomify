@@ -29,9 +29,13 @@ pub struct MemoryHost {
     pub approvals: RefCell<Vec<TileAcquisition>>,
     pub requests: RefCell<Vec<TileAcquisition>>,
     pub sleeps: RefCell<Vec<u32>>,
+    /// Synthetic elapsed milliseconds; automatic sleeps advance this value.
     pub clock_ms: Cell<u64>,
+    /// Arbitrary offset added to elapsed time in Host timing responses.
     pub time_origin_ms: Cell<u64>,
+    /// Tests advance the clock and release `pending_sleeps` themselves when enabled.
     pub manual_clock: Cell<bool>,
+    /// Manual sleepers as (elapsed-time deadline, completion sender).
     pub pending_sleeps: RefCell<Vec<(u64, futures::channel::oneshot::Sender<()>)>>,
     pub cancel_on_sleep: Cell<bool>,
     pub acquire_hook: RefCell<Option<AcquireHook>>,
@@ -56,8 +60,10 @@ pub struct MemoryHost {
     pub catalogs: RefCell<Vec<Catalog>>,
     pub display_only: Cell<bool>,
 }
+/// Override an attempt's outcome using its tile and request-start elapsed milliseconds.
 type AcquireHook = Box<dyn FnMut(&Tile, u64) -> Result<(), Error>>;
 impl MemoryHost {
+    /// Return completion timing on the test's chosen millisecond origin.
     fn timing(&self) -> HostTiming {
         HostTiming {
             time_ms: self

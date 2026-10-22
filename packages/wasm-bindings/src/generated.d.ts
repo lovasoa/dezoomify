@@ -327,6 +327,9 @@ export type DiscoveryInputKind = "source" | "observed-document" | "observed-reso
  * the clock's resolution. Timestamps are allowed, but dates are not required.
  */
 export interface HostTiming {
+    /**
+     * Completion reading in milliseconds from the invocation's shared origin.
+     */
     time_ms: number;
 }
 

@@ -7,18 +7,27 @@ const QUICK_PROBE_MS: u64 = 1_000;
 const ESTABLISHED_SUCCESSES: u32 = 8;
 const MAX_RATE: f64 = 64.0;
 
+/// Start-or-wait decision for one tile; only `Ready` records an in-flight attempt.
 pub(super) enum Admission {
+    /// Start now; the payload identifies this attempt's admission generation.
     Ready(u64),
+    /// Wait this many milliseconds, then check admission again.
     Wait(u32),
+    /// Await in-flight completions or the recovery owner's progress, then recheck.
     Blocked,
 }
 
+/// Whether a failed attempt uses caller-owned retries or shared origin recovery.
 pub(super) enum Feedback {
+    /// Apply the caller's ordinary retry policy and delay.
     Ordinary,
+    /// Existing recovery owns the wait; do not schedule an independent delay.
     Shared,
+    /// Shared recovery started or escalated; the payload is its delay in milliseconds.
     Backoff(u64),
 }
 
+/// One tile owns the recovery probe while its origin drains and cools down.
 struct Recovery {
     tile: u32,
     until: u64,
@@ -29,8 +38,8 @@ struct Recovery {
     quick: bool,
 }
 
-/// AIMD controls request starts/second, independently of worker concurrency.
-/// A recovery admits only its owner until a probe has actually succeeded.
+/// Pure per-origin request-start pacing and recovery, independent of worker limits.
+/// Every `now` argument uses one stable, nondecreasing millisecond scale.
 pub(super) struct Controller {
     rate: f64,
     ceiling: f64,
@@ -44,6 +53,8 @@ pub(super) struct Controller {
 }
 
 impl Controller {
+    /// Set the initial start gap in milliseconds; zero leaves requests unpaced
+    /// until throttling is observed.
     pub(super) fn new(initial_interval_ms: u32) -> Self {
         Self {
             rate: if initial_interval_ms == 0 {
@@ -62,6 +73,7 @@ impl Controller {
         }
     }
 
+    /// Check whether recovery blocks this tile, independently of any timed delay.
     pub(super) fn blocked(&self, tile: u32) -> bool {
         // Drain the old cohort before probing: collect corroborating refusals
         // and honor its longest Retry-After before releasing any new traffic.
@@ -70,6 +82,7 @@ impl Controller {
             .is_some_and(|recovery| recovery.tile != tile || self.inflight > 0)
     }
 
+    /// Decide whether `tile` may start at `now`; `Ready` creates one in-flight attempt.
     pub(super) fn admit(&mut self, now: u64, tile: u32) -> Admission {
         if self.blocked(tile) {
             return Admission::Blocked;
@@ -105,6 +118,7 @@ impl Controller {
         Admission::Ready(self.generation)
     }
 
+    /// Record success once for a `Ready` attempt, using its generation and tile index.
     pub(super) fn succeeded(&mut self, generation: u64, tile: u32, now: u64) {
         self.inflight -= 1;
         if generation != self.generation {
@@ -124,6 +138,8 @@ impl Controller {
         }
     }
 
+    /// Complete one `Ready` attempt with an error and proposed retry `delay_ms`;
+    /// return whether the caller or shared recovery owns the wait.
     pub(super) fn failed(
         &mut self,
         generation: u64,
@@ -186,6 +202,7 @@ impl Controller {
         Feedback::Backoff(if explicit { delay_ms } else { QUICK_PROBE_MS })
     }
 
+    /// Lower the start rate and learned ceiling using recent request starts at `now`.
     fn reduce_rate(&mut self, now: u64) {
         let observed = self
             .starts
@@ -206,6 +223,7 @@ impl Controller {
         self.next_ramp = now.saturating_add(FORBIDDEN_WINDOW_MS);
     }
 
+    /// Round the current start gap up to milliseconds; zero means unpaced.
     fn interval_ms(&self) -> u64 {
         if self.rate == 0.0 {
             return 0;

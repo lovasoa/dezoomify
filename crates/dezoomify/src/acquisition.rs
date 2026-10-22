@@ -2,6 +2,8 @@
 use crate::{Host, model::*, pacing::Scheduler};
 use futures_util::{StreamExt, stream};
 
+/// Acquire tiles with bounded concurrency and report completed progress.
+/// Reuse the job's scheduler across levels to retain pacing and recovery state.
 pub(crate) async fn acquire_tiles(
     tiles: impl Iterator<Item = Result<Tile, Error>>,
     host: &impl Host,
@@ -20,6 +22,7 @@ pub(crate) async fn acquire_tiles(
     Ok(())
 }
 
+/// Acquire one tile, retaining its identity and original failure context across retries.
 async fn acquire(
     host: &impl Host,
     tile: Tile,
