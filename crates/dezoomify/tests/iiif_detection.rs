@@ -2,6 +2,7 @@ mod support;
 
 use dezoomify::core::discovery::{DiscoveryInput, DiscoveryLimits};
 use dezoomify::core::{default_registry, registry_for};
+use dezoomify::model::DiscoveryInputKind;
 
 const PAGE: &str = "https://museum.test/exhibit/viewer";
 
@@ -45,5 +46,64 @@ fn minimal_v1_metadata_requires_an_explicit_info_url() {
             |_| None,
         );
         assert_eq!(catalog.is_ok(), accepted);
+    }
+}
+
+#[test]
+fn gallica_viewers_resolve_the_selected_page_without_fetching_html() {
+    // Issue #1292: Gallica's viewer does not expose an info.json link. Its
+    // public IIIF 1.1 service supplies dimensions without an explicit tile grid.
+    for (viewer, service) in [
+        (
+            "https://gallica.bnf.fr/ark:/12148/btv1b530411200/f1.item.r=wien.zoom",
+            "https://gallica.bnf.fr/iiif/ark:/12148/btv1b530411200/f1",
+        ),
+        (
+            "https://gallica.bnf.fr/ark:/12148/btv1b84911377/f1.item.r=wien.zoom",
+            "https://gallica.bnf.fr/iiif/ark:/12148/btv1b84911377/f1",
+        ),
+        (
+            "http://gallica.bnf.fr/ark:/12148/btv1b530411200",
+            "https://gallica.bnf.fr/iiif/ark:/12148/btv1b530411200/f1",
+        ),
+        (
+            "https://gallica.bnf.fr/ark:/12148/btv1b530411200/f12.item.zoom?lang=FR#viewer",
+            "https://gallica.bnf.fr/iiif/ark:/12148/btv1b530411200/f12",
+        ),
+    ] {
+        let info_url = format!("{service}/info.json");
+        let metadata = serde_json::json!({
+            "profile": "http://library.stanford.edu/iiif/image-api/1.1/compliance.html#level2",
+            "width": 7894,
+            "height": 6094,
+            "@context": "http://library.stanford.edu/iiif/image-api/1.1/context.json",
+            "@id": service,
+        });
+        for input in [
+            DiscoveryInput::new(viewer),
+            DiscoveryInput::with_contents(viewer, b"<html><body>Gallica viewer</body></html>")
+                .with_kind(DiscoveryInputKind::ObservedDocument),
+        ] {
+            let (catalog, requests) = support::discover_inputs(
+                default_registry(),
+                vec![input],
+                DiscoveryLimits::default(),
+                |uri| (uri == info_url).then(|| Ok((metadata.to_string().into_bytes(), None))),
+            );
+            let image = support::ready_image(catalog.unwrap());
+            assert_eq!(image.format, "iiif");
+            assert_eq!(image.source_url.as_deref(), Some(info_url.as_str()));
+            let level = image.levels.last().unwrap();
+            assert_eq!(
+                level.source.image_size(),
+                Some(dezoomify::Vec2d { x: 7894, y: 6094 })
+            );
+            assert_eq!(
+                support::tile_urls(level).unwrap()[0],
+                format!("{service}/0,0,512,512/512,512/0/native.jpg")
+            );
+            assert_eq!(requests.len(), 1);
+            assert_eq!(requests[0].uri, info_url);
+        }
     }
 }
