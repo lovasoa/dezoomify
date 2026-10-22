@@ -8,8 +8,18 @@ use crate::{
 use core::discovery::{DiscoveryInput, DiscoveryLimits};
 use std::{cell::RefCell, collections::HashSet};
 
-/// Dezoom one input using the platform capabilities owned by `host`.
-/// Settlement runs before every return, including validation and cancellation.
+/// Discover and save one selected image from a batch of source/observation inputs.
+///
+/// Supply at least one [`JobInput`] of kind [`DiscoveryInputKind::Source`]. The
+/// batch contributes evidence to one discovery, not one output per input. Input
+/// addresses and [`Options`] are validated before host I/O; local paths require
+/// a host that supports them. Selection indices are checked against the catalog.
+///
+/// Use a fresh [`Host`] and keep its dependencies alive until this future completes.
+/// Every returned result follows awaited [`Host::settle`], including validation
+/// errors and cancellation. To cancel, signal the host and keep awaiting this
+/// future: dropping it does not run asynchronous cleanup. A successful [`Output`]
+/// describes the host's actual save disposition, not necessarily a completed save.
 pub async fn dezoomify(
     inputs: Vec<JobInput>,
     options: Options,

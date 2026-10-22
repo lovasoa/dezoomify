@@ -55,8 +55,11 @@ mod bindings {
 
     // The member list also declares the native Rust trait.
     macro_rules! bind_host {
-        (async { $( $(#[$doc:meta])* $method:ident => $js:ident( $( $arg:ident: $ty:tt ),* ) -> $out:tt; )* }
-         sync { $( $notify:ident($value:ident: $value_ty:tt); )* } settle();) => {
+        ($(#[doc = $host_doc:literal])* async {
+            $( $(#[doc = $method_doc:literal])* $method:ident => $js:ident( $( $arg:ident: $ty:tt ),* ) -> $out:tt; )*
+         }
+         sync { $( $(#[doc = $notify_doc:literal])* $notify:ident($value:ident: $value_ty:tt); )* }
+         $(#[doc = $settle_doc:literal])* settle();) => {
             #[wasm_bindgen]
             extern "C" {
                 #[wasm_bindgen(typescript_type = "Host")]
@@ -75,7 +78,6 @@ mod bindings {
 
             impl dezoomify::Host for JsHost {
                 $(
-                    $(#[$doc])*
                     async fn $method(&self, $( $arg: $ty ),*) -> Result<$out, Error> {
                         let value = JsHost::$method(self, $( encode(&$arg)? ),*)
                             .await.map_err(rejected)?;
@@ -96,10 +98,14 @@ mod bindings {
 
             #[wasm_bindgen(typescript_custom_section)]
             const HOST: &str = concat!(
+                "/**\n", $(" *", $host_doc, "\n",)* " */\n",
                 "export interface Host {\n",
-                $( stringify!($js), "(", $(stringify!($arg), ": ", ts_type!($ty), ",",)*
-                   "): Promise<", ts_type!($out), ">;\n", )*
-                $( stringify!($notify), "(", stringify!($value), ": ", ts_type!($value_ty), "): void;\n", )*
+                $( "/**\n", $(" *", $method_doc, "\n",)* " */\n",
+                   stringify!($js), "(", $(stringify!($arg), ": ", ts_type!($ty), ",",)*
+                    "): Promise<", ts_type!($out), ">;\n", )*
+                $( "/**\n", $(" *", $notify_doc, "\n",)* " */\n",
+                   stringify!($notify), "(", stringify!($value), ": ", ts_type!($value_ty), "): void;\n", )*
+                "/**\n", $(" *", $settle_doc, "\n",)* " */\n",
                 "settle(): Promise<void>;\n}\n",
             );
         }
@@ -157,6 +163,10 @@ mod bindings {
 
     #[wasm_bindgen(typescript_custom_section)]
     const FUNCTIONS: &str = "
+/** Discover and save one selected image from a batch of source/observation inputs.
+ * Validates inputs and Options before I/O; awaits Host.settle on success or error.
+ * Use a fresh Host and keep its dependencies alive until this promise settles.
+ */
 export function dezoomify(inputs: JobInput[], options: Options, host: Host): Promise<Output>;
 export function applyProcessing(recipe: ProcessingRecipe, bytes: Uint8Array): Uint8Array;
 ";

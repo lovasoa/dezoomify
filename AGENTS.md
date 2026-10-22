@@ -28,10 +28,17 @@ product when that is simpler; share code when it improves the design.
 
 ## Documentation
 
+Explain caller obligations beyond the types at module/API declarations, including
+internal APIs with nontrivial ordering, ownership, or failure rules. Read affected
+callers and tests before documenting behavior; resolve discrepancies and update
+contracts with behavior changes. Prefer a simpler interface over a complex comment.
+See [Caller contracts](docs/code-quality.md).
+
 Keep docs short and durable. Link to source/help for variable names,
 values, schedules, schemas and API details; do not copy them into prose.
 Explain rationale or pitfalls when useful; omit walkthroughs and speculative
-references. Code changes need not change docs. Guides: `docs/user/`;
+references. Guide updates are optional unless the change affects their advice;
+source contracts must stay accurate. Guides: `docs/user/`;
 desktop: `apps/desktop/desktop-app.md`; setup: its README.
 Apply this to nested instructions too.
 
