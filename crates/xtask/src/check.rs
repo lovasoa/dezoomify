@@ -34,6 +34,17 @@ pub fn run(args: &[String]) -> Result<(), String> {
         "-D",
         "clippy::disallowed-types",
     ])?;
+    super::command::cargo(&[
+        "rustdoc",
+        "--quiet",
+        "-p",
+        "dezoomify",
+        "--lib",
+        "--",
+        "--document-private-items",
+        "-D",
+        "rustdoc::broken_intra_doc_links",
+    ])?;
     run_biome()?;
     run_typecheck()?;
     super::style::verify(&[])?;

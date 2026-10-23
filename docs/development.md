@@ -20,6 +20,8 @@ Rust toolchains or browsers. WASM builds need `wasm-bindgen-cli` matching
 Read [Architecture](architecture.md) to choose where a change belongs and
 [Testing](testing.md) to choose regression coverage. For new site support, use
 [Contributing a format](CONTRIBUTING-format.md).
+Apply [Caller contracts](code-quality.md) during implementation and review:
+simplify ambiguous interfaces and update source contracts when obligations change.
 
 ## Builds
 

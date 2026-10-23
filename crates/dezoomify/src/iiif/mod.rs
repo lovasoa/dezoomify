@@ -23,6 +23,7 @@ use crate::json_utils::all_json;
 use crate::core::DiscoveredEntry;
 
 mod contentdm;
+mod gallica;
 pub mod manifest_types;
 mod micrio;
 mod national_gallery;
@@ -61,6 +62,7 @@ const ROUTES: &[DiscoveryRoute] = &[
     viewer(url_matches(has_manifest_parameter))
         .resolve_metadata(manifest_parameter)
         .then_decode(decode),
+    gallica::ROUTE.then_decode(decode),
     onb::ROUTE.then_decode(decode),
     contentdm::RECORD_ROUTE.then_decode(contentdm::follow_info),
     contentdm::METADATA_ROUTE,

@@ -209,14 +209,15 @@ impl Controls {
         }
     }
 
+    /// Apply the shared gate policy; cancellation wakes either gate immediately.
     #[allow(clippy::result_large_err)] // Host methods share the canonical error value.
-    async fn checkpoint(&self, acquisition: bool) -> Result<(), Error> {
+    async fn checkpoint(&self, gate: Gate) -> Result<(), Error> {
         loop {
             let changed = self.0.changed.notified();
             if self.is_cancelled() {
                 return Err(cancelled());
             }
-            if !acquisition
+            if gate == Gate::Cancellation
                 || !(self.0.paused.load(Ordering::SeqCst)
                     || self.0.retry_waiting.load(Ordering::SeqCst))
             {
@@ -387,7 +388,7 @@ impl<'a> NativeHost<'a> {
                 return Ok(());
             }
             if self.retry_pending.get() {
-                self.controls.checkpoint(true).await?;
+                self.controls.checkpoint(Gate::Acquisition).await?;
                 continue;
             }
             let answer = self
@@ -551,7 +552,7 @@ impl<'a> NativeHost<'a> {
                 Err(error) if error.is_terminal() || error.is_output() => return Err(error),
                 Err(_) => {}
             }
-            self.controls.checkpoint(false).await?;
+            self.controls.checkpoint(Gate::Cancellation).await?;
             let _ = std::fs::remove_file(
                 dir.join(&namespace)
                     .join(crate::cache::cache_key(&tile.request)),
@@ -1000,7 +1001,7 @@ impl Host for NativeHost<'_> {
         crate::html::parse_html(query).await
     }
     async fn begin_output(&self, plan: OutputPlan) -> Result<(), Error> {
-        self.controls.checkpoint(false).await?;
+        self.controls.checkpoint(Gate::Cancellation).await?;
         if plan.format != self.format || self.output_plan.borrow().is_some() {
             return Err(Error::InvalidState(
                 "output preflight does not match invocation".into(),
@@ -1178,16 +1179,16 @@ impl Host for NativeHost<'_> {
             self.instrumentation.borrow_mut().retries_scheduled += 1;
         }
         self.approve_retry(&request).await?;
-        self.controls.checkpoint(true).await?;
+        self.controls.checkpoint(Gate::Acquisition).await?;
         let tile = request.tile;
         let result = async {
             if matches!(self.format, OutputFormat::IiifDir | OutputFormat::Zif) {
                 let encoded = self.encoded_tile(&tile).await?;
-                self.controls.checkpoint(false).await?;
+                self.controls.checkpoint(Gate::Cancellation).await?;
                 return self.place_encoded(encoded).await;
             }
             let decoded = self.tile(&tile).await?;
-            self.controls.checkpoint(false).await?;
+            self.controls.checkpoint(Gate::Cancellation).await?;
             self.place(&tile, decoded).await
         }
         .await;
@@ -1212,7 +1213,7 @@ impl Host for NativeHost<'_> {
     }
 
     async fn finish(&self, request: FinishRequest) -> Result<Output, Error> {
-        self.controls.checkpoint(false).await?;
+        self.controls.checkpoint(Gate::Cancellation).await?;
         let destination_for = |format| match &self.options.output {
             OutputTarget::File(path) => path.clone(),
             OutputTarget::AutoDir { dir, format } => {
@@ -1369,9 +1370,7 @@ impl Host for NativeHost<'_> {
         {
             return Err(error);
         }
-        self.controls
-            .checkpoint(matches!(gate, Gate::Acquisition))
-            .await?;
+        self.controls.checkpoint(gate).await?;
         Ok(self.timing())
     }
 
@@ -1668,8 +1667,8 @@ mod tests {
         runtime.block_on(async {
             let controls = Controls::default();
             controls.pause();
-            controls.checkpoint(false).await.unwrap();
-            let acquisition = controls.checkpoint(true);
+            controls.checkpoint(Gate::Cancellation).await.unwrap();
+            let acquisition = controls.checkpoint(Gate::Acquisition);
             tokio::pin!(acquisition);
             tokio::select! {
                 biased;

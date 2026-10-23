@@ -509,10 +509,14 @@ pub enum DiscoveryInputKind {
 
 /// One discovery input. An omitted kind is a user-supplied source for
 /// products that have no browser observations.
+/// A batch supplies evidence for one image selection, not independent jobs.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub struct JobInput {
+    /// Source address and base for relative references; native hosts may accept paths.
     pub url: String,
+    /// Supplied UTF-8 document instead of fetching `url`. Initial inputs must be
+    /// nonempty and within `Options.max_bytes`; observed metadata never follows links.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub contents: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -523,6 +527,8 @@ pub struct JobInput {
 /// sources are available under the requested interaction policy.
 pub type JobInputs = Vec<JobInput>;
 
+/// A probe's decoded pixel dimensions, or absence of a usable tile. Availability
+/// also means output was retained when the requested `TileRole` includes output.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "kebab-case")]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
@@ -1081,9 +1087,9 @@ impl Error {
         }
     }
 
-    /// Host-observed `retry-after` hint in milliseconds, when the response
-    /// carried one; the retrying loop waits at least this long. Aggregates
-    /// report the largest retained hint.
+    /// Host-observed `retry-after` hint in milliseconds, before policy clamping.
+    /// The core combines it with backoff through [`crate::retry::retry_delay_ms`];
+    /// this value is not an unbounded minimum wait.
     #[must_use]
     pub fn retry_after_ms(&self) -> Option<u64> {
         match self {
@@ -1305,6 +1311,9 @@ pub struct ResourceResponse {
     pub final_uri: Option<String>,
 }
 
+/// A resource read or a request for access the current policy could not provide.
+/// Discovery may revisit `needs-access` with interaction allowed; it is not a
+/// successful empty response or a transport failure.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
@@ -1313,6 +1322,8 @@ pub enum ResourceRead {
     NeedsAccess { origin: String },
 }
 
+/// Whether a capability may ask for access: `forbidden` uses only existing access;
+/// `allowed` may prompt but does not itself grant permission.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
@@ -1321,6 +1332,9 @@ pub enum Interaction {
     Allowed,
 }
 
+/// Checkpoints always check cancellation; `acquisition` also waits for pause or
+/// retry approval. Neither gate stops in-flight work; cancellation still requires
+/// awaiting job settlement.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
@@ -1350,6 +1364,9 @@ pub enum ProgressPhase {
     Output,
 }
 
+/// One request with placement and an index scoped to its probe sequence or final
+/// plan. Probe indices need not match final indices; `FinishRequest.reused_tiles`
+/// maps retained output by position. The index is not a source zoom identifier.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub struct Tile {
@@ -1360,12 +1377,16 @@ pub struct Tile {
 
 /// One acquisition attempt. The core owns retries; Hosts await approval for
 /// optional attempts before performing I/O. Attempt zero is the initial request.
+/// The core handles retry delays and origin pacing before calling the host.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub struct TileAcquisition {
     pub tile: Tile,
     pub attempt: u32,
+    /// This attempt exceeds the automatic allowance; acquire approval or return
+    /// a typed error (user cancellation is `cancelled`) before acquiring the tile.
     pub requires_approval: bool,
+    /// The preceding attempt's error, absent only on the initial attempt.
     pub previous_failure: Option<Box<Error>>,
 }
 
@@ -1399,21 +1420,28 @@ pub struct OutputGrid {
 }
 
 /// Output preflight after geometry probes and before ordinary acquisitions.
-/// Positioned or unresolved coverage has no grid and must finalize safely.
+/// Retain output from successful probes. Without a grid, use individual tile
+/// placements rather than assuming complete regular coverage.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub struct OutputPlan {
+    /// Selected image dimensions in pixels; absent when geometry is undeclared.
     pub canvas: Option<Size>,
     pub grid: Option<OutputGrid>,
     /// Compatible lower source levels, in decreasing size, sharing `grid`.
     /// Their tiles use level-local coordinates and `TilePlacement::canvas`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub source_levels: Vec<Size>,
+    /// Final tile count across the selected and source levels, including reused
+    /// output probes but excluding missing and probe-only observations.
     pub tile_count: u32,
     pub format: OutputFormat,
     pub title: Option<String>,
 }
 
+/// Finalization after successful preflight and all required acquisitions.
+/// Probe output is already retained; `reused_tiles` assigns its final plan indices
+/// by output position. A host may infer undeclared canvas dimensions from tiles.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub struct FinishRequest {
@@ -1423,19 +1451,32 @@ pub struct FinishRequest {
     pub reused_tiles: Vec<ReusedTile>,
 }
 
+/// Core discovery/acquisition policy, validated by `dezoomify` before host I/O.
+/// Hosts separately enforce transport, decode, and output resource limits.
+/// Omitted serialized fields use core defaults; out-of-range limits fail the job.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub struct Options {
+    /// Restrict discovery to a registered format id; absent or `auto` searches all.
     pub format: Option<String>,
     /// Issue approval-required attempts after the automatic retry allowance.
     pub interactive_retries: bool,
     pub output: OutputFormat,
+    /// Maximum overlapping metadata reads or tile attempts; positive and no
+    /// greater than `max_tiles`.
     pub max_concurrent: u32,
+    /// Positive limit applied separately to geometry probe calls and the final
+    /// tile plan (including reused probes and any reusable lower source levels).
     pub max_tiles: u32,
+    /// Automatic retries per tile after attempt zero, including origin recovery.
     pub max_retries: u32,
+    /// Byte limit for each fetched metadata body and initial supplied document.
+    /// Discovery also has an aggregate budget; hosts own tile/output limits.
     pub max_bytes: u64,
+    /// Maximum selected deferred catalog entries followed before a ready image.
     pub max_deferred_follows: u32,
+    /// First retry's backoff in milliseconds; see `retry_delay_ms` for clamping.
     pub retry_base_delay_ms: u64,
     /// Initial per-origin tile spacing. Zero leaves admission unpaced until
     /// throttling is observed; a positive value enables adaptive pacing.
