@@ -35,9 +35,7 @@ jobs:
         with:
           ref: ${{ env.SOURCE_REF }}
           fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # pinned
-        with:
-          toolchain: 1.98.1
+      - uses: ./.github/actions/setup-build
       - name: Require green CI for a numbered release
         if: github.event_name == 'workflow_dispatch'
         env:
@@ -74,16 +72,22 @@ jobs:
         include:
           - target: cli-linux-x86_64
             runner: ubuntu-latest
+            cache: cli-release
           - target: desktop-linux-x86_64
             runner: ubuntu-latest
+            cache: bundle-smoke
           - target: desktop-windows-x86_64
             runner: windows-latest
+            cache: bundle-smoke
           - target: desktop-macos-aarch64
             runner: macos-latest
+            cache: bundle-smoke
           - target: extension-chromium
             runner: ubuntu-latest
+            cache: web
           - target: extension-firefox
             runner: ubuntu-latest
+            cache: web
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -92,10 +96,9 @@ jobs:
       - uses: ./.github/actions/setup-pnpm
         with:
           install: true
-      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # pinned
+      - uses: ./.github/actions/setup-build
         with:
-          toolchain: 1.98.1
-          targets: wasm32-unknown-unknown
+          key: ${{ matrix.cache }}
       - uses: ./.github/actions/setup-wasm-bindgen
       - name: Install Linux desktop tools
         if: matrix.target == 'desktop-linux-x86_64'
@@ -109,7 +112,6 @@ jobs:
         if: matrix.target == 'desktop-windows-x86_64'
       - uses: ./.github/actions/setup-nasm
         if: startsWith(matrix.target, 'cli-') || startsWith(matrix.target, 'desktop-')
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Download plan
         env:
           GH_TOKEN: ${{ github.token }}
@@ -161,9 +163,7 @@ jobs:
         with:
           ref: ${{ needs.prepare.outputs.commit }}
           fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # pinned
-        with:
-          toolchain: 1.98.1
+      - uses: ./.github/actions/setup-build
       - name: Reassemble artifacts
         env:
           GH_TOKEN: ${{ github.token }}
@@ -194,9 +194,7 @@ jobs:
         with:
           ref: ${{ needs.prepare.outputs.commit }}
           fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # pinned
-        with:
-          toolchain: 1.98.1
+      - uses: ./.github/actions/setup-build
       - name: Download verified artifacts
         env:
           GH_TOKEN: ${{ github.token }}

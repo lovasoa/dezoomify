@@ -12,9 +12,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   deterministic:
-    # Sharded `cargo xtask ci local`: each leg runs one lane group so PRs get
-    # parallel feedback. Local repro stays serial via `cargo xtask ci local`
-    # (crates/xtask/src/ci.rs); lane semantics live there, never here.
+    # Keep the same lanes as `cargo xtask ci local`, with parallel feedback.
     name: deterministic (${{ matrix.lane-group }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -30,111 +28,47 @@ jobs:
           - extension
           - bindings+security
     steps:
-      - name: Locate Firefox driver cache
-        if: matrix.lane-group == 'extension'
-        run: echo "GECKODRIVER_CACHE_DIR=${{ runner.temp }}/geckodriver" >> "$GITHUB_ENV"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - uses: ./.github/actions/setup-pnpm
         with:
           # Native AVIF tests independently decode with the existing Sharp dependency.
-          install: ${{ matrix.lane-group == 'check' || matrix.lane-group == 'rust' || matrix.lane-group == 'browser+web' || matrix.lane-group == 'extension' || matrix.lane-group == 'bindings+security' }}
+          install: ${{ matrix.lane-group != 'wasm' }}
+      - uses: ./.github/actions/setup-build
+        with:
+          key: ${{ (matrix.lane-group == 'browser+web' || matrix.lane-group == 'extension') && 'web' || matrix.lane-group }}
       - uses: ./.github/actions/setup-nasm
         if: matrix.lane-group == 'check' || matrix.lane-group == 'rust'
-      - name: Set up Rust toolchain (WASM target)
-        if: matrix.lane-group == 'check' || matrix.lane-group == 'wasm' || matrix.lane-group == 'browser+web' || matrix.lane-group == 'extension' || matrix.lane-group == 'bindings+security'
-        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # pinned
-        with:
-          toolchain: 1.98.1 # must match rust-toolchain.toml
-          targets: wasm32-unknown-unknown
-      - name: Set up Rust toolchain
-        if: matrix.lane-group == 'rust'
-        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # pinned
-        with:
-          toolchain: 1.98.1 # must match rust-toolchain.toml
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          # This lane needs the release WASM and xtask on every UI-only change.
-          # Keep its workspace artifacts instead of pruning/recompiling them;
-          # isolate its cache from matrix legs that only build native/debug code.
-          key: ${{ matrix.lane-group == 'extension' && format('extension-{0}', hashFiles('crates/**', 'generated/*.json')) || '' }}
-          cache-workspace-crates: ${{ matrix.lane-group == 'extension' }}
-      - id: bindgen
-        # Version-coupled to Cargo.lock (see the action): every workflow that
-        # consumes wasm-bindgen resolves the same CLI release, and the
-        # installer caches it by that version, so consumers cannot drift.
-        if: matrix.lane-group == 'check' || matrix.lane-group == 'wasm' || matrix.lane-group == 'browser+web' || matrix.lane-group == 'extension' || matrix.lane-group == 'bindings+security'
+      - if: matrix.lane-group != 'rust'
         uses: ./.github/actions/setup-wasm-bindgen
       - name: Install cargo-deny 0.20.2
         if: matrix.lane-group == 'check'
         uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
         with:
           tool: cargo-deny@0.20.2
-      - name: Cache Playwright Chromium
-        id: playwright-cache
+      - name: Cache Playwright browsers
         if: matrix.lane-group == 'browser+web' || matrix.lane-group == 'extension'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
-          # The pnpm workspace lock is the complete JavaScript dependency set.
-          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
-          restore-keys: |
-            playwright-${{ runner.os }}-
-      # Browser binaries are only needed on the legs that drive real
-      # browsers (browser+web E2E, extension headless gate): every other leg
-      # skips the download entirely. On a cache hit only
-      # the OS dependencies are (re)ensured, never the browsers.
-      - name: Install Playwright Chromium
+          key: playwright-${{ runner.os }}-${{ hashFiles('crates/fixture-server/tests/webapp-e2e/package.json', 'apps/extension/tests/browser/package.json') }}
+      - name: Ensure browser dependencies and pinned revisions
         if: matrix.lane-group == 'browser+web' || matrix.lane-group == 'extension'
+        # Both jobs populate the same complete cache. Install is idempotent;
+        # one OS dependency pass serves both packages, even on a cache hit.
         run: |
-          if [ "${{ steps.playwright-cache.outputs.cache-hit }}" = "true" ]; then
-            pnpm --filter webapp-e2e exec playwright install-deps chromium
-          else
-            pnpm --filter webapp-e2e exec playwright install --with-deps chromium
-            # The extension headless gate consumes Playwright from its own
-            # workspace package: install its Chromium engine too so a version
-            # skew between the two consumers cannot leave one lane without a
-            # browser. Aligned versions make this a no-op.
-            pnpm --filter dezoomify-extension-headless exec playwright install chromium
-          fi
-      - name: Install Playwright Firefox
-        if: matrix.lane-group == 'extension'
-        run: pnpm --filter dezoomify-extension-headless exec playwright install --with-deps firefox
-      - name: Cache pinned Firefox driver
-        if: matrix.lane-group == 'extension'
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ env.GECKODRIVER_CACHE_DIR }}
-          key: geckodriver-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('apps/extension/tests/browser/geckodriver.mjs') }}
+          pnpm --filter webapp-e2e exec playwright install-deps chromium firefox
+          pnpm --filter webapp-e2e --filter dezoomify-extension-headless exec playwright install chromium firefox
       - name: Install pinned Firefox driver
         if: matrix.lane-group == 'extension'
         run: pnpm --filter dezoomify-extension-headless install:driver
-      - name: CI lane (rust)
-        if: matrix.lane-group == 'rust'
-        run: cargo xtask ci rust
-      - name: CI lane (check)
-        if: matrix.lane-group == 'check'
-        run: cargo xtask ci check
-      - name: CI lane (wasm)
-        if: matrix.lane-group == 'wasm'
-        run: cargo xtask ci wasm
-      - name: CI lane (browser)
-        if: matrix.lane-group == 'browser+web'
-        run: cargo xtask ci browser
-      - name: CI lane (web)
-        if: matrix.lane-group == 'browser+web'
-        run: cargo xtask ci web
-      # No desktop lane-group here: desktop.yml owns the desktop suite on
-      # three OSes (path-gated to desktop-relevant changes); the rust lane
-      # above still compiles and unit-tests the dezoomify-desktop crate on
-      # every run as the ubiquitous lean gate.
-      - name: CI lane (extension)
-        if: matrix.lane-group == 'extension'
-        run: cargo xtask ci extension
-      - name: CI lane (bindings)
-        if: matrix.lane-group == 'bindings+security'
-        run: cargo xtask ci bindings
-      - name: CI lane (security)
-        if: matrix.lane-group == 'bindings+security'
-        run: cargo xtask ci security
+      - name: CI lanes
+        env:
+          LANES: ${{ matrix.lane-group }}
+        run: |
+          for lane in ${LANES//+/ }; do
+            echo "::group::CI lane ($lane)"
+            cargo xtask ci "$lane"
+            echo "::endgroup::"
+          done

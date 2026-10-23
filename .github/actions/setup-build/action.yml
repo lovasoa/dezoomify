@@ -1,0 +1,36 @@
+name: setup-build
+description: Install the repository Rust toolchain and cache its dependencies
+inputs:
+  key:
+    description: Dependency group shared by jobs that build the same profiles and features
+    required: false
+    default: xtask
+runs:
+  using: composite
+  steps:
+    - name: Use HTTPS Ubuntu mirrors
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        for file in /etc/apt/apt-mirrors.txt /etc/apt/sources.list.d/ubuntu.sources; do
+          if [ -f "$file" ]; then
+            sudo sed -i 's|http://azure.archive.ubuntu.com|https://archive.ubuntu.com|g' "$file"
+          fi
+        done
+    - name: Use only the repository toolchain
+      shell: bash
+      run: |
+        rustup show
+        active="$(rustup show active-toolchain | cut -d ' ' -f1)"
+        rustup default "$active"
+        # rust-cache hashes every installed toolchain, including unused runner defaults.
+        while read -r toolchain; do
+          if [ "$toolchain" != "$active" ]; then
+            rustup toolchain uninstall "$toolchain"
+          fi
+        done < <(rustup toolchain list --quiet)
+    - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      with:
+        shared-key: ${{ inputs.key }}
+        # PRs read main's caches; multi-GB private copies otherwise evict them.
+        save-if: ${{ github.ref == 'refs/heads/main' }}
