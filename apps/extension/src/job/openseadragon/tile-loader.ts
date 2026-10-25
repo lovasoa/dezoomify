@@ -1,5 +1,3 @@
-import { canvasToPngBlob } from "@dezoomify/browser-runtime";
-
 interface TileSource {
   getTileUrl(level: number, x: number, y: number): string | (() => string);
   getTilePostData?(level: number, x: number, y: number): unknown;
@@ -50,35 +48,5 @@ export async function loadOpenSeadragonTile(
       callback: (result: unknown, error: unknown) => (result ? resolve(result) : reject(error)),
     });
   });
-  return imageBlob(data);
-}
-
-/** Loader callbacks return encoded Blobs or decoded drawables, possibly from a child realm. */
-async function imageBlob(value: unknown): Promise<Blob> {
-  if (Object.prototype.toString.call(value) === "[object Blob]") return value as Blob;
-  const image = ((value as { canvas?: HTMLCanvasElement })?.canvas ??
-    value) as CanvasImageSource & {
-    width: number;
-    height: number;
-    naturalWidth?: number;
-    naturalHeight?: number;
-  };
-  try {
-    const width = image?.naturalWidth ?? image?.width;
-    const height = image?.naturalHeight ?? image?.height;
-    if (![width, height].every((n) => Number.isSafeInteger(n) && n > 0))
-      throw new Error("OpenSeadragon returned an invalid tile size");
-    if (width * height > 16 * 1024 * 1024)
-      throw { kind: "size-limit", max_bytes: 64 * 1024 * 1024 };
-    const canvas = document.createElement("canvas");
-    canvas.width = width;
-    canvas.height = height;
-    const context = canvas.getContext("2d");
-    if (!context) throw new Error("OpenSeadragon tile canvas is unavailable");
-    context.drawImage(image, 0, 0);
-    return await canvasToPngBlob(canvas);
-  } finally {
-    if (Object.prototype.toString.call(value) === "[object ImageBitmap]")
-      (value as ImageBitmap).close();
-  }
+  return data;
 }

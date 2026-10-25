@@ -175,6 +175,8 @@ function testTargetUrl(origin, scenario) {
   if (scenario === "recursive-iframe") return `${origin}/recursive-iframe.html`;
   if (scenario.startsWith("memory-openseadragon-"))
     return `${origin}/memory-openseadragon.html?type=${encodeURIComponent(scenario.slice("memory-openseadragon-".length))}`;
+  if (scenario.startsWith("memory-openlayers-"))
+    return `${origin}/memory-openlayers.html?type=${encodeURIComponent(scenario.slice("memory-openlayers-".length))}`;
   if (scenario === "retry") return `${origin}/fixtures/failures/retry-approval/retry.dzi`;
   if (scenario === "observed-zoomify") return `${origin}/observed-zoomify/viewer.html`;
   return scenario === ""

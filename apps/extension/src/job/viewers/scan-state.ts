@@ -1,4 +1,10 @@
-import type { ObservedMetadata, ScanDiagnostics, ScanResult, StopReason } from "./types.ts";
+import type {
+  ObservedMetadata,
+  ScanDiagnostics,
+  ScanResult,
+  StopReason,
+  ViewerEvidence,
+} from "./types.ts";
 
 export const scanLimits = {
   documents: 16,
@@ -25,6 +31,7 @@ function yieldTask(): Promise<void> {
 
 export class ScanState {
   readonly inputs: ObservedMetadata[] = [];
+  readonly resources = new Set<string>();
   readonly diagnostics: ScanDiagnostics = {
     documents: 0,
     nodes: 0,
@@ -76,7 +83,7 @@ export class ScanState {
     this.slice = Date.now();
   }
 
-  collect(input: ObservedMetadata): "added" | "duplicate" | "full" {
+  collect({ input, resource }: ViewerEvidence): "added" | "duplicate" | "full" {
     if (this.seenImages.has(input.contents)) return "duplicate";
     const bytes = new TextEncoder().encode(input.contents).byteLength;
     if (this.diagnostics.bytes + bytes > scanLimits.bytes) {
@@ -86,6 +93,7 @@ export class ScanState {
     this.seenImages.add(input.contents);
     this.diagnostics.bytes += bytes;
     this.inputs.push(input);
+    if (resource) this.resources.add(resource);
     return "added";
   }
 
@@ -95,6 +103,7 @@ export class ScanState {
       ok: true,
       documentUrl: this.documentUrl,
       inputs: this.inputs,
+      resources: [...this.resources],
       diagnostics: this.diagnostics,
     };
   }

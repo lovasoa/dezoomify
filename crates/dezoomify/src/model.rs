@@ -527,6 +527,38 @@ pub struct JobInput {
 /// sources are available under the requested interaction policy.
 pub type JobInputs = Vec<JobInput>;
 
+/// Complete, finite pixel grids observed in a live viewer. Serialize as supplied
+/// `observed-metadata`; the Host resolves `resource_base` for this job only.
+/// These are source images, independent of viewport rotation, pan or overlays.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub struct ViewerObservation {
+    pub dezoomify_viewer: ViewerPyramid,
+}
+
+/// The reusable source is the viewer page. Resource addresses name an owned
+/// loader capability, not a public metadata endpoint or an HTTP fallback.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub struct ViewerPyramid {
+    pub source_url: String,
+    pub resource_base: String,
+    pub levels: Vec<ViewerLevel>,
+}
+
+/// One regular level in image pixels, with top-left origin and downward rows.
+/// `level` is an opaque viewer index; ordering need not match image size.
+/// The core validates dimensions and grid counts and computes edge crops.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub struct ViewerLevel {
+    pub level: u32,
+    pub size: Size,
+    pub tile_size: Size,
+    pub overlap: Size,
+    pub grid_size: Size,
+}
+
 /// A probe's decoded pixel dimensions, or absence of a usable tile. Availability
 /// also means output was retained when the requested `TileRole` includes output.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

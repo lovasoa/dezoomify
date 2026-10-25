@@ -1,0 +1,74 @@
+[
+  {
+    "name": "asian-art",
+    "issue": 1296,
+    "state": "open",
+    "url": "https://searchcollection.asianart.org/objects/13529/the-sixth-sikh-guru-hargobind-singh",
+    "evidence": "User-supplied HAR: MediaZoom initializer and working IIIF tiles",
+    "protocol": "iiif",
+    "width": 1819,
+    "height": 2500,
+    "tileSize": 256,
+    "resolutions": [8, 4, 2, 1],
+    "ownership": "element-data"
+  },
+  {
+    "name": "allen-memorial",
+    "issue": 715,
+    "state": "closed",
+    "url": "https://allenartcollection.oberlin.edu/objects/12464/nude-with-coral-necklace",
+    "evidence": "Public HTML and MediaZoom.js: initializer omits the version; module selects IIIF 2",
+    "protocol": "iiif",
+    "width": 2000,
+    "height": 1307,
+    "tileSize": 256,
+    "resolutions": [8, 4, 2, 1],
+    "ownership": "element-data"
+  },
+  {
+    "name": "new-britain",
+    "issue": 773,
+    "state": "closed",
+    "url": "https://ink.nbmaa.org/objects/322/summer-bather",
+    "evidence": "Public HTML and MediaZoom.js: explicit IIIF 2 initializer",
+    "protocol": "iiif",
+    "width": 4800,
+    "height": 4092,
+    "tileSize": 256,
+    "resolutions": [8, 4, 2, 1],
+    "ownership": "element-data"
+  },
+  {
+    "name": "philadelphia-history",
+    "issue": 321,
+    "state": "open",
+    "url": "https://www.philageohistory.org/rdic-images/view-image.cfm/ARW1873.ChesterCounty.051.Plate47_UpperUwchlanAndUwchlan",
+    "evidence": "Issue discussion records inline width, height and Zoomify URL without metadata; current page returns a bot challenge",
+    "protocol": "zoomify",
+    "width": 6212,
+    "height": 6248,
+    "tileSize": 256,
+    "ownership": "global"
+  },
+  {
+    "name": "texas-history",
+    "issue": 652,
+    "state": "closed",
+    "url": "https://texashistory.unt.edu/ark:/67531/metapth192767/m1/1/zoom/",
+    "evidence": "Public tiles/ImageProperties.xml supplies geometry; issue identifies OpenLayers 3.20.1, while the current viewer is challenged",
+    "protocol": "zoomify",
+    "width": 7149,
+    "height": 10000,
+    "tileSize": 256,
+    "ownership": "global"
+  },
+  {
+    "name": "croatian-wms",
+    "issue": 455,
+    "state": "open",
+    "url": "https://kartehgss.prehnit.hr/",
+    "evidence": "Public js/map.js constructs TileWMS and vector overlays in a geographic projection",
+    "protocol": "wms",
+    "ownership": "global"
+  }
+]

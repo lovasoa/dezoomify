@@ -14,17 +14,17 @@ import type { PublicPath, WxtBrowser } from "wxt/browser";
 import { transportError } from "../runtime/fetch.ts";
 import { findImageDownloadLink, findLoadedImage } from "./loaded-image.ts";
 import {
-  isOpenSeadragonTile,
-  readOpenSeadragonTile,
-  releaseOpenSeadragonTiles,
-  tileResourceBase,
-} from "./openseadragon/session.ts";
-import {
   cancelSourceFetch,
   collectCandidates,
   fetchSource,
   inspectSourceDocument,
 } from "./source-operations.ts";
+import {
+  isViewerTile,
+  readViewerTile,
+  releaseViewerTiles,
+  tileResourceBase,
+} from "./viewers/session.ts";
 
 type SourceApi = Pick<WxtBrowser, "tabs" | "scripting">;
 type SourceFrame = { frameId: number; documentUrl: string; token?: string; documentId?: string };
@@ -459,14 +459,14 @@ export function createSourceAccess(
     try {
       const deadlineAt = Math.min(scanDeadline, Date.now() + 1500);
       const reply = await inject(
-        { files: ["/openseadragon-scanner.js"], world: "MAIN" },
+        { files: ["/viewer-scanner.js"], world: "MAIN" },
         signal,
         undefined,
         deadlineAt,
         frame,
       );
       ({ observed, memory } = memoryScanReply(reply));
-      rememberTileFrames(observed, frame);
+      rememberTileFrames(isRecord(reply) ? reply.resources : undefined, frame);
     } catch (error) {
       // A memory scan is optional evidence; source loss/cancellation still
       // fails the following normal scan through the same lifetime guard.
@@ -516,19 +516,17 @@ export function createSourceAccess(
     }
   }
 
-  function rememberTileFrames(inputs: CandidateInput[], frame: SourceFrame) {
-    for (const input of inputs) {
-      try {
-        const base: unknown = JSON.parse(input.contents ?? "null")?.Image?.Url;
-        if (
-          typeof base === "string" &&
-          isOpenSeadragonTile(base) &&
-          sameDocumentUrl(base, frame.documentUrl)
-        )
-          tileFrames.set(base, frame);
-      } catch {
-        /* Other metadata formats do not describe page tile capabilities. */
-      }
+  function rememberTileFrames(resources: unknown, frame: SourceFrame) {
+    if (!Array.isArray(resources) || resources.length > 100) return;
+    for (const base of resources) {
+      if (
+        typeof base === "string" &&
+        base.length <= MAX_URL_LENGTH &&
+        isPublicHttpUrl(base) &&
+        tileResourceBase(`${base}/0/0/0/1/1.png`) === base &&
+        sameDocumentUrl(base, frame.documentUrl)
+      )
+        tileFrames.set(base, frame);
     }
   }
 
@@ -716,9 +714,7 @@ export function createSourceAccess(
     if (signal.aborted) throw transportError("cancelled", "source fetch cancelled");
     if (!validSourceRequestUrl(request.uri))
       throw transportError("bad-url", "invalid source request URL");
-    return isOpenSeadragonTile(request.uri)
-      ? fetchTile(request.uri, signal)
-      : fetchHttp(request, signal);
+    return isViewerTile(request.uri) ? fetchTile(request.uri, signal) : fetchHttp(request, signal);
   }
 
   async function fetchHttp(request: Pick<ResourceRequest, "uri" | "headers">, signal: AbortSignal) {
@@ -766,10 +762,10 @@ export function createSourceAccess(
     const base = tileResourceBase(url);
     const frame = base && tileFrames.get(base);
     if (!base || !frame)
-      throw transportError("source-lost", "OpenSeadragon source is no longer available");
+      throw transportError("source-lost", "viewer source is no longer available");
     const result = await inject(
       {
-        func: readOpenSeadragonTile,
+        func: readViewerTile,
         args: [url, base],
         world: "MAIN",
       },
@@ -800,7 +796,7 @@ export function createSourceAccess(
       void browserApi.scripting
         .executeScript({
           target: target(frame),
-          func: releaseOpenSeadragonTiles,
+          func: releaseViewerTiles,
           args: [bases],
           world: "MAIN",
         })
@@ -828,7 +824,7 @@ export function createSourceAccess(
     },
     observations,
     fetch,
-    handlesResource: isOpenSeadragonTile,
+    handlesResource: isViewerTile,
     releaseTiles,
     hasOrigin(origin: string) {
       return sessionFrames.has(origin);
