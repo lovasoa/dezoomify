@@ -36,6 +36,24 @@ export class PageObject {
     return PageObject.from(this.data(key));
   }
 
+  /** Read a prototype method without invoking getters. Calling it is reserved
+   * for an identified viewer or source after explicit source access. */
+  method(key: string): ((...args: unknown[]) => unknown) | undefined {
+    let current: object | null = this.identity;
+    for (let depth = 0; current && depth < 16; depth++) {
+      const own = descriptor(current, key);
+      if (own) return typeof own.value === "function" ? own.value : undefined;
+      current = Object.getPrototypeOf(current);
+    }
+    return undefined;
+  }
+
+  call(key: string, ...args: unknown[]): unknown {
+    const method = this.method(key);
+    if (!method) throw new Error(`missing viewer method ${key}`);
+    return apply(method, this.identity, args);
+  }
+
   matches(key: PropertyKey, value: boolean | object): boolean {
     return this.data(key) === value;
   }
@@ -121,8 +139,8 @@ export class PageObject {
     );
   }
 
-  registry(realm: PageRealm): Iterable<PageObject> | undefined {
-    const registry = this.reference("_viewers")?.identity;
+  mapValues(key: string, realm: PageRealm): Iterable<PageObject> | undefined {
+    const registry = this.reference(key)?.identity;
     if (!(registry instanceof realm.Map)) return undefined;
     const values: IterableIterator<unknown> = apply(realm.Map.prototype.values, registry, []);
     return {

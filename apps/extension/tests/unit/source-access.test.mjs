@@ -1,9 +1,5 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {
-  readOpenSeadragonTile,
-  releaseOpenSeadragonTiles,
-} from "../../src/job/openseadragon/session.ts";
 import { createSourceAccess } from "../../src/job/source-access.ts";
 import {
   cancelSourceFetch,
@@ -11,6 +7,7 @@ import {
   fetchSource,
   inspectSourceDocument,
 } from "../../src/job/source-operations.ts";
+import { readViewerTile, releaseViewerTiles } from "../../src/job/viewers/session.ts";
 
 const SOURCE_URL = "https://gallery.example/page?view=1";
 
@@ -163,8 +160,8 @@ function snapshot(documentUrl = SOURCE_URL) {
 
 test("live tile capabilities stay bound to their exact viewer frame and are released on retirement", async () => {
   const viewerUrl = "https://gallery.example/viewer";
-  const base = `${viewerUrl}#dezoomify-openseadragon-tile/test-source/image`;
-  const uri = `${base}/10/0_0.png`;
+  const base = `${viewerUrl}#dezoomify-viewer-tile/test-source/image`;
+  const uri = `${base}/10/0/0/256/256.png`;
   const tile = { ok: true, documentUrl: viewerUrl, status: 200, url: uri, data: "AQ==", bytes: 1 };
   let tileReply = () => tile;
   const fake = fakeBrowser(async (injection) => {
@@ -174,6 +171,7 @@ test("live tile capabilities stay bound to their exact viewer frame and are rele
       return {
         ok: true,
         documentUrl,
+        resources: frameId === 9 ? [base] : [],
         inputs:
           frameId === 9
             ? [
@@ -185,7 +183,7 @@ test("live tile capabilities stay bound to their exact viewer frame and are rele
               ]
             : [],
       };
-    if (injection.func === readOpenSeadragonTile) {
+    if (injection.func === readViewerTile) {
       assert.equal(frameId, 9);
       assert.equal(injection.world, "MAIN");
       return tileReply();
@@ -226,7 +224,7 @@ test("live tile capabilities stay bound to their exact viewer frame and are rele
       kind: "policy-denied",
       blocked_reason: "source-document-lost",
     });
-    const release = fake.calls.find((call) => call.func === releaseOpenSeadragonTiles);
+    const release = fake.calls.find((call) => call.func === releaseViewerTiles);
     assert.deepEqual(release.args, [[base]]);
     assert.deepEqual(release.target.frameIds, [9]);
   } finally {
@@ -374,7 +372,7 @@ test("MAIN-world observations are independently validated and preserve document 
   };
   const fake = fakeBrowser(async (injection) => {
     if (injection.files) {
-      assert.deepEqual(injection.files, ["/openseadragon-scanner.js"]);
+      assert.deepEqual(injection.files, ["/viewer-scanner.js"]);
       assert.equal(injection.world, "MAIN");
       assert.equal(injection.func, undefined);
       assert.equal(injection.args, undefined);

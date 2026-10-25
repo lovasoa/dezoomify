@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Live OpenLayers image</title></head>
+<body>
+<div id="viewer" style="width:600px;height:600px"></div>
+<script src="/openlayers-fixture.js"></script>
+<script>
+(() => {
+  const ol = OpenLayersFixture;
+  const type = new URLSearchParams(location.search).get("type");
+  const options = { size: [512,512], tileSize: 256, crossOrigin: "Anonymous" };
+  const source = type === "zoomify"
+    ? new ol.Zoomify({ ...options, url: `${location.origin}/memory-zoomify/` })
+    : new ol.IIIF({ ...options, resolutions: [2,1], version: 2, format: "png",
+      supports: ["regionByPx","sizeByW"], url: `${location.origin}/memory-iiif` });
+  const nativeUrl = source.getTileUrlFunction();
+  source.setTileUrlFunction((coord) => `viewer:${coord.join("/")}`);
+  source.setTileLoadFunction((tile, token) => {
+    const coord = token.slice("viewer:".length).split("/").map(Number);
+    tile.getImage().src = `${nativeUrl(coord,1,null)}?via=viewer-loader`;
+  });
+  const element = document.getElementById("viewer");
+  const map = new ol.Map({ target: element, layers: [new ol.TileLayer({ source })],
+    view: new ol.View({ center: [256,-256], resolution: 1 }) });
+  element.jQueryViewerData = { map };
+  map.once("rendercomplete", () => { document.documentElement.dataset.viewerReady = "true"; });
+  window.OpenLayersFixture = undefined;
+})();
+</script>
+</body>
+</html>

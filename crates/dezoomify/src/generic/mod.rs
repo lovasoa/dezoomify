@@ -4,9 +4,16 @@ use crate::core::adaptive::is_generic_template;
 use crate::core::discovery::image_url;
 use crate::core::{DiscoverableGrid, DiscoveryError, FormatSpec, ImagePlan, ResolvedLevel};
 
-pub const SPEC: FormatSpec =
-    FormatSpec::new("generic", &[image_url(is_generic_template).plan(decode)])
-        .with_display_name("Generic format");
+mod viewer;
+
+pub const SPEC: FormatSpec = FormatSpec::new(
+    "generic",
+    &[
+        image_url(is_generic_template).plan(decode),
+        crate::core::discovery::json_metadata::<crate::model::ViewerObservation>(),
+    ],
+)
+.with_display_name("Generic format");
 
 fn decode(template: &str) -> Result<ImagePlan, DiscoveryError> {
     Ok(ImagePlan::new(

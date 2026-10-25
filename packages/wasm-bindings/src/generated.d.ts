@@ -112,6 +112,15 @@ export interface OutputGrid {
 }
 
 /**
+ * Complete, finite pixel grids observed in a live viewer. Serialize as supplied
+ * `observed-metadata`; the Host resolves `resource_base` for this job only.
+ * These are source images, independent of viewport rotation, pan or overlays.
+ */
+export interface ViewerObservation {
+    dezoomify_viewer: ViewerPyramid;
+}
+
+/**
  * Core discovery/acquisition policy, validated by `dezoomify` before host I/O.
  * Hosts separately enforce transport, decode, and output resource limits.
  * Omitted serialized fields use core defaults; out-of-range limits fail the job.
@@ -317,6 +326,19 @@ export interface ResourceRequest {
     uri: string;
     headers?: Header[];
     purpose: RequestPurpose;
+}
+
+/**
+ * One regular level in image pixels, with top-left origin and downward rows.
+ * `level` is an opaque viewer index; ordering need not match image size.
+ * The core validates dimensions and grid counts and computes edge crops.
+ */
+export interface ViewerLevel {
+    level: number;
+    size: Size;
+    tile_size: Size;
+    overlap: Size;
+    grid_size: Size;
 }
 
 /**
@@ -530,6 +552,16 @@ export interface LimitContext {
  * The meaning of the existing compression setting for a codec.
  */
 export type OutputControl = { kind: "quality"; minimum: number; warning_below: number } | { kind: "effort" } | { kind: "none" };
+
+/**
+ * The reusable source is the viewer page. Resource addresses name an owned
+ * loader capability, not a public metadata endpoint or an HTTP fallback.
+ */
+export interface ViewerPyramid {
+    source_url: string;
+    resource_base: string;
+    levels: ViewerLevel[];
+}
 
 /**
  * The shared failure context, defined once instead of per variant:

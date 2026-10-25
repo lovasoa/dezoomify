@@ -31,14 +31,24 @@ Request permissions synchronously from a visible action to preserve user
 activation. HTTP refusals must not open permission prompts. Keep injected
 operations finite, cancellable, and validated at the job-page boundary.
 
-For a live OpenSeadragon source whose regular pyramid is understood but whose
-tile loading is custom, reuse its page loader through a document-bound capability.
-Rust still plans, retries, and assembles the tiles. Registered tile addresses must
-never fall through to HTTP and are released on retirement; see the
-[tile session](src/job/openseadragon/session.ts).
-Page-side loaders stay in closures rather than global properties.
-The viewer's existing image loader owns tile I/O and its built-in retries.
-Cancellation stops waiting and prevents saving; already queued viewer work can finish.
+The [viewer scanner](src/job/viewers/traversal.ts) shares traversal, limits and
+deduplication across OpenSeadragon and OpenLayers adapters. Adapters extract
+source facts; Rust owns format interpretation and grid validation. Known
+OpenSeadragon formats supply metadata. Custom OpenSeadragon sources and finite
+OpenLayers image grids use the Rust-defined `ViewerObservation` contract.
+
+The shared [tile session](src/job/viewers/session.ts) retains page loaders in
+closures behind document-bound capabilities. Addresses never fall through to
+HTTP and are released on retirement. Rust computes placement/crops and owns
+retry decisions; adapters reuse the viewer's loading behavior. Cancellation
+detaches owned waits without clearing the viewer's render queue or cache.
+Cached drawables are borrowed; only transferred bitmaps are closed.
+
+OpenLayers detection follows accessible map references, including element data
+stores, without needing a global `ol`. It supports finite pixel-image grids;
+geographic maps and arbitrary reprojection are not inferred to be artwork.
+The [issue corpus](tests/browser/corpus/openlayers/README.md) records provenance,
+replay coverage and unavailable historical examples.
 
 ## Saving and packaging
 

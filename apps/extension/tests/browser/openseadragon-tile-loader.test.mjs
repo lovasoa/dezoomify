@@ -91,10 +91,10 @@ async function loadFixture(mode) {
   const addedGlobals = Reflect.ownKeys(window)
     .filter((key) => !globalKeys.has(key))
     .map(String);
-  const base = JSON.parse(metadata.contents).Image.Url;
-  const result = await TileSession.readOpenSeadragonTile(`${base}/8/0_0.png`, base);
-  TileSession.releaseOpenSeadragonTiles([base]);
-  const retired = await TileSession.readOpenSeadragonTile(`${base}/8/0_0.png`, base);
+  const base = JSON.parse(metadata.input.contents).dezoomify_viewer.resource_base;
+  const result = await TileSession.readViewerTile(`${base}/8/0/0/256/256.png`, base);
+  TileSession.releaseViewerTiles([base]);
+  const retired = await TileSession.readViewerTile(`${base}/8/0/0/256/256.png`, base);
   if (retired.ok) throw new Error("retired source still loads tiles");
   if (!result.ok) return result.error;
   const bytes = Uint8Array.fromBase64(result.data);

@@ -260,6 +260,8 @@ function testScenarioPath(scenario: unknown): string {
   if (scenario === "recursive-iframe") return "/recursive-iframe";
   if (typeof scenario === "string" && scenario.startsWith("memory-openseadragon-"))
     return "/memory-openseadragon.html";
+  if (typeof scenario === "string" && scenario.startsWith("memory-openlayers-"))
+    return "/memory-openlayers.html";
   if (scenario === "cookie-session") return "/protected/artwork.dzi";
   if (scenario === "retry") return "/fixtures/failures/retry-approval/retry.dzi";
   if (typeof scenario === "string" && scenario.startsWith("fixtures/")) return `/${scenario}/`;

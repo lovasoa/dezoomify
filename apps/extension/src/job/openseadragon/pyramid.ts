@@ -1,4 +1,4 @@
-import type { DziSource } from "./types.ts";
+import type { ViewerLevel } from "@dezoomify/wasm-bindings";
 
 interface LiveSource {
   width: number;
@@ -14,61 +14,33 @@ interface LiveSource {
   getNumTiles(level: number): { x: number; y: number };
 }
 
-/** Only expose grids the existing Deep Zoom planner can reproduce exactly.
- * Tile addresses and decoding remain the live viewer's responsibility.
- */
-export function readLivePyramid(value: object, base: string): DziSource {
+/** Snapshot the viewer's regular grids. Rust checks coverage and computes crops;
+ * sparse/custom-bound sources need a richer contract and are not approximated. */
+export function readLivePyramid(value: object): ViewerLevel[] {
   const source = value as LiveSource;
-  const { width, height, maxLevel, tileOverlap: overlap = 0 } = source;
-  const tileSize = source.getTileWidth(maxLevel);
   if (
     source.ready === false ||
-    source.minLevel !== 0 ||
     source.displayRects?.length ||
     Object.hasOwn(source, "getTileBounds") ||
     Object.hasOwn(source, "tileExists") ||
-    ![width, height, tileSize].every((n) => Number.isSafeInteger(n) && n > 0 && n <= 0xffffffff) ||
-    maxLevel !== Math.ceil(Math.log2(Math.max(width, height))) ||
-    !Number.isSafeInteger(overlap) ||
-    overlap < 0 ||
-    overlap > tileSize
+    !Number.isSafeInteger(source.minLevel) ||
+    source.minLevel < 0 ||
+    !Number.isSafeInteger(source.maxLevel) ||
+    source.maxLevel < source.minLevel ||
+    source.maxLevel - source.minLevel >= 64
   )
     throw new Error("unsupported OpenSeadragon grid");
-  for (let level = 0; level <= maxLevel; level++) {
-    const scale = 2 ** (level - maxLevel);
+  const levels: ViewerLevel[] = [];
+  for (let level = source.minLevel; level <= source.maxLevel; level++) {
+    const scale = source.getLevelScale(level);
     const count = source.getNumTiles(level);
-    if (
-      source.getLevelScale(level) !== scale ||
-      source.getTileWidth(level) !== tileSize ||
-      source.getTileHeight(level) !== tileSize ||
-      count.x !== Math.ceil(Math.ceil(width * scale) / tileSize) ||
-      count.y !== Math.ceil(Math.ceil(height * scale) / tileSize)
-    )
-      throw new Error("unsupported OpenSeadragon grid");
+    levels.push({
+      level,
+      size: { width: Math.ceil(source.width * scale), height: Math.ceil(source.height * scale) },
+      tile_size: { width: source.getTileWidth(level), height: source.getTileHeight(level) },
+      overlap: { width: source.tileOverlap ?? 0, height: source.tileOverlap ?? 0 },
+      grid_size: { width: count.x, height: count.y },
+    });
   }
-  return {
-    protocol: "dzi",
-    width,
-    height,
-    tileWidth: tileSize,
-    tileHeight: tileSize,
-    overlap,
-    format: "png",
-    base,
-  };
-}
-
-export function tileCoordinates(url: string, shape: DziSource): [number, number, number] {
-  const match = /\/(\d+)\/(\d+)_(\d+)\.png$/.exec(url);
-  if (!match) throw { kind: "bad-url", detail: "invalid OpenSeadragon tile address" };
-  const [level, x, y] = match.slice(1).map(Number);
-  const maxLevel = Math.ceil(Math.log2(Math.max(shape.width, shape.height)));
-  const scale = 2 ** (level - maxLevel);
-  if (
-    level > maxLevel ||
-    x >= Math.ceil((shape.width * scale) / shape.tileWidth) ||
-    y >= Math.ceil((shape.height * scale) / shape.tileHeight)
-  )
-    throw { kind: "bad-url", detail: "invalid OpenSeadragon tile coordinates" };
-  return [level, x, y];
+  return levels;
 }

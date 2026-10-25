@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { projectMetadata, readTileSource } from "../../src/job/openseadragon/metadata.ts";
-import { PageObject } from "../../src/job/openseadragon/page-object.ts";
+import { PageObject } from "../../src/job/viewers/page-object.ts";
 
 const context = { documentUrl: "https://viewer.example/page?image=1", imageIndex: 2 };
 const dzi = () => ({
