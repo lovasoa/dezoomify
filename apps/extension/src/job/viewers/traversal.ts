@@ -1,18 +1,11 @@
+import { ViewerCollector } from "./collector.ts";
 import { PageAccess, PageObject } from "./page-object.ts";
 import { type ScanState, scanLimits } from "./scan-state.ts";
 import type { PageRealm } from "./types.ts";
-import { ViewerCollector } from "./viewers.ts";
 
-function recordDocument(
-  state: ScanState,
-  doc: Document,
-  openSeadragon: PageObject | undefined,
-): void {
+function recordDocument(state: ScanState, doc: Document): void {
   state.diagnostics.documents++;
   if (doc.URL.length <= 2048) state.diagnostics.frames.push(doc.URL);
-  const version = openSeadragon?.reference("version")?.boundedString("versionStr", 64);
-  if (version !== undefined && !state.diagnostics.versions.includes(version))
-    state.diagnostics.versions += `${state.diagnostics.versions ? "," : ""}${version}`;
 }
 
 export class PageTraversal {
@@ -34,13 +27,18 @@ export class PageTraversal {
     const doc = realm.document;
     this.seenFrames.add(win);
     const root = PageObject.from(win);
-    const openSeadragon = root?.reference("OpenSeadragon");
-    recordDocument(this.state, doc, openSeadragon);
+    recordDocument(this.state, doc);
     const until = Math.min(this.state.end, Date.now() + scanLimits.documentMs);
-    const queue = [root, openSeadragon].filter((value): value is PageObject => !!value);
-    const registry = openSeadragon?.registry(realm);
-    if (registry) await this.viewers.readAll(registry, doc, until);
+    const roots = root ? this.viewers.roots(root) : [];
+    const queue = [...roots, ...(root ? [root] : [])];
+    for (const value of roots) await this.viewers.registry(value, realm, until);
     const elements = await this.collectElements(doc, queue, until);
+    // Image containers and their element-data stores precede the broad window
+    // graph. Bundled viewers can hide their namespace while retaining a DOM link.
+    for (const element of elements) {
+      const anchors = this.viewers.anchors(element);
+      if (anchors.length) await this.scanReferences(realm, anchors, until);
+    }
     // Probe known canvases before broad reference traversal can exhaust the budget.
     await this.viewers.probe(realm, elements, until);
     await this.scanReferences(realm, queue, until);
@@ -96,11 +94,7 @@ export class PageTraversal {
     until: number,
   ): Promise<boolean> {
     if (await this.viewers.read(value, realm.document, until)) return true;
-    const registry = value.registry(realm);
-    if (registry) {
-      await this.viewers.readAll(registry, realm.document, until, false);
-      return true;
-    }
+    if (await this.viewers.registry(value, realm, until)) return true;
     await this.enqueueProperties(value, queue, until);
     return false;
   }

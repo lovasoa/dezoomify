@@ -6,11 +6,11 @@ import { build } from "esbuild";
 import { chromium, firefox } from "playwright";
 
 const bundle = await build({
-  entryPoints: [fileURLToPath(new URL("../../src/job/openseadragon-scanner.ts", import.meta.url))],
+  entryPoints: [fileURLToPath(new URL("../../src/job/viewer-scanner.ts", import.meta.url))],
   bundle: true,
   write: false,
   format: "iife",
-  globalName: "OpenSeadragonScanner",
+  globalName: "ViewerScanner",
   target: "es2022",
 });
 const scannerScript = bundle.outputFiles[0].text;
@@ -262,7 +262,7 @@ for (const [name, engine] of [
               }
               try {
                 ${scannerScript}
-                const result = await OpenSeadragonScanner.scanOpenSeadragon(Date.now() + 1500);
+                const result = await ViewerScanner.scanViewers(Date.now() + 1500);
                 return { result, taskRan };
               } finally {
                 Date.now = now;
@@ -274,7 +274,7 @@ for (const [name, engine] of [
             assert.equal(result.diagnostics.documents, 1, "the parent scans only its document");
             const child = await scope.evaluate(`(async () => {
               ${scannerScript}
-              return OpenSeadragonScanner.scanOpenSeadragon(Date.now() + 1500);
+              return ViewerScanner.scanViewers(Date.now() + 1500);
             })()`);
             assert.equal(child.inputs.length, 1, "the inventory can scan the HTTP child directly");
             assert.equal(child.diagnostics.documents, 1);
@@ -327,7 +327,7 @@ for (const [name, engine] of [
           );
           const expired = await page.evaluate(`(async () => {
             ${scannerScript}
-            return OpenSeadragonScanner.scanOpenSeadragon(Date.now() - 1);
+            return ViewerScanner.scanViewers(Date.now() - 1);
           })()`);
           assert.equal(expired.inputs.length, 0);
           assert.equal(expired.diagnostics.truncated, true);

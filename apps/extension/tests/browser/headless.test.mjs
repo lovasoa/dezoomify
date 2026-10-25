@@ -35,6 +35,7 @@ import {
   QUADRANTS,
 } from "../../../../test/support/png.mjs";
 import { GECKODRIVER } from "./geckodriver.mjs";
+import { openLayersLibrary } from "./openlayers-fixture.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, "../../../..");
@@ -126,6 +127,7 @@ async function startFixtureServer(workDir) {
     path.join(staticDir, "openseadragon-fixture.js"),
     `(()=>{${library}\nwindow.OpenSeadragon=OpenSeadragon;})()`,
   );
+  writeFileSync(path.join(staticDir, "openlayers-fixture.js"), await openLayersLibrary());
   const addrFile = path.join(workDir, "server.addr");
   const proc = spawn(process.execPath, [
     path.join(REPO_ROOT, "test/fixture-server.mjs"),
@@ -963,6 +965,32 @@ for (const [browser, runJob] of [
             1,
             "only the page initializes IIP metadata",
           );
+      }
+    } finally {
+      rmSync(work, { recursive: true, force: true });
+    }
+  });
+  test(`${browser}: bundled OpenLayers sources save through their private tile loader`, {
+    timeout: 180000,
+  }, async () => {
+    const work = mkdtempSync(path.join(tmpdir(), "dezoomify-e2e-openlayers-"));
+    try {
+      for (const type of ["iiif", "zoomify"]) {
+        const caseWork = path.join(work, type);
+        mkdirSync(caseWork);
+        const offset = readFileSync(fixtureServer.logFile, "utf8").length;
+        assertPng(
+          await runJob(fixtureServer.base, caseWork, { scenario: `memory-openlayers-${type}` }),
+        );
+        const events = newFixtureEvents(fixtureServer.logFile, offset);
+        assert.equal(
+          events.filter((e) => /info\.json|ImageProperties\.xml/.test(e.path)).length,
+          0,
+        );
+        assert.ok(
+          events.some((e) => e.query?.includes("via=viewer-loader")),
+          "the source's custom loader ran",
+        );
       }
     } finally {
       rmSync(work, { recursive: true, force: true });

@@ -2,6 +2,11 @@ import type { JobInput } from "@dezoomify/wasm-bindings";
 
 export type ObservedMetadata = JobInput & { kind: "observed-metadata"; contents: string };
 
+export interface ViewerEvidence {
+  input: ObservedMetadata;
+  resource?: string;
+}
+
 export interface SourceGeometry {
   width: number;
   height: number;
@@ -77,6 +82,7 @@ export interface ScanResult {
   ok: true;
   documentUrl: string;
   inputs: ObservedMetadata[];
+  resources: string[];
   diagnostics: ScanDiagnostics;
 }
 

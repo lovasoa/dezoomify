@@ -1,4 +1,4 @@
-import type { PageObject } from "./page-object.ts";
+import type { PageObject } from "../viewers/page-object.ts";
 import type {
   DziSource,
   IiifSource,
@@ -9,7 +9,7 @@ import type {
   SourceGeometry,
   TileSource,
   ZoomifySource,
-} from "./types.ts";
+} from "../viewers/types.ts";
 
 function address(value: string, baseURI: string): string {
   const url = new URL(value, baseURI);
