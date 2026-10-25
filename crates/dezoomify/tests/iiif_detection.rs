@@ -50,6 +50,53 @@ fn minimal_v1_metadata_requires_an_explicit_info_url() {
 }
 
 #[test]
+fn emuseum_viewers_supply_geometry_without_info_json() {
+    // Issue #1296: distilled from the Asian Art Museum's public viewer HAR.
+    let viewer =
+        "https://searchcollection.asianart.org/objects/13529/the-sixth-sikh-guru-hargobind-singh";
+    let service = "https://searchcollection.asianart.org/internal/media/zoomdispatcher/78199";
+    let page = br#"<script>require(["t5/core/pageinit"], function(pi) {
+        pi([], [["emuseum/MediaZoom:init",1819,2500,"/internal/media/zoomdispatcher/78199",256,2]]);
+    });</script>"#;
+    for input in [
+        DiscoveryInput::new(viewer),
+        DiscoveryInput::with_contents(viewer, page.as_slice())
+            .with_kind(DiscoveryInputKind::ObservedDocument),
+    ] {
+        let (catalog, requests) = support::discover_inputs(
+            default_registry(),
+            vec![input],
+            DiscoveryLimits::default(),
+            |uri| (uri == viewer).then(|| Ok((page.to_vec(), None))),
+        );
+        let image = support::ready_image(catalog.unwrap());
+        assert_eq!(image.format, "iiif");
+        assert_eq!(image.source_url.as_deref(), Some(viewer));
+        let level = image.levels.last().unwrap();
+        assert_eq!(
+            level.source.image_size(),
+            Some(dezoomify::Vec2d { x: 1819, y: 2500 })
+        );
+        let tiles = support::tile_urls(level).unwrap();
+        assert_eq!(tiles.len(), 80);
+        assert_eq!(
+            tiles[0],
+            format!("{service}/0,0,256,256/256,/0/default.jpg")
+        );
+        assert_eq!(
+            tiles[79],
+            format!("{service}/1792,2304,27,196/27,/0/default.jpg")
+        );
+        let half = support::tile_urls(&image.levels[2]).unwrap();
+        assert_eq!(
+            half[3],
+            format!("{service}/1536,0,283,512/142,/0/default.jpg")
+        );
+        assert!(requests.iter().all(|request| request.uri == viewer));
+    }
+}
+
+#[test]
 fn gallica_viewers_resolve_the_selected_page_without_fetching_html() {
     // Issue #1292: Gallica's viewer does not expose an info.json link. Its
     // public IIIF 1.1 service supplies dimensions without an explicit tile grid.
