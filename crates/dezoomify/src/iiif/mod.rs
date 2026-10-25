@@ -23,6 +23,7 @@ use crate::json_utils::all_json;
 use crate::core::DiscoveredEntry;
 
 mod contentdm;
+mod emuseum;
 mod gallica;
 pub mod manifest_types;
 mod micrio;
@@ -70,6 +71,7 @@ const ROUTES: &[DiscoveryRoute] = &[
     national_gallery::ROUTES[0],
     national_gallery::ROUTES[1],
     philadelphia::ROUTE.then_decode(decode),
+    emuseum::ROUTE,
     metadata(url_suffix("/info.json")).decode(decode),
     metadata(url_suffix("/manifest.json")).decode(decode),
     json_metadata::<Document>(),

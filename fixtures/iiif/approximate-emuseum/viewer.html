@@ -1,0 +1,12 @@
+<!doctype html>
+<base href="./media/">
+<div id="map"></div>
+<script>
+function require(modules, callback) {
+  callback(() => {});
+}
+require(["t5/core/pageinit"], function(pi) {
+  pi([], [["emuseum/MediaZoom:init",512,512,"../zoomdispatcher/78199",256,2]]);
+});
+document.documentElement.dataset.viewerReady = "true";
+</script>
