@@ -168,11 +168,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          mkdir -p target
+          # rust-cache can restore this directory even after pruning its files.
+          rm -rf target/release-dist
+          mkdir -p target/release-dist
           for name in release-plan release-cli-linux-x86_64 release-desktop-linux-x86_64 release-desktop-windows-x86_64 release-desktop-macos-aarch64 release-extension-chromium release-extension-firefox; do
-            gh run download "${{ github.run_id }}" -n "$name" -D dist
+            gh run download "${{ github.run_id }}" -n "$name" -D target/release-dist
           done
-          mv dist target/release-dist
       - name: Verify release artifacts
         run: |
           v="${{ needs.prepare.outputs.version }}"
