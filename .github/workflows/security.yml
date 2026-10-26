@@ -20,7 +20,6 @@ jobs:
         with:
           key: check
       - uses: ./.github/actions/setup-wasm-bindgen
-      - uses: ./.github/actions/setup-nasm
       - name: Install cargo-deny 0.20.2
         uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
         with:

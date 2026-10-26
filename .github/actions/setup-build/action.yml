@@ -1,22 +1,53 @@
 name: setup-build
-description: Install the repository Rust toolchain and cache its dependencies
+description: Set up the repository Rust toolchain, build prerequisites and dependency cache
 inputs:
   key:
     description: Dependency group shared by jobs that build the same profiles and features
     required: false
     default: xtask
+  desktop:
+    description: Also install desktop webview, headless-display and bundling tools
+    required: false
+    default: "false"
 runs:
   using: composite
   steps:
-    - name: Use HTTPS Ubuntu mirrors
+    # Native codec prerequisites are a baseline, not a per-job Cargo feature choice.
+    - name: Install Linux build prerequisites
       if: runner.os == 'Linux'
       shell: bash
+      env:
+        DESKTOP: ${{ inputs.desktop }}
       run: |
         for file in /etc/apt/apt-mirrors.txt /etc/apt/sources.list.d/ubuntu.sources; do
           if [ -f "$file" ]; then
             sudo sed -i 's|http://azure.archive.ubuntu.com|https://archive.ubuntu.com|g' "$file"
           fi
         done
+        packages=()
+        if [ "$RUNNER_ARCH" = X64 ]; then
+          packages+=(nasm)
+        fi
+        if [ "$DESKTOP" = true ]; then
+          packages+=(libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev librsvg2-dev libayatana-appindicator3-dev build-essential dpkg-dev xvfb xauth)
+        fi
+        if [ "${#packages[@]}" -gt 0 ]; then
+          sudo apt-get update
+          sudo apt-get install -y "${packages[@]}"
+        fi
+    - name: Install macOS build prerequisites
+      if: runner.arch == 'X64' && runner.os == 'macOS'
+      shell: bash
+      run: brew install nasm
+    - name: Install Windows build prerequisites
+      if: runner.arch == 'X64' && runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        choco install nasm --no-progress -y
+        if ($LASTEXITCODE -ne 0) { throw 'NASM installation failed' }
+        "$env:ProgramFiles\NASM" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+    - uses: ./.github/actions/setup-windows-bundlers
+      if: inputs.desktop == 'true' && runner.os == 'Windows'
     - name: Use only the repository toolchain
       shell: bash
       run: |
