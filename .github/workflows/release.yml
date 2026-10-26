@@ -89,19 +89,8 @@ jobs:
       - uses: ./.github/actions/setup-build
         with:
           key: ${{ matrix.cache }}
+          desktop: ${{ startsWith(matrix.target, 'desktop-') }}
       - uses: ./.github/actions/setup-wasm-bindgen
-      - name: Install Linux desktop tools
-        if: matrix.target == 'desktop-linux-x86_64'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev librsvg2-dev libayatana-appindicator3-dev build-essential dpkg-dev xvfb xauth
-      # The prebuilt Tauri CLI comes from `setup-pnpm install: true`
-      # (@tauri-apps/cli, pinned in apps/desktop/package.json); no `cargo
-      # install` source compile.
-      - uses: ./.github/actions/setup-windows-bundlers
-        if: matrix.target == 'desktop-windows-x86_64'
-      - uses: ./.github/actions/setup-nasm
-        if: startsWith(matrix.target, 'cli-') || startsWith(matrix.target, 'desktop-')
       - name: Download plan
         env:
           GH_TOKEN: ${{ github.token }}

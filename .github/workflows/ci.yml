@@ -38,8 +38,6 @@ jobs:
       - uses: ./.github/actions/setup-build
         with:
           key: ${{ (matrix.lane-group == 'browser+web' || matrix.lane-group == 'extension') && 'web' || matrix.lane-group }}
-      - uses: ./.github/actions/setup-nasm
-        if: matrix.lane-group == 'check' || matrix.lane-group == 'rust'
       - if: matrix.lane-group != 'rust'
         uses: ./.github/actions/setup-wasm-bindgen
       - name: Install cargo-deny 0.20.2
