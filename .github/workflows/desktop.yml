@@ -81,9 +81,9 @@ jobs:
         run: cargo xtask test desktop --e2e-window
   # Every supported release target builds and installs its real bundle, then
   # verifies that the window stays alive. Missing host tools fail the job.
-  bundle-smoke:
+  bundle-install-launch:
     if: github.event_name != 'workflow_dispatch'
-    name: Bundle smoke (${{ matrix.os }})
+    name: Bundle install and launch (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 35
     strategy:
@@ -97,7 +97,7 @@ jobs:
           install: true
       - uses: ./.github/actions/setup-build
         with:
-          key: bundle-smoke
+          key: desktop-bundle
       - uses: ./.github/actions/setup-nasm
       - name: Install Linux webview packages
         if: runner.os == 'Linux'
@@ -110,7 +110,7 @@ jobs:
       # link, Defender, cold CARGO_HOME) and rust-cache never covers its output.
       - uses: ./.github/actions/setup-windows-bundlers
         if: runner.os == 'Windows'
-      - name: Bundle, install, and launch smoke (Linux deb)
+      - name: Build, install, and launch (Linux deb)
         if: runner.os == 'Linux'
         run: |
           set -euo pipefail
@@ -120,9 +120,9 @@ jobs:
           PKG="$(dpkg-deb -f "$DEB" Package)"
           BIN="$(dpkg -L "$PKG" | grep -m1 '/dezoomify-desktop$')"
           code=0
-          xvfb-run -a timeout 20 "$BIN" >smoke-launch.log 2>&1 || code=$?
+          xvfb-run -a timeout 20 "$BIN" >bundle-launch.log 2>&1 || code=$?
           test "$code" -eq 124
-      - name: Bundle, install, and launch smoke (macOS dmg)
+      - name: Build, install, and launch (macOS dmg)
         if: runner.os == 'macOS'
         run: |
           set -euo pipefail
@@ -145,13 +145,13 @@ jobs:
           sleep 2
           screencapture -x dmg-installation.png
           APP_BIN="$APP_DIR/Contents/MacOS/$(/usr/libexec/PlistBuddy -c 'Print CFBundleExecutable' "$APP_DIR/Contents/Info.plist")"
-          "$APP_BIN" >smoke-launch.log 2>&1 & APP_PID=$!
+          "$APP_BIN" >bundle-launch.log 2>&1 & APP_PID=$!
           sleep 15
           kill -0 "$APP_PID"
           kill "$APP_PID"
           wait "$APP_PID" 2>/dev/null || true
           hdiutil detach "$MNT"
-      - name: Bundle, install, and launch smoke (Windows MSI)
+      - name: Build, install, and launch (Windows MSI)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
@@ -166,16 +166,16 @@ jobs:
           if (-not $exe) { throw "installed exe missing" }
           $app = Start-Process -FilePath $exe.FullName -PassThru
           Start-Sleep -Seconds 15
-          if ($app.HasExited) { throw "smoke launch exited early" }
+          if ($app.HasExited) { throw "installed app exited early" }
           Stop-Process -Id $app.Id -Force
-      - name: Upload bundle smoke logs
+      - name: Upload bundle install and launch logs
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: desktop-bundle-smoke-${{ matrix.os }}
+          name: desktop-bundle-install-launch-${{ matrix.os }}
           path: |
             bundle.log
-            smoke-launch.log
+            bundle-launch.log
             signature.log
             dmg-installation.png
           retention-days: 30
@@ -193,7 +193,7 @@ jobs:
           install: true
       - uses: ./.github/actions/setup-build
         with:
-          key: bundle-smoke
+          key: desktop-bundle
       - uses: ./.github/actions/setup-wasm-bindgen
       - name: Freeze the checked-out branch's release plan
         id: plan

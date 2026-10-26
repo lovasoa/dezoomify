@@ -291,7 +291,7 @@ function emitLiveFailureWarning(target, error) {
 }
 
 for (const target of targets) {
-  test(target.name, async ({ page }, testInfo) => {
+  test(`loads a tile from ${target.name}`, async ({ page }, testInfo) => {
     test.setTimeout(target.timeout || 30000);
 
     try {

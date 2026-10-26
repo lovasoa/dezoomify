@@ -1,3 +1,4 @@
+// Verify the Node CLI saves images from generic, IIIF, and pnav fixtures.
 const fs = require("fs");
 const os = require("os");
 const path = require("path");

@@ -1,9 +1,10 @@
 # Testing
 
-Test behavior that could regress. Prefer improving an existing test or adding a
-fixture to the shared runner over adding many unit tests. A test should catch
-future bugs without depending on implementation details; not every change needs
-a new test. Do not assert source-file contents or invent architectural tests.
+Test behavior that could regress. Give tests short names that describe that
+behavior. Prefer improving an existing test or adding a fixture to the shared
+runner over adding many unit tests. A test should catch future bugs without
+depending on implementation details; not every change needs a new test. Do not
+assert source-file contents or invent architectural tests.
 
 ## Choose a test
 
