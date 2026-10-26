@@ -139,15 +139,15 @@ export class PageObject {
     );
   }
 
-  mapValues(key: string, realm: PageRealm): Iterable<PageObject> | undefined {
+  /** Preserve scalar slots so the caller can bound every registry entry. */
+  mapValues(key: string, realm: PageRealm): Iterable<PageObject | undefined> | undefined {
     const registry = this.reference(key)?.identity;
     if (!(registry instanceof realm.Map)) return undefined;
     const values: IterableIterator<unknown> = apply(realm.Map.prototype.values, registry, []);
     return {
       *[Symbol.iterator]() {
         for (const value of values) {
-          const object = PageObject.from(value);
-          if (object) yield object;
+          yield PageObject.from(value);
         }
       },
     };

@@ -363,7 +363,8 @@ test("a lost frame-inventory reply remains bounded", async (t) => {
   }
 });
 
-test("MAIN-world observations are independently validated and preserve document evidence", async () => {
+test("delayed viewer findings preserve document evidence", async (t) => {
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"] });
   const observation = {
     url: `${SOURCE_URL}#dezoomify-openseadragon-0`,
     kind: "observed-metadata",
@@ -372,6 +373,7 @@ test("MAIN-world observations are independently validated and preserve document 
   };
   const fake = fakeBrowser(async (injection) => {
     if (injection.files) {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
       assert.deepEqual(injection.files, ["/viewer-scanner.js"]);
       assert.equal(injection.world, "MAIN");
       assert.equal(injection.func, undefined);
@@ -390,9 +392,16 @@ test("MAIN-world observations are independently validated and preserve document 
     assert.equal(injection.world ?? "ISOLATED", "ISOLATED");
     return snapshot();
   });
-  const source = createSourceAccess(fake.api, { tabId: 9, documentUrl: SOURCE_URL });
+  const source = createSourceAccess(
+    fake.api,
+    { tabId: 9, documentUrl: SOURCE_URL },
+    { timeoutMs: 5000 },
+  );
   try {
-    const scan = await source.scan();
+    const pending = source.scan();
+    await new Promise((resolve) => setImmediate(resolve));
+    t.mock.timers.tick(2000);
+    const scan = await pending;
     assert.deepEqual(scan.inputs, [...snapshot().inputs, observation]);
     assert.deepEqual(scan.memory, { rejected: 0, truncated: false });
   } finally {

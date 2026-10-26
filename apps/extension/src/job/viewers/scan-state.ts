@@ -12,8 +12,7 @@ export const scanLimits = {
   references: 12000,
   images: 100,
   bytes: 1024 * 1024,
-  sliceMs: 8,
-  documentMs: 250,
+  sliceSteps: 128,
 } as const;
 
 function yieldTask(): Promise<void> {
@@ -46,17 +45,15 @@ export class ScanState {
     stopped: "",
     frames: [],
   };
-  readonly started = Date.now();
-  readonly end: number;
-  private slice = Date.now();
+  private readonly started = performance.now();
+  private steps = 0;
   private readonly seenImages = new Set<string>();
   private readonly stops = new Set<StopReason>();
 
   readonly documentUrl: string;
 
-  constructor(documentUrl: string, deadlineAt: number) {
+  constructor(documentUrl: string) {
     this.documentUrl = documentUrl;
-    this.end = Math.min(deadlineAt, this.started + 1000);
   }
 
   truncate(reason: StopReason): void {
@@ -65,9 +62,9 @@ export class ScanState {
     this.diagnostics.stopped = [...this.stops].join(",");
   }
 
-  expired(until: number): boolean {
-    if (Date.now() >= until) {
-      this.truncate("time-budget");
+  full(): boolean {
+    if (this.diagnostics.references >= scanLimits.references) {
+      this.truncate("reference-limit");
       return true;
     }
     if (this.inputs.length >= scanLimits.images) {
@@ -77,10 +74,15 @@ export class ScanState {
     return false;
   }
 
+  /** Charge every inspected reference slot, including scalars and duplicates. */
+  takeReference(): boolean {
+    if (this.full()) return false;
+    this.diagnostics.references++;
+    return true;
+  }
+
   async yieldSlice(): Promise<void> {
-    if (Date.now() - this.slice < scanLimits.sliceMs) return;
-    await yieldTask();
-    this.slice = Date.now();
+    if (++this.steps % scanLimits.sliceSteps === 0) await yieldTask();
   }
 
   collect({ input, resource }: ViewerEvidence): "added" | "duplicate" | "full" {
@@ -98,7 +100,7 @@ export class ScanState {
   }
 
   result(): ScanResult {
-    this.diagnostics.elapsedMs = Date.now() - this.started;
+    this.diagnostics.elapsedMs = performance.now() - this.started;
     return {
       ok: true,
       documentUrl: this.documentUrl,

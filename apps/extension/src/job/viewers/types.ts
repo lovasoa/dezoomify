@@ -56,7 +56,6 @@ export interface MetadataContext {
 }
 
 export type StopReason =
-  | "time-budget"
   | "image-limit"
   | "payload-limit"
   | "frame-limit"
