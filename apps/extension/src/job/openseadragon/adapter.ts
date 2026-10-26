@@ -43,15 +43,16 @@ export const openSeadragonAdapter: ViewerAdapter = {
   version: (root) =>
     root.reference("OpenSeadragon")?.reference("version")?.boundedString("versionStr", 64),
   registry: (object, realm) => object.mapValues("_viewers", realm),
-  async probe(realm, elements, seen, state, until) {
+  async probe(realm, elements, seen, state) {
     const probe = createElementProbe(realm, scanLimits.images);
     if (!probe) return [];
     const access = new PageAccess();
     for (const element of elements) {
-      if (state.expired(until)) break;
-      if (!element.classList.contains("openseadragon-canvas") || seen.has(element)) continue;
-      state.diagnostics.probes++;
-      probe.dispatch(element, (value) => !!openSeadragonAdapter.identify(value, access));
+      if (state.full()) break;
+      if (element.classList.contains("openseadragon-canvas") && !seen.has(element)) {
+        state.diagnostics.probes++;
+        probe.dispatch(element, (value) => !!openSeadragonAdapter.identify(value, access));
+      }
       await state.yieldSlice();
     }
     return probe.captured;

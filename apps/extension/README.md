@@ -32,10 +32,13 @@ activation. HTTP refusals must not open permission prompts. Keep injected
 operations finite, cancellable, and validated at the job-page boundary.
 
 The [viewer scanner](src/job/viewers/traversal.ts) shares traversal, limits and
-deduplication across OpenSeadragon and OpenLayers adapters. Adapters extract
-source facts; Rust owns format interpretation and grid validation. Known
-OpenSeadragon formats supply metadata. Custom OpenSeadragon sources and finite
-OpenLayers image grids use the Rust-defined `ViewerObservation` contract.
+deduplication across OpenSeadragon and OpenLayers adapters. Work limits bound
+the search; fixed-step yielding keeps it responsive without making findings
+depend on scheduling delays. The source operation retains its overall timeout.
+Adapters extract source facts; Rust owns format interpretation and grid
+validation. Known OpenSeadragon formats supply metadata. Custom OpenSeadragon
+sources and finite OpenLayers image grids use the Rust-defined
+`ViewerObservation` contract.
 
 The shared [tile session](src/job/viewers/session.ts) retains page loaders in
 closures behind document-bound capabilities. Addresses never fall through to

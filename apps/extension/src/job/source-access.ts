@@ -457,12 +457,11 @@ export function createSourceAccess(
     let observed: CandidateInput[] = [];
     let memory: CandidateSnapshot["memory"];
     try {
-      const deadlineAt = Math.min(scanDeadline, Date.now() + 1500);
       const reply = await inject(
         { files: ["/viewer-scanner.js"], world: "MAIN" },
         signal,
         undefined,
-        deadlineAt,
+        scanDeadline,
         frame,
       );
       ({ observed, memory } = memoryScanReply(reply));

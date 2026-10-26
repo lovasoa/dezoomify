@@ -135,6 +135,19 @@ function prepareViewer(mode) {
     if (mode === "large-dom") {
       appendLargeDom();
     }
+    configureReferenceLimit();
+  }
+  function configureReferenceLimit() {
+    if (mode === "large-properties") {
+      delete window.OpenSeadragon;
+      viewer.setMouseNavEnabled(false);
+      window.referenceFlood = Object.fromEntries(Array.from({ length: 20000 }, (_, i) => [i, i]));
+      window.referenceFlood.viewer = viewer;
+    }
+    if (mode === "large-registry") {
+      OpenSeadragon._viewers = new Map(Array.from({ length: 20000 }, (_, i) => [i, i]));
+      OpenSeadragon._viewers.set("late", viewer);
+    }
   }
   function appendLargeDom() {
     const fragment = document.createDocumentFragment();
@@ -171,7 +184,9 @@ for (const [name, engine] of [
   ["Chromium", chromium],
   ["Firefox", firefox],
 ]) {
-  test(`${name}: memory-only OpenSeadragon observations and probe restoration`, async () => {
+  test(`${name}: memory-only OpenSeadragon observations and probe restoration`, {
+    timeout: 120000,
+  }, async () => {
     const browser = await engine.launch({ headless: true });
     try {
       const version = "6.1.1";
@@ -186,6 +201,8 @@ for (const [name, engine] of [
         "blob-frame",
         "http-frame",
         "large-dom",
+        "large-properties",
+        "large-registry",
         "negative",
         "throwing-listener",
         "frozen-apply",
@@ -236,22 +253,9 @@ for (const [name, engine] of [
               throw new Error("memory only");
             };
           });
-          // Advance the clock during the large traversal so fast machines
-          // exercise the slice budget too; verify a queued task can run.
           const measured = await page.evaluate(`(async () => {
-              const now = Date.now;
-              const started = now();
-              const timeout = window.setTimeout;
-              let elapsed = 0, taskRan = false;
-              // Make broad reference traversal exhaust its budget deterministically.
-              // The targeted canvas probe must collect the image first.
-              // Freeze wall time so runner delays cannot consume the simulated budget.
-              if (${mode === "throwing-listener"})
-                Date.now = () => started + (elapsed += 0.1);
+              let taskRan = false;
               if (${mode === "large-dom"}) {
-                Date.now = () => started + (elapsed += 0.001);
-                window.setTimeout = (callback, delay = 0, ...args) =>
-                  timeout.call(window, callback, Math.max(1000, delay), ...args);
                 const channel = new MessageChannel();
                 channel.port1.onmessage = () => {
                   taskRan = true;
@@ -260,30 +264,31 @@ for (const [name, engine] of [
                 };
                 channel.port2.postMessage(null);
               }
-              try {
-                ${scannerScript}
-                const result = await ViewerScanner.scanViewers(Date.now() + 1500);
-                return { result, taskRan };
-              } finally {
-                Date.now = now;
-                window.setTimeout = timeout;
-              }
+              ${scannerScript}
+              const result = await ViewerScanner.scanViewers();
+              return { result, taskRan };
             })()`);
           const result = measured.result;
           if (mode === "http-frame") {
             assert.equal(result.diagnostics.documents, 1, "the parent scans only its document");
             const child = await scope.evaluate(`(async () => {
               ${scannerScript}
-              return ViewerScanner.scanViewers(Date.now() + 1500);
+              return ViewerScanner.scanViewers();
             })()`);
             assert.equal(child.inputs.length, 1, "the inventory can scan the HTTP child directly");
             assert.equal(child.diagnostics.documents, 1);
           }
           assert.equal(
             result.inputs.length,
-            ["http-frame", "negative", "frozen-apply", "private-disabled", "sparse-dzi"].includes(
-              mode,
-            )
+            [
+              "http-frame",
+              "negative",
+              "frozen-apply",
+              "private-disabled",
+              "sparse-dzi",
+              "large-properties",
+              "large-registry",
+            ].includes(mode)
               ? 0
               : 1,
             `${version}/${mode}: ${JSON.stringify(result.diagnostics)}`,
@@ -313,8 +318,10 @@ for (const [name, engine] of [
             hooked: window.hookDuringTask ?? false,
           }));
           assert.equal(tasks.hooked, false, "the prototype hook never survives into another task");
-          if (mode === "throwing-listener")
-            assert.ok(result.diagnostics.stopped.includes("time-budget"));
+          if (["large-properties", "large-registry"].includes(mode)) {
+            assert.equal(result.diagnostics.truncated, true);
+            assert.ok(result.diagnostics.stopped.includes("reference-limit"));
+          }
           if (mode === "large-dom") {
             assert.ok(measured.taskRan, "large DOM scanning yields to page tasks");
             assert.equal(result.diagnostics.truncated, true);
@@ -325,12 +332,6 @@ for (const [name, engine] of [
             mode === "throwing-listener" ? ["fixture listener"] : [],
             `${version}/${mode}`,
           );
-          const expired = await page.evaluate(`(async () => {
-            ${scannerScript}
-            return ViewerScanner.scanViewers(Date.now() - 1);
-          })()`);
-          assert.equal(expired.inputs.length, 0);
-          assert.equal(expired.diagnostics.truncated, true);
         } finally {
           await page.close();
         }

@@ -104,7 +104,7 @@ for (const [name, engine] of [
             await page.addScriptTag({ content: library });
             await page.evaluate(createViewer, fixture);
             await page.addScriptTag({ content: scanner });
-            const result = await page.evaluate(() => ViewerScanner.scanViewers(Date.now() + 1500));
+            const result = await page.evaluate(() => ViewerScanner.scanViewers());
             if (fixture.protocol === "wms") {
               assert.equal(result.inputs.length, 0, "geographic WMS has no finite image pyramid");
               continue;

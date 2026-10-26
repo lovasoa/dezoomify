@@ -16,12 +16,11 @@ export interface ViewerAdapter {
   anchors?(element: Element): (Element | null)[];
   roots?(root: PageObject): PageObject[];
   version?(root: PageObject): string | undefined;
-  registry?(object: PageObject, realm: PageRealm): Iterable<PageObject> | undefined;
+  registry?(object: PageObject, realm: PageRealm): Iterable<PageObject | undefined> | undefined;
   probe?(
     realm: PageRealm,
     elements: Element[],
     seen: Set<Element>,
     state: ScanState,
-    until: number,
   ): Promise<PageObject[]>;
 }
