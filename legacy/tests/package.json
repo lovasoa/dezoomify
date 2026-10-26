@@ -7,7 +7,7 @@
   },
   "scripts": {
     "test": "playwright test --reporter=dot",
-    "test:node-cli": "node node-cli-smoke.js",
+    "test:node-cli": "node node-cli-downloads.js",
     "test:live": "playwright test --config live-playwright.config.js --reporter=dot"
   },
   "author": "",
