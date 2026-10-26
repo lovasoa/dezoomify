@@ -20,7 +20,11 @@ function element(dimensions = {}) {
 
 function doc() {
   const ids = {
-    "canvas-wrapper": element({ clientWidth: 800, clientHeight: 600 }),
+    "canvas-wrapper": element({
+      clientWidth: 800,
+      clientHeight: 600,
+      getBoundingClientRect: () => ({ left: 100, top: 200, width: 800, height: 600 }),
+    }),
     "rendering-canvas": element({ width: 1600, height: 1200 }),
     "preview-zoom-in": element(),
     "preview-zoom-out": element(),
@@ -57,6 +61,56 @@ test("zoom stays between fit and the image's natural scale", () => {
   assert.equal(preview.getTransform().scale, 1);
   preview.zoomBy(0.01, d);
   assert.equal(preview.getTransform().scale, 0.03);
+});
+
+test("wheel zoom follows the pointer after panning; toolbar zoom uses the viewport center", () => {
+  const d = doc();
+  const preview = createPreviewControls();
+  preview.initControls(d);
+  const wrapper = d.ids["canvas-wrapper"];
+  wrapper.fire("wheel", { deltaY: -100, clientX: 700, clientY: 350 });
+  assert.deepEqual(preview.getTransform(), { scale: 0.625, tx: -50, ty: 37.5 });
+
+  const canvas = d.ids["rendering-canvas"];
+  canvas.fire("pointerdown", { clientX: 700, clientY: 350, pointerId: 1 });
+  canvas.fire("pointermove", { clientX: 740, clientY: 370 });
+  canvas.fire("pointerup", {});
+  wrapper.fire("wheel", { deltaY: -100, clientX: 400, clientY: 550, ctrlKey: true });
+  assert.deepEqual(preview.getTransform(), { scale: 0.78125, tx: 12.5, ty: 59.375 });
+
+  wrapper.fire("wheel", { deltaY: 100, clientX: 400, clientY: 550, ctrlKey: true });
+  assert.deepEqual(preview.getTransform(), { scale: 0.625, tx: -10, ty: 57.5 });
+
+  d.ids["preview-zoom-in"].fire("click");
+  assert.deepEqual(preview.getTransform(), { scale: 0.78125, tx: -12.5, ty: 71.875 });
+});
+
+test("pointer zoom uses the bounded scale and recenters at fit", () => {
+  const d = doc();
+  const preview = createPreviewControls();
+  preview.initControls(d);
+  preview.setScale(0.9, d);
+  const wrapper = d.ids["canvas-wrapper"];
+  const pointer = { clientX: 725, clientY: 635 };
+  wrapper.fire("wheel", { deltaY: -100, ...pointer });
+  assert.deepEqual(preview.getTransform(), { scale: 1, tx: -25, ty: -15 });
+  wrapper.fire("wheel", { deltaY: -100, ...pointer });
+  assert.deepEqual(preview.getTransform(), { scale: 1, tx: -25, ty: -15 });
+
+  for (let i = 0; i < 4; i++) wrapper.fire("wheel", { deltaY: 100, ...pointer });
+  assert.deepEqual(preview.getTransform(), { scale: 0.5, tx: 0, ty: 0 });
+});
+
+test("pointer zoom keeps a letterboxed axis centered", () => {
+  const d = doc();
+  d.ids["rendering-canvas"].width = 400;
+  const preview = createPreviewControls();
+  preview.initControls(d);
+  d.ids["canvas-wrapper"].fire("wheel", { deltaY: -100, clientX: 600, clientY: 350 });
+  const { scale, tx, ty } = preview.getTransform();
+  assert.equal(scale, 0.625);
+  assert.equal(Math.abs(tx), 0);
+  assert.equal(ty, 37.5);
 });
 
 test("controls wire buttons, wheel, and bounded drag without pixel reads", () => {
