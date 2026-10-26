@@ -211,7 +211,11 @@ importers:
 
   packages/wasm-bindings: {}
 
-  packages/wasm-harness: {}
+  packages/wasm-harness:
+    devDependencies:
+      '@dezoomify/browser-runtime':
+        specifier: workspace:*
+        version: link:../browser-runtime
 
 packages:
 

@@ -15,7 +15,8 @@ pub(super) const ROUTE: DiscoveryRoute = viewer(url_matches(|uri| info(uri).is_s
     });
 
 static ARK_PATH: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^/ark:/(\w+/\w+)(?:/(f\w+))?").expect("constant Gallica ARK pattern")
+    Regex::new(r"^/(?:view3if/\w+/)?ark:/(\w+/\w+)(?:/(f\d+))?")
+        .expect("constant Gallica ARK pattern")
 });
 
 fn info(uri: &str) -> Option<Request> {

@@ -13,8 +13,8 @@ use crate::core::discovery::{
 use crate::core::{
     AdaptiveSource, CatalogPlan, DeferredResource, DiscoveryCatalog, DiscoveryError,
     DiscoveryResource, DiscoveryRoute, FormatSpec, Grid, GridRequests, GridTile, ImagePlan,
-    ObservationResult, ParsedResource, Request, ResolvedGrid, ResolvedLevel, TileRole, TileSpec,
-    resolve_relative,
+    ObservationResult, ParsedResource, Request, ResolvedGrid, ResolvedLevel, TileRole, TileSource,
+    TileSpec, resolve_relative,
 };
 use crate::iiif::tile_info::TileSizeFormat;
 use crate::json_utils::all_json;
@@ -112,7 +112,14 @@ impl Metadata for Document {
 fn embedded_metadata(
     resource: DiscoveryResource<'_>,
 ) -> Option<Result<ParsedResource, DiscoveryError>> {
-    let mut infos = all_json::<ImageInfo>(resource.bytes())
+    // A JSON document must decode as a whole. Scanning its children after a
+    // schema failure would discard the distinction between a painting image,
+    // its canvas and its service (and hide the original metadata error).
+    if serde_json::from_slice::<serde::de::IgnoredAny>(resource.bytes()).is_ok() {
+        return None;
+    }
+    let mut infos = crate::web_page::script_bodies(resource)
+        .flat_map(all_json::<ImageInfo>)
         .filter(ImageInfo::has_distinctive_iiif_properties)
         .peekable();
     infos.peek()?;
@@ -298,7 +305,7 @@ fn catalog(uri: &str, contents: &[u8]) -> Result<DiscoveryCatalog, DiscoveryErro
             {
                 Document::Image(Box::new(info)).decode(resource)
             } else {
-                embedded_metadata(resource).unwrap_or_else(|| Err(IIIFError::from(error).into()))
+                Err(IIIFError::from(error).into())
             }
         }
     }?;
@@ -445,27 +452,8 @@ fn catalog_from_levels(mut levels: Vec<ResolvedLevel>) -> Result<DiscoveryCatalo
 }
 
 #[cfg(test)]
-fn levels(url: &str, raw_info: &[u8]) -> Result<Vec<ResolvedLevel>, IIIFError> {
-    match serde_json::from_slice(raw_info) {
-        Ok(info) => levels_from_info(url, info),
-        Err(e) => {
-            // Due to the very fault-tolerant way we parse iiif manifests, a single javascript
-            // object with a 'width' and a 'height' field is enough to be detected as an IIIF level
-            // See https://github.com/lovasoa/dezoomify-rs/issues/80
-            let levels: Vec<ResolvedLevel> = all_json::<ImageInfo>(raw_info)
-                .filter(ImageInfo::has_distinctive_iiif_properties)
-                .map(|info| levels_from_info(url, info))
-                .collect::<Result<Vec<_>, _>>()?
-                .into_iter()
-                .flatten()
-                .collect();
-            if levels.is_empty() {
-                Err(e.into())
-            } else {
-                Ok(levels)
-            }
-        }
-    }
+fn levels(url: &str, raw_info: &[u8]) -> Result<Vec<ResolvedLevel>, DiscoveryError> {
+    Ok(crate::test_support::ready_image(catalog(url, raw_info)?).levels)
 }
 
 fn levels_from_info(url: &str, mut image_info: ImageInfo) -> Result<Vec<ResolvedLevel>, IIIFError> {
@@ -538,11 +526,15 @@ fn levels_from_info(url: &str, mut image_info: ImageInfo) -> Result<Vec<Resolved
                 .map_err(|error| IIIFError::GeometryError {
                     description: error.to_string(),
                 })?;
-                let adaptive = AdaptiveSource::Iiif(IiifProbe {
-                    declared: source,
-                    requests,
-                });
-                Ok(ResolvedLevel::new(adaptive)
+                let source = if requests.use_size_upscaling {
+                    TileSource::Adaptive(AdaptiveSource::IiifUpscaling(IiifUpscalingProbe {
+                        declared: source,
+                        requests,
+                    }))
+                } else {
+                    TileSource::Grid(source)
+                };
+                Ok(ResolvedLevel::new(source)
                     .with_title(Some(format!("IIIF level {tile_ordinal}")))
                     .with_scale_factor(Some(scale_factor))
                     .with_warnings(warnings.clone()))
@@ -608,25 +600,23 @@ impl GridRequests for IIIFLevel {
     }
 }
 
+/// Full-resolution IIIF 3 size-upscaling compatibility only: some services
+/// require a caret-prefixed width instead of the ordinary width/height form.
+/// Other IIIF levels have metadata-defined geometry and need no serial probe.
 #[derive(Clone, Debug)]
-pub struct IiifProbe {
+pub struct IiifUpscalingProbe {
     pub(crate) declared: Grid,
     requests: IIIFLevel,
 }
 
-impl IiifProbe {
+impl IiifUpscalingProbe {
     #[allow(clippy::result_large_err)]
     pub(crate) async fn resolve(
         self,
         host: &impl crate::Host,
         mut remaining_probes: u32,
     ) -> Result<Option<ResolvedGrid>, crate::model::Error> {
-        let tries = if self.requests.use_size_upscaling {
-            2
-        } else {
-            1
-        };
-        for attempt in 0..tries {
+        for attempt in 0..2 {
             let mut requests = self.requests.clone();
             requests.force_width_only = attempt > 0;
             let tile = Grid::new(
@@ -824,7 +814,7 @@ fn tile_paths_follow_the_iiif_image_identifier() {
         (
             // A missing identifier falls back to the request URL.
             "http://test.com/info.json",
-            br#"{"width": 600, "height": 350}"#,
+            br#"{"type": "ImageService3", "width": 600, "height": 350}"#,
             "http://test.com/0,0,512,350/512,350/0/default.jpg,http://test.com/512,0,88,350/88,350/0/default.jpg",
         ),
         (
@@ -936,10 +926,9 @@ fn discovery_requests_metadata_then_returns_normalized_replayable_levels() {
         .collect();
     assert!(areas.windows(2).all(|pair| pair[0] <= pair[1]));
     let level = level_with_scale(&image.levels, 1);
-    let crate::core::TileSource::Adaptive(source) = &level.source else {
-        panic!("IIIF tile geometry is adaptive");
+    let TileSource::Grid(plan) = &level.source else {
+        panic!("ordinary IIIF geometry must not require probing");
     };
-    let plan = source.declared_grid().expect("declared IIIF grid");
     let first = plan.tiles_row_major().next().unwrap().unwrap();
     assert_eq!(
         (first.ordinal, first.request.header("Referer")),
