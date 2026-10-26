@@ -1,0 +1,7 @@
+{
+  "@context": "http://library.stanford.edu/iiif/image-api/1.1/context.json",
+  "@id": "{{origin}}/fixtures/iiif/approximate-gallica",
+  "profile": "http://library.stanford.edu/iiif/image-api/1.1/compliance.html#level2",
+  "width": 512,
+  "height": 512
+}

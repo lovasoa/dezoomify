@@ -1,0 +1,18 @@
+{
+  "@context": "http://iiif.io/api/presentation/2/context.json",
+  "@type": "sc:Manifest",
+  "label": "Map",
+  "metadata": [{"label": "Format", "value": [{"@value": "Map on paper"}, {"@value": "image/jpeg"}]}],
+  "sequences": [{"@type": "sc:Sequence", "canvases": [{
+    "@type": "sc:Canvas", "label": "Page 1", "width": 512, "height": 512,
+    "images": [{"@type": "oa:Annotation", "motivation": "sc:painting", "resource": {
+      "@type": "dctypes:Image", "format": "image/jpeg", "width": 512, "height": 512,
+      "@id": "{{origin}}/fixtures/iiif/approximate-gallica/full/full/0/native.jpg",
+      "service": {
+        "@id": "{{origin}}/fixtures/iiif/approximate-gallica",
+        "@context": "http://iiif.io/api/image/1/context.json",
+        "profile": "http://library.stanford.edu/iiif/image-api/1.1/compliance.html#level2"
+      }
+    }}]
+  }]}]
+}

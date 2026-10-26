@@ -117,6 +117,14 @@ fn gallica_viewers_resolve_the_selected_page_without_fetching_html() {
             "https://gallica.bnf.fr/ark:/12148/btv1b530411200/f12.item.zoom?lang=FR#viewer",
             "https://gallica.bnf.fr/iiif/ark:/12148/btv1b530411200/f12",
         ),
+        (
+            "https://gallica.bnf.fr/view3if/ga/ark:/12148/btv1b52504834s",
+            "https://gallica.bnf.fr/iiif/ark:/12148/btv1b52504834s/f1",
+        ),
+        (
+            "https://gallica.bnf.fr/view3if/ga/ark:/12148/btv1b52504834s/f12?lang=FR#viewer",
+            "https://gallica.bnf.fr/iiif/ark:/12148/btv1b52504834s/f12",
+        ),
     ] {
         let info_url = format!("{service}/info.json");
         let metadata = serde_json::json!({
@@ -152,5 +160,47 @@ fn gallica_viewers_resolve_the_selected_page_without_fetching_html() {
             assert_eq!(requests.len(), 1);
             assert_eq!(requests[0].uri, info_url);
         }
+    }
+}
+
+#[test]
+fn gallica_manifest_keeps_painting_urls_out_of_tile_service_plans() {
+    let manifest = include_str!("../../../fixtures/iiif/approximate-gallica/manifest.json")
+        .replace("{{origin}}", "https://library.test");
+    let (catalog, _) = support::discover_inputs(
+        default_registry(),
+        vec![DiscoveryInput::with_contents(
+            "https://library.test/manifest.json",
+            manifest,
+        )],
+        DiscoveryLimits::default(),
+        |_| None,
+    );
+    let catalog = catalog.unwrap();
+    let [dezoomify::core::DiscoveredEntry::Deferred(image)] = catalog.entries() else {
+        panic!("a painting image must defer to its service metadata");
+    };
+    assert_eq!(
+        image.uri,
+        "https://library.test/fixtures/iiif/approximate-gallica/info.json"
+    );
+    assert_eq!(image.title.as_deref(), Some("Map - Page 1"));
+}
+
+#[test]
+fn malformed_json_metadata_cannot_be_salvaged_as_nested_service_geometry() {
+    // Even genuine service geometry inside a broken manifest cannot replace
+    // the manifest. This applies to opaque URLs as well as declared metadata.
+    let manifest = br#"{"@type":"sc:Manifest","metadata":false,"sequences":[],
+        "thumbnail":{"type":"ImageService3","id":"https://images.test/thumbnail",
+                     "width":512,"height":512}}"#;
+    for uri in ["https://library.test/manifest.json", PAGE] {
+        let (catalog, _) = support::discover_inputs(
+            registry_for("iiif").unwrap(),
+            vec![DiscoveryInput::with_contents(uri, manifest.as_slice())],
+            DiscoveryLimits::default(),
+            |_| None,
+        );
+        assert!(catalog.is_err(), "{uri}");
     }
 }
