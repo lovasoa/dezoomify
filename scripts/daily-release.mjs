@@ -1,5 +1,5 @@
-// The release workflow serializes all refs. A published date is immutable:
-// reruns resume its store submissions, never build another commit under it.
+// The workflow serializes all refs and publishes only changed commits.
+// Published dates are immutable; retry failed jobs to resume a partial release.
 import { appendFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 import { githubApi } from "./store-release.mjs";
@@ -13,19 +13,19 @@ async function findRelease(api, path) {
   }
 }
 
-export async function prepareRelease(api, version, commit) {
+export async function shouldRelease(api, version, commit) {
   const release = await findRelease(api, `releases/tags/${encodeURIComponent(version)}`);
   if (release?.draft || release?.prerelease)
     throw new Error(`Release ${version} is not published; reconcile it before retrying`);
-  if (release) return { version, build: false };
-  // A build frozen yesterday can finish after midnight. Reuse it rather than
-  // publishing a second release on the actual publication day.
+  if (release) return false;
+  // A build frozen yesterday can finish after midnight. Do not publish a
+  // second release on the actual publication day.
   const latest = await findRelease(api, "releases/latest");
   const [year, month, day] = version.split(".").map(Number);
   const date = new Date(Date.UTC(2000 + year, month - 1, day)).toISOString().slice(0, 10);
   if (latest && (latest.target_commitish === commit || latest.published_at?.startsWith(date)))
-    return { version: latest.tag_name, build: false };
-  return { version, build: true };
+    return false;
+  return true;
 }
 
 async function main() {
@@ -38,9 +38,9 @@ async function main() {
   } = process.env;
   if (!repository || !token || !version || !commit || !output)
     throw new Error("Missing release workflow environment");
-  const release = await prepareRelease(githubApi({ repository, token }), version, commit);
-  await appendFile(output, `version=${release.version}\nbuild=${release.build}\n`);
-  console.log(`${release.build ? "Build" : "Reuse published release"} ${release.version}`);
+  const build = await shouldRelease(githubApi({ repository, token }), version, commit);
+  await appendFile(output, `version=${version}\nbuild=${build}\n`);
+  console.log(build ? `Build ${version}` : "No new release needed; stopping");
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

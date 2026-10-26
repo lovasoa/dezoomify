@@ -7,9 +7,10 @@ existing version. Source URLs must not enter monitoring.
 
 The [release workflow](../.github/workflows/release.yml) publishes desktop, CLI
 and extensions together, at most once per UTC date. Versions and tags use
-`YY.M.D` without leading zeroes. A delayed schedule is still valid; reruns reuse
-the published artifacts and skip stores that already accepted that version.
-Unchanged source commits reuse the last release rather than publishing a new date.
+`YY.M.D` without leading zeroes. A delayed schedule is still valid. Unchanged
+source commits and already-published dates stop before builds or store jobs.
+Retry failed jobs to resume a partial publication using its frozen artifacts;
+stores that already accepted that version are not submitted again.
 Manual dispatch publishes the selected branch after its exact commit passes CI.
 Store acceptance does not mean review has completed. Uncertain submissions and
 incomplete draft releases require reconciliation before retrying.

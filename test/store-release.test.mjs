@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
-import { prepareRelease } from "../scripts/daily-release.mjs";
+import { shouldRelease } from "../scripts/daily-release.mjs";
 import {
   downloadAsset,
   freezeRelease,
@@ -202,19 +202,16 @@ test("tampered ZIPs and mismatched manifest versions fail before contacting a st
   assert.equal(s.records.length, 0);
 });
 
-test("a published date is reused; drafts and failed lookups never authorize a rebuild", async () => {
+test("published dates stop early; drafts and failed lookups never authorize a rebuild", async () => {
   const api = githubApi({
     repository: "owner/repo",
     token: "fixture",
     fetcher: async () => json({}, 404),
   });
-  assert.deepEqual(await prepareRelease(api, version, commit), { version, build: true });
-  assert.deepEqual(await prepareRelease(async () => ({ draft: false }), version, commit), {
-    version,
-    build: false,
-  });
+  assert.equal(await shouldRelease(api, version, commit), true);
+  assert.equal(await shouldRelease(async () => ({ draft: false }), version, commit), false);
   await assert.rejects(
-    prepareRelease(async () => ({ draft: true }), version, commit),
+    shouldRelease(async () => ({ draft: true }), version, commit),
     /reconcile/,
   );
   const forbidden = githubApi({
@@ -222,7 +219,7 @@ test("a published date is reused; drafts and failed lookups never authorize a re
     token: "fixture",
     fetcher: async () => json({}, 403),
   });
-  await assert.rejects(prepareRelease(forbidden, version, commit), /HTTP 403/);
+  await assert.rejects(shouldRelease(forbidden, version, commit), /HTTP 403/);
 });
 
 test("a release that finished after midnight prevents a second publication that day", async () => {
@@ -234,13 +231,10 @@ test("a release that finished after midnight prevents a second publication that 
         ? json({ tag_name: "26.10.25", published_at: "2026-10-26T00:02:00Z" })
         : json({}, 404),
   });
-  assert.deepEqual(await prepareRelease(api, version, commit), {
-    version: "26.10.25",
-    build: false,
-  });
+  assert.equal(await shouldRelease(api, version, commit), false);
 });
 
-test("unchanged days reuse the last release; a changed commit gets the next date version", async () => {
+test("unchanged days do nothing; the next changed commit can be released", async () => {
   const api = githubApi({
     repository: "owner/repo",
     token: "fixture",
@@ -254,15 +248,9 @@ test("unchanged days reuse the last release; a changed commit gets the next date
         : json({}, 404),
   });
   for (const date of ["26.10.26", "26.10.27", "26.10.28"]) {
-    assert.deepEqual(await prepareRelease(api, date, commit), {
-      version: "26.10.25",
-      build: false,
-    });
+    assert.equal(await shouldRelease(api, date, commit), false);
   }
-  assert.deepEqual(await prepareRelease(api, "26.10.29", "b".repeat(40)), {
-    version: "26.10.29",
-    build: true,
-  });
+  assert.equal(await shouldRelease(api, "26.10.29", "b".repeat(40)), true);
 });
 
 test("neither store records acceptance of another version", async () => {

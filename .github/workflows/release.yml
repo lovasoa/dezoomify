@@ -26,7 +26,7 @@ jobs:
           fetch-depth: 0
       - uses: ./.github/actions/setup-pnpm
       - uses: ./.github/actions/setup-build
-      - name: Freeze the UTC date and reuse any published release
+      - name: Freeze the UTC date and stop if there is nothing to release
         id: daily
         env:
           GH_TOKEN: ${{ github.token }}
@@ -178,7 +178,6 @@ jobs:
 
   stores:
     needs: [prepare, publish]
-    if: always() && !cancelled() && needs.prepare.result == 'success' && (needs.publish.result == 'success' || needs.prepare.outputs.build == 'false')
     runs-on: ubuntu-latest
     environment: store-submit
     timeout-minutes: 30
