@@ -9,6 +9,7 @@ The [release workflow](../.github/workflows/release.yml) publishes desktop, CLI
 and extensions together, at most once per UTC date. Versions and tags use
 `YY.M.D` without leading zeroes. A delayed schedule is still valid; reruns reuse
 the published artifacts and skip stores that already accepted that version.
+Unchanged source commits reuse the last release rather than publishing a new date.
 Manual dispatch publishes the selected branch after its exact commit passes CI.
 Store acceptance does not mean review has completed. Uncertain submissions and
 incomplete draft releases require reconciliation before retrying.

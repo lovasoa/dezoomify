@@ -13,7 +13,7 @@ async function findRelease(api, path) {
   }
 }
 
-export async function prepareRelease(api, version) {
+export async function prepareRelease(api, version, commit) {
   const release = await findRelease(api, `releases/tags/${encodeURIComponent(version)}`);
   if (release?.draft || release?.prerelease)
     throw new Error(`Release ${version} is not published; reconcile it before retrying`);
@@ -23,7 +23,8 @@ export async function prepareRelease(api, version) {
   const latest = await findRelease(api, "releases/latest");
   const [year, month, day] = version.split(".").map(Number);
   const date = new Date(Date.UTC(2000 + year, month - 1, day)).toISOString().slice(0, 10);
-  if (latest?.published_at?.startsWith(date)) return { version: latest.tag_name, build: false };
+  if (latest && (latest.target_commitish === commit || latest.published_at?.startsWith(date)))
+    return { version: latest.tag_name, build: false };
   return { version, build: true };
 }
 
@@ -32,11 +33,12 @@ async function main() {
     GITHUB_REPOSITORY: repository,
     GH_TOKEN: token,
     DEZOOMIFY_VERSION: version,
+    GITHUB_SHA: commit,
     GITHUB_OUTPUT: output,
   } = process.env;
-  if (!repository || !token || !version || !output)
+  if (!repository || !token || !version || !commit || !output)
     throw new Error("Missing release workflow environment");
-  const release = await prepareRelease(githubApi({ repository, token }), version);
+  const release = await prepareRelease(githubApi({ repository, token }), version, commit);
   await appendFile(output, `version=${release.version}\nbuild=${release.build}\n`);
   console.log(`${release.build ? "Build" : "Reuse published release"} ${release.version}`);
 }

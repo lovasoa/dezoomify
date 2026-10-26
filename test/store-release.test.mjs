@@ -16,6 +16,7 @@ const zip = Buffer.from(
   "base64",
 );
 const version = "26.10.26";
+const commit = "a".repeat(40);
 const digest = `sha256:${createHash("sha256").update(zip).digest("hex")}`;
 const env = Object.fromEntries(
   [
@@ -111,7 +112,7 @@ async function scenario(browser = "chromium") {
     [`/repos/owner/repo/git/ref/tags/${version}`]: {
       object: { type: "tag", sha: "annotated" },
     },
-    "/repos/owner/repo/git/tags/annotated": { object: { type: "commit", sha: "a".repeat(40) } },
+    "/repos/owner/repo/git/tags/annotated": { object: { type: "commit", sha: commit } },
   };
   const fetcher = async (url, options = {}) => {
     const path = new URL(url).pathname;
@@ -207,13 +208,13 @@ test("a published date is reused; drafts and failed lookups never authorize a re
     token: "fixture",
     fetcher: async () => json({}, 404),
   });
-  assert.deepEqual(await prepareRelease(api, version), { version, build: true });
-  assert.deepEqual(await prepareRelease(async () => ({ draft: false }), version), {
+  assert.deepEqual(await prepareRelease(api, version, commit), { version, build: true });
+  assert.deepEqual(await prepareRelease(async () => ({ draft: false }), version, commit), {
     version,
     build: false,
   });
   await assert.rejects(
-    prepareRelease(async () => ({ draft: true }), version),
+    prepareRelease(async () => ({ draft: true }), version, commit),
     /reconcile/,
   );
   const forbidden = githubApi({
@@ -221,7 +222,7 @@ test("a published date is reused; drafts and failed lookups never authorize a re
     token: "fixture",
     fetcher: async () => json({}, 403),
   });
-  await assert.rejects(prepareRelease(forbidden, version), /HTTP 403/);
+  await assert.rejects(prepareRelease(forbidden, version, commit), /HTTP 403/);
 });
 
 test("a release that finished after midnight prevents a second publication that day", async () => {
@@ -233,7 +234,35 @@ test("a release that finished after midnight prevents a second publication that 
         ? json({ tag_name: "26.10.25", published_at: "2026-10-26T00:02:00Z" })
         : json({}, 404),
   });
-  assert.deepEqual(await prepareRelease(api, version), { version: "26.10.25", build: false });
+  assert.deepEqual(await prepareRelease(api, version, commit), {
+    version: "26.10.25",
+    build: false,
+  });
+});
+
+test("unchanged days reuse the last release; a changed commit gets the next date version", async () => {
+  const api = githubApi({
+    repository: "owner/repo",
+    token: "fixture",
+    fetcher: async (url) =>
+      url.endsWith("/releases/latest")
+        ? json({
+            tag_name: "26.10.25",
+            target_commitish: commit,
+            published_at: "2026-10-25T03:00:00Z",
+          })
+        : json({}, 404),
+  });
+  for (const date of ["26.10.26", "26.10.27", "26.10.28"]) {
+    assert.deepEqual(await prepareRelease(api, date, commit), {
+      version: "26.10.25",
+      build: false,
+    });
+  }
+  assert.deepEqual(await prepareRelease(api, "26.10.29", "b".repeat(40)), {
+    version: "26.10.29",
+    build: true,
+  });
 });
 
 test("neither store records acceptance of another version", async () => {
