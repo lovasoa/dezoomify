@@ -1,70 +1,61 @@
 name: release
 
 on:
-  workflow_run:
-    workflows: [ci]
-    types: [completed]
-  workflow_dispatch:
-    inputs:
-      ref:
-        description: Numbered vX.Y.Z tag
-        required: true
-        type: string
+  schedule:
+    - cron: '30 2 * * *'
+  # Dispatching a reviewed branch is also the production publication E2E.
+  workflow_dispatch: {}
 
 permissions:
   actions: read
   contents: read
 
 concurrency:
-  group: release-${{ github.event_name == 'workflow_run' && 'rolling' || inputs.ref }}
+  group: release
   cancel-in-progress: false
-
-env:
-  SOURCE_REF: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || inputs.ref }}
 
 jobs:
   prepare:
-    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.event == 'push' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-latest
     outputs:
-      version: ${{ steps.plan.outputs.version }}
-      commit: ${{ steps.plan.outputs.commit }}
-      release_tag: ${{ steps.plan.outputs.release_tag }}
+      version: ${{ steps.daily.outputs.version }}
+      build: ${{ steps.daily.outputs.build }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ env.SOURCE_REF }}
           fetch-depth: 0
+      - uses: ./.github/actions/setup-pnpm
       - uses: ./.github/actions/setup-build
-      - name: Require green CI for a numbered release
-        if: github.event_name == 'workflow_dispatch'
+      - name: Freeze the UTC date and stop if there is nothing to release
+        id: daily
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          export DEZOOMIFY_VERSION="$(cargo xtask release version)"
+          node scripts/daily-release.mjs
+      - name: Require green CI for the exact source commit
+        if: steps.daily.outputs.build == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           sha="$(git rev-parse HEAD)"
-          test -n "$(gh run list --workflow ci.yml --branch main --event push --commit "$sha" --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
+          test -n "$(gh run list --workflow ci.yml --commit "$sha" --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
       - name: Freeze plan
-        id: plan
+        if: steps.daily.outputs.build == 'true'
         env:
-          NUMBERED_REF: ${{ inputs.ref }}
+          DEZOOMIFY_VERSION: ${{ steps.daily.outputs.version }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            cargo xtask release plan --numbered
-          else
-            cargo xtask release plan
-          fi
-          plans=(target/release-dist/*/plan.json)
-          test "${#plans[@]}" = 1
-          plan="${plans[0]}"
-          test -z "$NUMBERED_REF" || test "$NUMBERED_REF" = "$(jq -r .tag "$plan")"
-          jq -r '"version=\(.version)\ncommit=\(.commit)\nrelease_tag=\(.tag)"' "$plan" >> "$GITHUB_OUTPUT"
+          rm -rf target/release-dist
+          cargo xtask release plan
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: steps.daily.outputs.build == 'true'
         with:
           name: release-plan
           path: target/release-dist
 
   build:
     needs: prepare
+    if: needs.prepare.outputs.build == 'true'
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -91,7 +82,6 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.prepare.outputs.commit }}
           fetch-depth: 0
       - uses: ./.github/actions/setup-pnpm
         with:
@@ -115,7 +105,10 @@ jobs:
       - name: Download plan
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh run download "${{ github.run_id }}" -n release-plan -D target/release-dist
+        shell: bash
+        run: |
+          rm -rf target/release-dist
+          gh run download "${{ github.run_id }}" -n release-plan -D target/release-dist
       - name: Linux desktop release gate
         if: matrix.target == 'desktop-linux-x86_64'
         env:
@@ -154,14 +147,16 @@ jobs:
           name: release-${{ matrix.target }}
           path: target/release-dist
 
-  verify:
+  publish:
     needs: [prepare, build]
     runs-on: ubuntu-latest
-    environment: release-signing
+    environment: release-publish
+    permissions:
+      actions: read
+      contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.prepare.outputs.commit }}
           fetch-depth: 0
       - uses: ./.github/actions/setup-build
       - name: Reassemble artifacts
@@ -174,38 +169,37 @@ jobs:
           for name in release-plan release-cli-linux-x86_64 release-desktop-linux-x86_64 release-desktop-windows-x86_64 release-desktop-macos-aarch64 release-extension-chromium release-extension-firefox; do
             gh run download "${{ github.run_id }}" -n "$name" -D target/release-dist
           done
-      - name: Verify release artifacts
+      - name: Verify and publish the daily release
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           v="${{ needs.prepare.outputs.version }}"
-          cargo xtask release verify --plan "target/release-dist/$v/plan.json" --artifacts "target/release-dist/$v"
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: release-verified
-          path: target/release-dist
+          cargo xtask release publish --plan "target/release-dist/$v/plan.json" --artifacts "target/release-dist/$v"
 
-  publish:
-    needs: [prepare, verify]
+  stores:
+    needs: [prepare, publish]
     runs-on: ubuntu-latest
-    environment: release-publish
+    environment: store-submit
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox]
     permissions:
-      actions: read
-      contents: write
+      contents: read
+      deployments: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ needs.prepare.outputs.commit }}
-          fetch-depth: 0
-      - uses: ./.github/actions/setup-build
-      - name: Download verified artifacts
+      - uses: ./.github/actions/setup-pnpm
+      - name: Submit the published ZIP and confirm store acceptance
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          mkdir -p target/release-dist
-          gh run download "${{ github.run_id }}" -n release-verified -D target/release-dist
-      - name: Verify and publish
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          v="${{ needs.prepare.outputs.version }}"
-          cargo xtask release verify --plan "target/release-dist/$v/plan.json" --artifacts "target/release-dist/$v"
-          cargo xtask release publish --plan "target/release-dist/$v/plan.json" --artifacts "target/release-dist/$v"
+          BROWSER: ${{ matrix.browser }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.version }}
+          CHROME_WS_PUBLISHER_ID: ${{ vars.CHROME_WS_PUBLISHER_ID }}
+          CHROME_WS_CLIENT_ID: ${{ secrets.CHROME_WS_CLIENT_ID }}
+          CHROME_WS_CLIENT_SECRET: ${{ secrets.CHROME_WS_CLIENT_SECRET }}
+          CHROME_WS_REFRESH_TOKEN: ${{ secrets.CHROME_WS_REFRESH_TOKEN }}
+          AMO_JWT_ISSUER: ${{ secrets.AMO_JWT_ISSUER }}
+          AMO_JWT_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+        run: node scripts/store-release.mjs submit

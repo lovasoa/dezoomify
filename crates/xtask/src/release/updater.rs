@@ -129,11 +129,11 @@ mod tests {
     const SIGNATURE: &str = "untrusted comment: signature from minisign secret key\nRUQf6LRCGA9i559r3g7V1qNyJDApGip8MfqcadIgT9CuhV3EMhHoN1mGTkUidF/z7SrlQgXdy8ofjb7bNJJylDOocrCo8KLzZwo=\ntrusted comment: timestamp:1556193335\tfile:test\ny/rUw2y8/hOUYjZU71eHp/Wo1KZ40fGy2VJEDl34XMJM+TX48Ss/17u3IvIfbVR1FkZZSNCisQbuQY+bHwhEBg==";
 
     #[test]
-    fn manifest_verifies_bundles_and_keeps_downloads_pinned_for_both_channels() {
+    fn manifest_verifies_bundles_and_keeps_downloads_pinned_to_the_release() {
         let root = temp_root("updater");
         let key = PublicKey::from_base64(KEY).unwrap();
         let signature = STANDARD.encode(SIGNATURE);
-        let mut plan = plan_from_repo();
+        let plan = plan_from_repo();
         std::fs::write(root.join("notes.md"), "Release notes").unwrap();
         for target in &plan.targets {
             if let Some(name) = bundle_name(&target.name, &plan.version) {
@@ -143,33 +143,25 @@ mod tests {
                 std::fs::write(dir.join(format!("{name}.sig")), &signature).unwrap();
             }
         }
-        for channel in ["rolling", "stable"] {
-            plan.channel = channel.into();
-            plan.tag = format!(
-                "{}v{}",
-                if channel == "rolling" { "rolling-" } else { "" },
-                plan.version
-            );
-            let manifest = manifest_with_key(&plan, &root, &key).unwrap();
-            assert_eq!(manifest["version"], plan.version);
-            assert_eq!(manifest["notes"], "Release notes");
-            let platforms = manifest["platforms"].as_object().unwrap();
-            assert_eq!(assets(&plan, &root).len(), 3);
-            for (platform, target, extension) in [
-                ("linux-x86_64", "desktop-linux-x86_64", ".deb"),
-                ("windows-x86_64", "desktop-windows-x86_64", ".msi"),
-                ("darwin-aarch64", "desktop-macos-aarch64", ".app.tar.gz"),
-            ] {
-                let url = platforms[platform]["url"].as_str().unwrap();
-                assert!(url.contains(&format!("/releases/download/{}/", plan.tag)));
-                assert!(url.ends_with(extension));
-                assert_eq!(platforms[platform]["signature"], signature);
-                assert!(assets(&plan, &root).contains(
-                    &root
-                        .join(target)
-                        .join(bundle_name(target, &plan.version).unwrap())
-                ));
-            }
+        let manifest = manifest_with_key(&plan, &root, &key).unwrap();
+        assert_eq!(manifest["version"], plan.version);
+        assert_eq!(manifest["notes"], "Release notes");
+        let platforms = manifest["platforms"].as_object().unwrap();
+        assert_eq!(assets(&plan, &root).len(), 3);
+        for (platform, target, extension) in [
+            ("linux-x86_64", "desktop-linux-x86_64", ".deb"),
+            ("windows-x86_64", "desktop-windows-x86_64", ".msi"),
+            ("darwin-aarch64", "desktop-macos-aarch64", ".app.tar.gz"),
+        ] {
+            let url = platforms[platform]["url"].as_str().unwrap();
+            assert!(url.contains(&format!("/releases/download/{}/", plan.tag)));
+            assert!(url.ends_with(extension));
+            assert_eq!(platforms[platform]["signature"], signature);
+            assert!(assets(&plan, &root).contains(
+                &root
+                    .join(target)
+                    .join(bundle_name(target, &plan.version).unwrap())
+            ));
         }
         let bundle = root
             .join("desktop-linux-x86_64")
