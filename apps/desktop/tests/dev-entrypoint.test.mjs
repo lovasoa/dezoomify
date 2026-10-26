@@ -1,10 +1,5 @@
-// Development-surface smoke test: start the real Vite entrypoint and inspect
-// the module graph that the Tauri window loads from localhost:1420.
-//
-// This intentionally uses only Node's built-in test and fetch APIs. It is
-// fast enough for the default desktop lane, does not need a webview, and
-// catches startup/entrypoint/stylesheet regressions before a native window
-// is involved.
+// Verify the Vite entrypoint and stylesheets used by the Tauri window.
+// Runs without a webview to catch frontend startup regressions.
 
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
@@ -73,7 +68,7 @@ function stopFrontend(child) {
     return;
   }
   try {
-    // The detached process group includes pnpm and Vite, so the smoke test
+    // The detached process group includes pnpm and Vite, so the test
     // cannot leave a server behind for a later test or developer command.
     process.kill(-child.pid, "SIGTERM");
   } catch {
@@ -86,7 +81,7 @@ async function waitForExit(child, timeoutMs = 2000) {
   await Promise.race([new Promise((resolve) => child.once("exit", resolve)), delay(timeoutMs)]);
 }
 
-test("desktop dev server serves the real entrypoint and shared theme", {
+test("desktop dev server serves its entrypoint and stylesheets", {
   timeout: 30000,
 }, async () => {
   const { child, getStderr, getSpawnError } = startFrontend();

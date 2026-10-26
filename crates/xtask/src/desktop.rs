@@ -729,8 +729,8 @@ fn program_available(name: &str) -> bool {
     }
 }
 
-/// PATH for a child that may shell out to `pnpm` (for example the desktop dev
-/// smoke test). `None` keeps the inherited environment when a runnable pnpm
+/// PATH for a child that may shell out to `pnpm` (for example the desktop
+/// dev-server test). `None` keeps the inherited environment when a runnable pnpm
 /// already exists and no repo-local shim needs exposing.
 pub(crate) fn node_path() -> Result<Option<std::ffi::OsString>, String> {
     if program_available("pnpm") {

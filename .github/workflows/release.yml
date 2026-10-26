@@ -66,13 +66,13 @@ jobs:
             cache: cli-release
           - target: desktop-linux-x86_64
             runner: ubuntu-latest
-            cache: bundle-smoke
+            cache: desktop-bundle
           - target: desktop-windows-x86_64
             runner: windows-latest
-            cache: bundle-smoke
+            cache: desktop-bundle
           - target: desktop-macos-aarch64
             runner: macos-latest
-            cache: bundle-smoke
+            cache: desktop-bundle
           - target: extension-chromium
             runner: ubuntu-latest
             cache: web

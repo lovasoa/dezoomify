@@ -43,7 +43,7 @@ Native codec build tools are listed in [Development](../../docs/development.md).
 
 Icons derive from the root `favicon.svg` through the pinned Tauri CLI. Signing
 and user approval steps live in the [installation guide](desktop-app.md#install).
-Bundle smoke checks verify install/launch and macOS signatures; they do not
+Bundle installation checks verify startup and macOS signatures; they do not
 exercise Finder approval of a quarantined download. Check that on a clean Mac.
 
 The macOS section of the desktop guide generates the DMG background. Preserve
