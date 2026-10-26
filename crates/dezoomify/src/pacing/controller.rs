@@ -1,11 +1,10 @@
-use crate::model::Error;
+use crate::model::{Error, RequestPacing};
 use std::collections::VecDeque;
 
 const RAMP_INTERVAL_MS: u64 = 30_000;
 const FORBIDDEN_WINDOW_MS: u64 = 60_000;
 const QUICK_PROBE_MS: u64 = 1_000;
 const ESTABLISHED_SUCCESSES: u32 = 8;
-const MAX_RATE: f64 = 64.0;
 
 /// Start-or-wait decision for one tile; only `Ready` records an in-flight attempt.
 pub(super) enum Admission {
@@ -53,16 +52,12 @@ pub(super) struct Controller {
 }
 
 impl Controller {
-    /// Set the initial start gap in milliseconds; zero leaves requests unpaced
-    /// until throttling is observed.
-    pub(super) fn new(initial_interval_ms: u32) -> Self {
+    /// Accept validated pacing; absence leaves starts unpaced until throttling.
+    pub(super) fn new(pacing: Option<RequestPacing>) -> Self {
+        let (rate, ceiling) = pacing.map_or((0.0, 64.0), |p| (p.start_rps, p.max_rps));
         Self {
-            rate: if initial_interval_ms == 0 {
-                0.0
-            } else {
-                1000.0 / f64::from(initial_interval_ms)
-            },
-            ceiling: MAX_RATE,
+            rate,
+            ceiling,
             starts: VecDeque::new(),
             last_start: None,
             next_ramp: RAMP_INTERVAL_MS,
@@ -87,13 +82,10 @@ impl Controller {
         if self.blocked(tile) {
             return Admission::Blocked;
         }
-        let ready = self.recovery.as_ref().map_or_else(
-            || {
-                self.last_start
-                    .map_or(0, |last| last.saturating_add(self.interval_ms()))
-            },
-            |recovery| recovery.until,
-        );
+        let ready = self
+            .last_start
+            .map_or(0, |last| last.saturating_add(self.interval_ms()))
+            .max(self.recovery.as_ref().map_or(0, |recovery| recovery.until));
         if ready > now {
             return Admission::Wait((ready - now).min(u64::from(u32::MAX)) as u32);
         }
@@ -133,7 +125,8 @@ impl Controller {
             self.recovery = None;
             self.next_ramp = now.saturating_add(FORBIDDEN_WINDOW_MS);
         } else if self.rate > 0.0 && now >= self.next_ramp {
-            self.rate = (self.rate + 0.25).min(self.ceiling);
+            // Grow proportionally so higher configured ceilings remain useful.
+            self.rate = (self.rate * 1.25).min(self.ceiling);
             self.next_ramp = now.saturating_add(RAMP_INTERVAL_MS);
         }
     }
@@ -218,7 +211,7 @@ impl Controller {
         } else {
             self.rate.min(observed)
         };
-        self.rate = (current * 0.5).clamp(0.01, MAX_RATE);
+        self.rate = (current * 0.5).max(f64::MIN_POSITIVE).min(self.ceiling);
         self.ceiling = self.ceiling.min(current * 0.8).max(self.rate);
         self.next_ramp = now.saturating_add(FORBIDDEN_WINDOW_MS);
     }

@@ -194,7 +194,7 @@ async fn acquire_plan(
     options: &Options,
     progress: &mut Progress,
 ) -> Result<Vec<ReusedTile>, Error> {
-    let scheduler = crate::pacing::Scheduler::new(options.initial_tile_interval_ms);
+    let scheduler = crate::pacing::Scheduler::new(options.pacing);
     let AcquisitionPlan {
         source,
         previous,
@@ -548,6 +548,9 @@ fn validate(inputs: &[JobInput], options: &Options) -> Result<(), Error> {
         return Err(Error::InvalidInput("inputs require a user source and at most 256 valid URLs or local paths up to 2048 bytes"
                 .to_string()
                 .into()));
+    }
+    if let Some(pacing) = options.pacing {
+        pacing.validate()?;
     }
     if options.max_concurrent == 0 || options.max_tiles == 0 || options.max_bytes == 0 {
         return Err(Error::InvalidOptions(

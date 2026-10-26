@@ -1483,10 +1483,42 @@ pub struct FinishRequest {
     pub reused_tiles: Vec<ReusedTile>,
 }
 
+/// Adaptive tile-request starts per HTTP origin, shared across a job's levels.
+/// Rates must be finite and positive, with `start_rps <= max_rps`. Successful
+/// requests gradually increase the rate; throttling lowers it and may establish
+/// a lower learned ceiling. The configured maximum is never exceeded. Starts
+/// are spaced without burst credits, rounded up to whole milliseconds; actual
+/// throughput also depends on concurrency and the Host's fetch/decode work.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub struct RequestPacing {
+    pub start_rps: f64,
+    pub max_rps: f64,
+}
+
+impl RequestPacing {
+    /// Check configuration before any I/O; products may also use this at input time.
+    pub fn validate(&self) -> Result<(), Error> {
+        if !self.start_rps.is_finite()
+            || !self.max_rps.is_finite()
+            || self.start_rps <= 0.0
+            || self.max_rps <= 0.0
+            || self.start_rps > self.max_rps
+        {
+            return Err(Error::InvalidOptions(
+                "request pacing requires finite positive rates with start_rps <= max_rps"
+                    .to_string()
+                    .into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
 /// Core discovery/acquisition policy, validated by `dezoomify` before host I/O.
 /// Hosts separately enforce transport, decode, and output resource limits.
 /// Omitted serialized fields use core defaults; out-of-range limits fail the job.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub struct Options {
@@ -1510,9 +1542,9 @@ pub struct Options {
     pub max_deferred_follows: u32,
     /// First retry's backoff in milliseconds; see `retry_delay_ms` for clamping.
     pub retry_base_delay_ms: u64,
-    /// Initial per-origin tile spacing. Zero leaves admission unpaced until
-    /// throttling is observed; a positive value enables adaptive pacing.
-    pub initial_tile_interval_ms: u32,
+    /// Per-origin tile pacing. Absent leaves starts unpaced until throttling is
+    /// observed; recovery then uses a learned ceiling of at most 64 requests/s.
+    pub pacing: Option<RequestPacing>,
 }
 
 impl Default for Options {
@@ -1527,7 +1559,7 @@ impl Default for Options {
             max_bytes: 67_108_864,
             max_deferred_follows: 8,
             retry_base_delay_ms: 1000,
-            initial_tile_interval_ms: 0,
+            pacing: None,
         }
     }
 }

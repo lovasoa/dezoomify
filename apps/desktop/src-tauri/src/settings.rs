@@ -2,9 +2,8 @@
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::time::Duration;
 
-use dezoomify::model::OutputPreference;
+use dezoomify::model::{OutputPreference, RequestPacing};
 use dezoomify_native::JobOptions;
 
 /// Default compression; JPEG quality is 100-5 = 95.
@@ -23,9 +22,19 @@ pub const MAX_HEADERS: usize = 32;
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum NetworkProfile {
     #[default]
-    Maximum,
-    Balanced,
+    Automatic,
+    Aggressive,
     Gentle,
+}
+
+impl NetworkProfile {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Automatic => "automatic",
+            Self::Aggressive => "aggressive",
+            Self::Gentle => "gentle",
+        }
+    }
 }
 
 /// Validated desktop settings. All bounds are enforced by
@@ -64,30 +73,34 @@ impl DesktopSettings {
             max_width: None,
             max_height: None,
             retries: DEFAULT_RETRIES,
-            network_profile: NetworkProfile::Maximum,
+            network_profile: NetworkProfile::Automatic,
             cache_dir: None,
             headers: BTreeMap::new(),
         }
     }
 }
 
-pub fn job_options_for(settings: &DesktopSettings) -> JobOptions {
-    let (max_concurrent, min_interval) = match settings.network_profile {
-        NetworkProfile::Maximum => (16, Duration::ZERO),
-        NetworkProfile::Balanced => (8, Duration::from_millis(200)),
-        NetworkProfile::Gentle => (4, Duration::from_millis(500)),
-    };
-    JobOptions {
+/// Resolve the desktop-owned preset manifest shared with the webview. Fails if
+/// the bundled manifest is invalid; callers must resolve this before registering a job.
+pub fn job_options_for(settings: &DesktopSettings) -> Result<JobOptions, String> {
+    let profiles: BTreeMap<String, RequestPacing> =
+        serde_json::from_str(include_str!("../../network-profiles.json"))
+            .map_err(|error| format!("invalid built-in network profiles: {error}"))?;
+    let pacing = profiles
+        .get(settings.network_profile.name())
+        .copied()
+        .ok_or_else(|| "missing built-in network profile".to_string())?;
+    pacing.validate().map_err(|error| error.to_string())?;
+    Ok(JobOptions {
         headers: settings.headers.clone(),
         max_width: settings.max_width,
         max_height: settings.max_height,
-        max_concurrent,
         max_retries: settings.retries,
-        min_interval,
+        pacing: Some(pacing),
         compression: settings.compression,
         cache_dir: settings.cache_dir.clone(),
         ..JobOptions::default()
-    }
+    })
 }
 
 fn validate_dir_field(raw: &str, field: &str) -> Result<Option<PathBuf>, String> {
@@ -332,12 +345,12 @@ pub fn parse_settings(value: &serde_json::Value) -> Result<DesktopSettings, Stri
         Some(v) => parse_retries_field(v)?,
     };
     let network_profile = match obj.get("network_profile") {
-        None => NetworkProfile::Maximum,
+        None => NetworkProfile::Automatic,
         Some(serde_json::Value::String(value)) => match value.as_str() {
-            "maximum" => NetworkProfile::Maximum,
-            "balanced" => NetworkProfile::Balanced,
+            "aggressive" | "maximum" => NetworkProfile::Aggressive,
+            "automatic" | "balanced" => NetworkProfile::Automatic,
             "gentle" => NetworkProfile::Gentle,
-            _ => return Err("network_profile must be maximum, balanced, or gentle".to_string()),
+            _ => return Err("network_profile must be gentle, automatic, or aggressive".to_string()),
         },
         Some(_) => return Err("network_profile must be a string".to_string()),
     };
@@ -379,6 +392,7 @@ pub fn parse_settings(value: &serde_json::Value) -> Result<DesktopSettings, Stri
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::time::Duration;
 
     #[test]
     fn defaults_match_cli() {
@@ -390,7 +404,7 @@ mod tests {
         assert_eq!(settings.retries, 3);
         assert_eq!(settings.max_width, None);
         assert_eq!(settings.max_height, None);
-        let options = job_options_for(&settings);
+        let options = job_options_for(&settings).unwrap();
         assert_eq!(options.compression, 5);
         assert_eq!(options.max_retries, 3);
         assert_eq!(options.max_concurrent, 16);
@@ -423,7 +437,7 @@ mod tests {
             settings.output_format.format(),
             Some(dezoomify::model::OutputFormat::Avif)
         );
-        assert_eq!(job_options_for(&settings).compression, 100);
+        assert_eq!(job_options_for(&settings).unwrap().compression, 100);
     }
 
     #[test]
@@ -442,16 +456,19 @@ mod tests {
     }
 
     #[test]
-    fn network_profiles_apply_real_pacing_and_concurrency() {
-        let balanced = parse_settings(&json!({"network_profile": "balanced"})).unwrap();
-        let balanced_options = job_options_for(&balanced);
-        assert_eq!(balanced_options.max_concurrent, 8);
-        assert_eq!(balanced_options.min_interval, Duration::from_millis(200));
-
-        let gentle = parse_settings(&json!({"network_profile": "gentle"})).unwrap();
-        let gentle_options = job_options_for(&gentle);
-        assert_eq!(gentle_options.max_concurrent, 4);
-        assert_eq!(gentle_options.min_interval, Duration::from_millis(500));
+    fn network_profiles_configure_core_pacing_without_changing_concurrency() {
+        for (name, start_rps, max_rps) in [
+            ("gentle", 2.0, 2.0),
+            ("automatic", 5.0, 16.0),
+            ("aggressive", 16.0, 128.0),
+            ("balanced", 5.0, 16.0),
+            ("maximum", 16.0, 128.0),
+        ] {
+            let settings = parse_settings(&json!({"network_profile": name})).unwrap();
+            let options = job_options_for(&settings).unwrap();
+            assert_eq!(options.max_concurrent, 16);
+            assert_eq!(options.pacing, Some(RequestPacing { start_rps, max_rps }));
+        }
         assert!(parse_settings(&json!({"network_profile": "unsafe"})).is_err());
     }
 

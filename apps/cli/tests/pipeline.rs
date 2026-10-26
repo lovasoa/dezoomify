@@ -130,6 +130,10 @@ fn flags_and_logging_reach_the_runtime() {
             "0",
             "--min-interval",
             "1ms",
+            "--start-rps",
+            "64.5",
+            "--max-rps",
+            "128",
         ],
     ];
     for (index, flags) in flags.iter().enumerate() {

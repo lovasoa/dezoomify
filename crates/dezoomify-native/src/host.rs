@@ -260,7 +260,6 @@ pub struct NativeHost<'a> {
     instrumentation: RefCell<Instrumentation>,
     inflight: Cell<usize>,
     decode_tails: Arc<DecodeTails>,
-    throttle: tokio::sync::Mutex<Option<Instant>>,
     clock_start: Instant,
     progress: RefCell<Box<dyn FnMut(Progress) + 'a>>,
     last_progress: RefCell<Progress>,
@@ -294,7 +293,7 @@ impl<'a> NativeHost<'a> {
             "format": options.format, "image_index": options.image_index, "zoom_level": options.zoom_level,
             "largest": options.largest, "max_width": options.max_width, "max_height": options.max_height,
             "parallelism": options.max_concurrent, "retries": options.max_retries,
-            "retry_delay_ms": options.retry_base_delay.as_millis(),
+            "retry_delay_ms": options.retry_base_delay.as_millis(), "pacing": options.pacing,
             "compression": options.compression, "header_names": options.headers.keys().collect::<Vec<_>>(),
             "credentials_present": !options.headers.is_empty(), "cache_enabled": true,
             "max_tiles": options.max_tiles, "max_bytes": options.max_bytes
@@ -337,7 +336,6 @@ impl<'a> NativeHost<'a> {
             instrumentation: RefCell::default(),
             inflight: Cell::new(0),
             decode_tails: Arc::default(),
-            throttle: tokio::sync::Mutex::new(None),
             clock_start: Instant::now(),
             progress: RefCell::new(Box::new(|_| {})),
             last_progress: RefCell::new(Progress::default()),
@@ -433,7 +431,7 @@ impl<'a> NativeHost<'a> {
             max_bytes: self.options.max_bytes,
             max_deferred_follows: 10,
             retry_base_delay_ms: self.options.retry_base_delay.as_millis().min(300_000) as u64,
-            initial_tile_interval_ms: 0,
+            pacing: self.options.pacing,
         }
     }
 
@@ -558,21 +556,6 @@ impl<'a> NativeHost<'a> {
                     .join(crate::cache::cache_key(&tile.request)),
             );
         }
-        if !self.options.min_interval.is_zero() {
-            let mut previous = self.throttle.lock().await;
-            if let Some(previous) = *previous {
-                let wait = (previous + self.options.min_interval)
-                    .saturating_duration_since(Instant::now());
-                if !wait.is_zero() {
-                    self.controlled(async {
-                        tokio::time::sleep(wait).await;
-                        Ok(())
-                    })
-                    .await?;
-                }
-            }
-            *previous = Some(Instant::now());
-        }
         let response = self.read(&tile.request).await?;
         self.decode(
             response.body,
@@ -633,19 +616,6 @@ impl<'a> NativeHost<'a> {
                 dir.join(&namespace)
                     .join(crate::cache::cache_key(&tile.request)),
             );
-        }
-        if !self.options.min_interval.is_zero() {
-            let mut previous = self.throttle.lock().await;
-            if let Some(previous) = *previous {
-                let wait = (previous + self.options.min_interval)
-                    .saturating_duration_since(Instant::now());
-                self.controlled(async {
-                    tokio::time::sleep(wait).await;
-                    Ok(())
-                })
-                .await?;
-            }
-            *previous = Some(Instant::now());
         }
         let response = self.read(&tile.request).await?;
         let processing = tile.placement.processing;

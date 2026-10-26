@@ -238,7 +238,7 @@ fn transport_and_concurrency_defaults_match_documented_limits() {
     let config = JobOptions::default();
     assert_eq!(config.max_concurrent, 16);
     assert_eq!(config.max_retries, 3);
-    assert_eq!(config.min_interval, std::time::Duration::ZERO);
+    assert_eq!(config.pacing, None);
     let fetch = FetchLimits::default();
     assert_eq!(fetch.timeout, std::time::Duration::from_secs(30));
     assert_eq!(fetch.connect_timeout, std::time::Duration::from_secs(6));

@@ -83,6 +83,19 @@ export interface ImageRequest {
 }
 
 /**
+ * Adaptive tile-request starts per HTTP origin, shared across a job's levels.
+ * Rates must be finite and positive, with `start_rps <= max_rps`. Successful
+ * requests gradually increase the rate; throttling lowers it and may establish
+ * a lower learned ceiling. The configured maximum is never exceeded. Starts
+ * are spaced without burst credits, rounded up to whole milliseconds; actual
+ * throughput also depends on concurrency and the Host's fetch/decode work.
+ */
+export interface RequestPacing {
+    start_rps: number;
+    max_rps: number;
+}
+
+/**
  * Batched CSS queries against inert, UTF-8 HTML. Parsing never fetches or executes.
  */
 export interface HtmlQuery {
@@ -163,10 +176,10 @@ export interface Options {
      */
     retry_base_delay_ms?: number;
     /**
-     * Initial per-origin tile spacing. Zero leaves admission unpaced until
-     * throttling is observed; a positive value enables adaptive pacing.
+     * Per-origin tile pacing. Absent leaves starts unpaced until throttling is
+     * observed; recovery then uses a learned ceiling of at most 64 requests/s.
      */
-    initial_tile_interval_ms?: number;
+    pacing?: RequestPacing | undefined;
 }
 
 /**
