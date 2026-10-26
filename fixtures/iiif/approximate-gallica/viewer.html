@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Gallica-style IIIF viewer</title>
+<script>
+  fetch("manifest.json").then(response => response.json()).then(() => {
+    document.documentElement.dataset.viewerReady = "true";
+  });
+</script>
+</html>

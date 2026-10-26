@@ -112,7 +112,14 @@ impl Metadata for Document {
 fn embedded_metadata(
     resource: DiscoveryResource<'_>,
 ) -> Option<Result<ParsedResource, DiscoveryError>> {
-    let mut infos = all_json::<ImageInfo>(resource.bytes())
+    // A JSON document must decode as a whole. Scanning its children after a
+    // schema failure would discard the distinction between a painting image,
+    // its canvas and its service (and hide the original metadata error).
+    if serde_json::from_slice::<serde::de::IgnoredAny>(resource.bytes()).is_ok() {
+        return None;
+    }
+    let mut infos = crate::web_page::script_bodies(resource)
+        .flat_map(all_json::<ImageInfo>)
         .filter(ImageInfo::has_distinctive_iiif_properties)
         .peekable();
     infos.peek()?;
@@ -298,7 +305,7 @@ fn catalog(uri: &str, contents: &[u8]) -> Result<DiscoveryCatalog, DiscoveryErro
             {
                 Document::Image(Box::new(info)).decode(resource)
             } else {
-                embedded_metadata(resource).unwrap_or_else(|| Err(IIIFError::from(error).into()))
+                Err(IIIFError::from(error).into())
             }
         }
     }?;
@@ -445,27 +452,8 @@ fn catalog_from_levels(mut levels: Vec<ResolvedLevel>) -> Result<DiscoveryCatalo
 }
 
 #[cfg(test)]
-fn levels(url: &str, raw_info: &[u8]) -> Result<Vec<ResolvedLevel>, IIIFError> {
-    match serde_json::from_slice(raw_info) {
-        Ok(info) => levels_from_info(url, info),
-        Err(e) => {
-            // Due to the very fault-tolerant way we parse iiif manifests, a single javascript
-            // object with a 'width' and a 'height' field is enough to be detected as an IIIF level
-            // See https://github.com/lovasoa/dezoomify-rs/issues/80
-            let levels: Vec<ResolvedLevel> = all_json::<ImageInfo>(raw_info)
-                .filter(ImageInfo::has_distinctive_iiif_properties)
-                .map(|info| levels_from_info(url, info))
-                .collect::<Result<Vec<_>, _>>()?
-                .into_iter()
-                .flatten()
-                .collect();
-            if levels.is_empty() {
-                Err(e.into())
-            } else {
-                Ok(levels)
-            }
-        }
-    }
+fn levels(url: &str, raw_info: &[u8]) -> Result<Vec<ResolvedLevel>, DiscoveryError> {
+    Ok(crate::test_support::ready_image(catalog(url, raw_info)?).levels)
 }
 
 fn levels_from_info(url: &str, mut image_info: ImageInfo) -> Result<Vec<ResolvedLevel>, IIIFError> {
@@ -824,7 +812,7 @@ fn tile_paths_follow_the_iiif_image_identifier() {
         (
             // A missing identifier falls back to the request URL.
             "http://test.com/info.json",
-            br#"{"width": 600, "height": 350}"#,
+            br#"{"type": "ImageService3", "width": 600, "height": 350}"#,
             "http://test.com/0,0,512,350/512,350/0/default.jpg,http://test.com/512,0,88,350/88,350/0/default.jpg",
         ),
         (

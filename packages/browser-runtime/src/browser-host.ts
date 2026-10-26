@@ -25,6 +25,7 @@ import { causeOf, isJobError, unknownDetail } from "../../shared-ui/src/failure.
 import type { CanvasAssembly } from "./assembly.ts";
 import { originOfUrl } from "./fetch-primitives.ts";
 import type { SelectionLimits } from "./limits.ts";
+import { canvasTooLargeFailure } from "./plan-gates.ts";
 import type { TileDecoder } from "./tile-decode.ts";
 import type { TileImageLike } from "./tile-draw.ts";
 
@@ -74,8 +75,13 @@ export class BrowserHost implements Host {
     this.signal = AbortSignal.any([deps.signal, this.resources.signal]);
   }
 
-  async beginOutput(_plan: OutputPlan): Promise<void> {
-    await this.checkpoint("cancellation");
+  async beginOutput(plan: OutputPlan): Promise<void> {
+    try {
+      await this.checkpoint("cancellation");
+      this.deps.assembly.prepare(plan.canvas);
+    } catch (error) {
+      throw this.failure(error);
+    }
   }
 
   /** Classify one thrown value into the typed error contract, attaching the
@@ -358,6 +364,7 @@ export class BrowserHost implements Host {
     if (catalog.entries.length === 1) return 0;
     return this.own(() => this.deps.chooseImage(catalog, this.signal));
   }
+  /** Select only a fitting declared level; unknown geometry is checked at output preflight. */
   async chooseLevel(image: Image): Promise<number> {
     await this.checkpoint("cancellation");
     const { maxWidth, maxHeight, maxArea } = this.deps.selectionLimits;
@@ -370,7 +377,12 @@ export class BrowserHost implements Host {
     const fitting = levels.filter(
       ({ size, area }) => size.width <= maxWidth && size.height <= maxHeight && area <= maxArea,
     );
-    return fitting.at(-1)?.index ?? levels[0]?.index ?? image.levels.length - 1;
+    const selected = fitting.at(-1);
+    if (selected) return selected.index;
+    const smallest = levels[0];
+    if (smallest)
+      throw canvasTooLargeFailure(smallest.size.width, smallest.size.height, image.sourceUrl ?? "");
+    return image.levels.length - 1;
   }
   private updatePauseGate(): void {
     if (this.paused || this.retryWaiting) {

@@ -533,6 +533,19 @@ test("output preflight ignores acquisition pause and classifies cancellation", a
   await assert.rejects(h.host.beginOutput({}), { kind: "cancelled" });
 });
 
+test("output preflight rejects oversized geometry before tile requests without blaming a tile", async () => {
+  const h = setup();
+  h.deps.assembly = createCanvasAssembly({
+    ...h.deps,
+    createCanvas() {
+      assert.fail("an oversized canvas must not be allocated");
+    },
+  });
+  await assert.rejects(h.host.beginOutput({ canvas: { width: 23541, height: 21746 } }), {
+    kind: "plan-invalid",
+  });
+});
+
 test("pause gates acquisition, resume releases it, cancellation interrupts waits and late progress", async () => {
   const h = setup();
   h.host.pause();
@@ -682,11 +695,10 @@ test("multiple images await the supplied choice while a single pyramid continues
   await assert.rejects(host.chooseImage({ entries: [] }), { kind: "plan-empty" });
 });
 
-test("resolution choice fits device limits and preserves fallback behavior", async () => {
+test("resolution choice fits device limits and defers only unknown geometry", async () => {
   const host = setup().host;
   for (const [sizes, expected] of [
     [[square(1), square(256), square(512)], 1],
-    [[square(512), square(1024)], 0],
     [[undefined, undefined], 1],
     [[square(0), square(256)], 1],
     [[square(256), square(256)], 1],
@@ -699,6 +711,9 @@ test("resolution choice fits device limits and preserves fallback behavior", asy
     ],
   ])
     assert.equal(await host.chooseLevel(image(sizes)), expected);
+  await assert.rejects(host.chooseLevel(image([square(512), square(1024)])), {
+    kind: "plan-invalid",
+  });
   const areaHost = setup({
     selectionLimits: { maxWidth: 1000, maxHeight: 1000, maxArea: 100 },
   }).host;

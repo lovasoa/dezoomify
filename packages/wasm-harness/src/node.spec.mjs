@@ -6,6 +6,9 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { createCanvasAssembly } from "../../browser-runtime/src/assembly.ts";
+import { BrowserHost } from "../../browser-runtime/src/browser-host.ts";
+import { selectionLimitsFor } from "../../browser-runtime/src/limits.ts";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const target = JSON.parse(
@@ -101,6 +104,82 @@ test("async Host reads binary metadata and saves the full selected image", async
   assert.equal(platform.observed.settled, 1);
   assert.ok(platform.observed.reads.every((request) => request.uri === url));
   assert.ok(platform.observed.progress.some((progress) => progress.completed === 4));
+});
+
+test("Gallica viewer and manifest save the largest fitting IIIF resolution without an advertised pyramid", async () => {
+  const service = "https://gallica.bnf.fr/iiif/ark:/12148/btv1b52504834s/f1";
+  const manifestUrl = "https://gallica.bnf.fr/iiif/ark:/12148/btv1b52504834s/manifest.json";
+  const fixture = path.join(root, "fixtures/iiif/approximate-gallica");
+  const info = {
+    ...JSON.parse(readFileSync(path.join(fixture, "info.json"), "utf8")),
+    "@id": service,
+    width: 23541,
+    height: 21746,
+  };
+  const manifest = JSON.parse(readFileSync(path.join(fixture, "manifest.json"), "utf8"));
+  const painting = manifest.sequences[0].canvases[0].images[0].resource;
+  painting.service["@id"] = service;
+  painting["@id"] = `${service}/full/full/0/native.jpg`;
+  for (const source of [
+    "https://gallica.bnf.fr/view3if/ga/ark:/12148/btv1b52504834s",
+    manifestUrl,
+  ]) {
+    const requests = [];
+    const decoded = (bytes) => {
+      const [width, height] = JSON.parse(new TextDecoder().decode(bytes));
+      return { width, height, close() {} };
+    };
+    let saved;
+    // Real planning, selection, URL construction and assembly lifecycle, but
+    // synthetic bitmaps: the regression must not allocate a 128MP image.
+    const assembly = createCanvasAssembly({
+      decode: async (bytes) => decoded(bytes),
+      processTile: (_recipe, bytes) => bytes,
+      createCanvas: (width, height) => ({ width, height, ctx2d: { drawImage() {} } }),
+      encode: async () => new Blob(["synthetic pixels"]),
+      save: (_blob, width, height) => {
+        saved = { width, height };
+        return "browser-save-ready";
+      },
+    });
+    const platform = new BrowserHost({
+      signal: new AbortController().signal,
+      selectionLimits: selectionLimitsFor(),
+      assembly,
+      decoder: { decode: async (bytes) => decoded(bytes), dispose() {}, async settle() {} },
+      async fetchResource(request) {
+        requests.push(request.uri);
+        let response = request.uri === manifestUrl ? manifest : info;
+        if (request.purpose !== "metadata") {
+          const suffix = request.uri.slice(service.length);
+          assert.ok(request.uri.startsWith(`${service}/`), request.uri);
+          const tile = suffix.match(/^\/(\d+),(\d+),(\d+),(\d+)\/(\d+),(\d+)\/0\/native\.jpg$/);
+          assert.ok(tile, request.uri);
+          response = [Number(tile[5]), Number(tile[6])];
+        } else {
+          assert.ok([manifestUrl, `${service}/info.json`].includes(request.uri), request.uri);
+        }
+        return {
+          kind: "response",
+          response: { bytes: new TextEncoder().encode(JSON.stringify(response)) },
+        };
+      },
+      onProgress() {},
+      async chooseImage() {
+        return 0;
+      },
+      async approveRetry() {
+        assert.fail("no retry expected");
+      },
+    });
+    platform.parseHtml = async () => ({});
+    const output = await wasm.dezoomify([{ url: source }], options, platform);
+    assert.deepEqual(output.canvas, { width: 11771, height: 10873 });
+    assert.deepEqual(saved, output.canvas);
+    assert.equal(output.disposition, "browser-save-ready");
+    assert.ok(requests.includes(`${service}/0,0,1024,1024/512,512/0/native.jpg`));
+    assert.ok(requests.includes(`${service}/22528,21504,1013,242/507,121/0/native.jpg`));
+  }
 });
 
 test("pacing and throttling work with arbitrary clock origins", async () => {
