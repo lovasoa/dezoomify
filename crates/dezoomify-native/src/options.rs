@@ -1,6 +1,6 @@
 //! Native input, transport, and output settings.
 use crate::output::validate_destination;
-use dezoomify::model::{Error, OutputFormat};
+use dezoomify::model::{Error, OutputFormat, RequestPacing};
 use std::{collections::BTreeMap, path::PathBuf, time::Duration};
 
 /// Where the finished output goes.
@@ -47,10 +47,8 @@ pub struct JobOptions {
     pub max_tiles: usize,
     /// Maximum bytes accepted for one metadata or tile response.
     pub max_bytes: u64,
-    /// Minimum interval between tile request starts (per-tile throttle).
-    /// `ZERO` disables staggering (the CLI default); bulk image pacing stays
-    /// in the caller.
-    pub min_interval: Duration,
+    /// Core-owned adaptive tile pacing; the native Host adds no throttle.
+    pub pacing: Option<RequestPacing>,
     /// RAM budget for tile processing, pixels, descriptors and codec workspace.
     /// Defaults to 80% of available RAM; callers may supply a smaller cap.
     pub output_retain_cap: u64,
@@ -80,7 +78,7 @@ impl Default for JobOptions {
             max_concurrent: crate::imaging::MAX_CONCURRENT,
             max_tiles: 1 << 20,
             max_bytes: 64 << 20,
-            min_interval: Duration::ZERO,
+            pacing: None,
             output_retain_cap: crate::imaging::available_memory_bytes() / 5 * 4,
         }
     }
@@ -110,6 +108,9 @@ impl JobOptions {
     /// an early destination check. The commit point validates again to close
     /// races between start and publication.
     pub fn validate(&self) -> Result<(), Error> {
+        if let Some(pacing) = self.pacing {
+            pacing.validate()?;
+        }
         if self.input_url.is_empty() || self.input_url.len() > 2048 {
             return Err(Error::InvalidInput(
                 "input must be 1..2048 bytes".to_string().into(),

@@ -5,12 +5,14 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use dezoomify::model::RequestPacing;
+
 pub(crate) const APP_VERSION: &str = match option_env!("DEZOOMIFY_VERSION") {
     Some(version) => version,
     None => env!("CARGO_PKG_VERSION"),
 };
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Args {
     pub input: Option<String>,
     pub output: Option<PathBuf>,
@@ -46,9 +48,11 @@ pub struct Args {
     pub compression: u8,
     /// Max idle connections per host, wired to native fetch limits.
     pub max_idle_per_host: usize,
-    /// Minimum delay between requests (see `parse_duration`). Wired to
-    /// native per-tile staggering; bulk runs also pace images.
+    /// Compatibility option: adds a core request-rate ceiling and also spaces
+    /// bulk image starts. Tile admission itself belongs exclusively to core.
     pub min_interval: Duration,
+    /// Arbitrary per-origin tile rates, validated by the core's shared contract.
+    pub pacing: RequestPacing,
     /// Max time for one request, wired to native fetch `timeout`.
     pub timeout: Duration,
     /// Max time to connect, wired to native fetch `connect_timeout`.
@@ -125,6 +129,8 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
     let mut compression: u8 = 5;
     let mut max_idle_per_host: usize = 32;
     let mut min_interval = Duration::ZERO;
+    let mut start_rps = None;
+    let mut max_rps = None;
     let mut timeout = Duration::from_secs(30);
     let mut connect_timeout = Duration::from_secs(6);
     let mut logging = "info".to_string();
@@ -233,6 +239,17 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
                 min_interval =
                     parse_duration(&raw).map_err(|e| format!("invalid --min-interval: {e}"))?;
             }
+            "--start-rps" | "--max-rps" => {
+                let raw = take_value(args, &mut i, inline_value, flag)?;
+                let rate = raw
+                    .parse::<f64>()
+                    .map_err(|_| format!("invalid {flag} value: {raw}"))?;
+                if flag == "--start-rps" {
+                    start_rps = Some(rate);
+                } else {
+                    max_rps = Some(rate);
+                }
+            }
             "--timeout" => {
                 let raw = take_value(args, &mut i, inline_value, "--timeout")?;
                 timeout = parse_duration(&raw).map_err(|e| format!("invalid --timeout: {e}"))?;
@@ -333,6 +350,7 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
         compression,
         max_idle_per_host,
         min_interval,
+        pacing: request_pacing(start_rps, max_rps, min_interval)?,
         timeout,
         connect_timeout,
         logging,
@@ -340,6 +358,25 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
         tile_cache,
         bulk,
     })
+}
+
+/// Resolve CLI defaults and the legacy interval into data, never a second pacer.
+fn request_pacing(
+    start_rps: Option<f64>,
+    max_rps: Option<f64>,
+    min_interval: Duration,
+) -> Result<RequestPacing, String> {
+    let max_rps = max_rps.unwrap_or(16.0);
+    let mut pacing = RequestPacing {
+        start_rps: start_rps.unwrap_or(5.0_f64.min(max_rps)),
+        max_rps,
+    };
+    pacing.validate().map_err(|error| error.to_string())?;
+    if !min_interval.is_zero() {
+        pacing.max_rps = pacing.max_rps.min(1.0 / min_interval.as_secs_f64());
+        pacing.start_rps = pacing.start_rps.min(pacing.max_rps);
+    }
+    Ok(pacing)
 }
 
 fn split_flag_value(arg: &str) -> (&str, Option<String>) {
@@ -503,8 +540,12 @@ fn help() -> String {
         "  -H, --header \"Name: value\"  HTTP header for tile requests (repeatable, last wins)",
         "  --max-idle-per-host <n>     max idle connections per host (default 32)",
         "  --accept-invalid-certs      accept insecure TLS certificates (insecure)",
-        "  -i, --min-interval <duration> minimum delay between requests, e.g. 50ms, 2s (default 0)",
-        "                              (bulk paces images; per-tile requests are staggered)",
+        "  --start-rps <rate>          initial tile requests/s per server (default 5)",
+        "  --max-rps <rate>            maximum tile requests/s per server (default 16)",
+        "                              positive decimals; start must not exceed max",
+        "                              all rates adapt to server limits; parallelism also applies",
+        "  -i, --min-interval <duration> additional rate ceiling, e.g. 200ms caps at 5/s (default 0)",
+        "                              also spaces bulk image starts; start rate is capped to fit",
         "  --timeout <duration>        max time for one request (default 30s)",
         "  --connect-timeout <duration> max time to connect (default 6s)",
         "  --logging <level>           log verbosity: error, warn, info, debug, trace (default info)",
@@ -522,6 +563,33 @@ fn help() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn arbitrary_request_rates_and_legacy_interval_configure_core() {
+        for (flags, expected) in [
+            (vec![], (5.0, 16.0)),
+            (vec!["--start-rps=1.5", "--max-rps=128"], (1.5, 128.0)),
+            (vec!["--max-rps=2"], (2.0, 2.0)),
+            (vec!["--min-interval=2s"], (0.5, 0.5)),
+            (
+                vec!["--start-rps=8", "--max-rps=128", "-i200ms"],
+                (5.0, 5.0),
+            ),
+        ] {
+            let args = parse(&flags.into_iter().map(str::to_string).collect::<Vec<_>>()).unwrap();
+            assert_eq!((args.pacing.start_rps, args.pacing.max_rps), expected);
+        }
+        for flags in [
+            vec!["--start-rps=0"],
+            vec!["--start-rps=-1"],
+            vec!["--start-rps=NaN"],
+            vec!["--max-rps=inf"],
+            vec!["--max-rps=0"],
+            vec!["--start-rps=8", "--max-rps=2"],
+        ] {
+            assert!(parse(&flags.into_iter().map(str::to_string).collect::<Vec<_>>()).is_err());
+        }
+    }
 
     #[test]
     fn parses_headers() {

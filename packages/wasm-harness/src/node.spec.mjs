@@ -211,7 +211,7 @@ test("pacing and throttling work with arbitrary clock origins", async () => {
       {
         ...options,
         max_retries: 1,
-        initial_tile_interval_ms: 250,
+        pacing: { start_rps: 4, max_rps: 64 },
       },
       platform,
     );

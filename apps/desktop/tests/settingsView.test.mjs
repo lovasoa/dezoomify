@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createElement, useState } from "react";
 import { act, click, input, makeContainer } from "../../../test/react-dom.mjs";
-import { defaultSettings } from "../src/settings.ts";
+import { defaultSettings, loadSettings, saveSettings } from "../src/settings.ts";
 
 // linkedom documents lack `oninput`, which keeps React's text-input change
 // detection disabled. Arm it before react-dom loads so edits fire onChange.
@@ -117,6 +117,46 @@ test("desktop quick choices apply sizes and update estimates with the format", (
     dimensions,
   );
   act(() => root.unmount());
+});
+
+test("network presets share a numerical help table and default to Automatic", () => {
+  const { container, root, current } = renderSettings();
+  const network = container.querySelector('.dz-quick-menu[aria-label="Network"]');
+  assert.ok(container.querySelector('summary[aria-label="Network: Automatic"]'));
+  const buttons = [...network.querySelectorAll("button")];
+  for (const [index, profile] of ["gentle", "automatic", "aggressive"].entries()) {
+    click(buttons[index]);
+    assert.equal(current().network_profile, profile);
+  }
+  click(container.querySelector('button[aria-label="Network: More information"]'));
+  const dialog = container.querySelector("dialog");
+  assert.ok(dialog.hasAttribute("open"));
+  assert.deepEqual(
+    [...dialog.querySelectorAll("thead th")].map((cell) => cell.textContent),
+    ["Mode", "Starts at", "Can increase to"],
+  );
+  assert.deepEqual(
+    [...dialog.querySelectorAll("tbody tr")].map((row) =>
+      [...row.children].map((cell) => cell.textContent),
+    ),
+    [
+      ["Gentle", "2 requests/s", "2 requests/s"],
+      ["Automatic", "5 requests/s", "16 requests/s"],
+      ["Aggressive", "16 requests/s", "128 requests/s"],
+    ],
+  );
+  act(() => root.unmount());
+});
+
+test("saved network profiles migrate without changing the new default", () => {
+  for (const [old, profile] of [
+    ["maximum", "aggressive"],
+    ["balanced", "automatic"],
+  ]) {
+    saveSettings({ ...defaultSettings(), network_profile: old });
+    assert.equal(loadSettings().network_profile, profile);
+  }
+  saveSettings(defaultSettings());
 });
 
 test("quick settings translate the automatic preference and estimated units", () => {

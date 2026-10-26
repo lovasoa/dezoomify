@@ -3,7 +3,12 @@ import { outputOptions } from "@dezoomify/wasm-bindings/codecs";
 import type { ReactElement, ReactNode } from "react";
 import { useEffect, useId, useRef, useState } from "react";
 import type { DesktopSettings, NetworkProfile } from "./settings.ts";
-import { headersToEditableText, pickDirectory } from "./settings.ts";
+import {
+  headersToEditableText,
+  NETWORK_PACING,
+  NETWORK_PROFILES,
+  pickDirectory,
+} from "./settings.ts";
 
 interface Props {
   settings: DesktopSettings;
@@ -18,8 +23,6 @@ function formatChoices(): Array<{ value: DesktopSettings["output_format"]; label
     label: option.label_key ? t(option.label_key as I18nKey) : option.name,
   }));
 }
-
-const profiles: NetworkProfile[] = ["maximum", "balanced", "gentle"];
 
 const sizes = [
   { label: "Full HD", width: 1920, height: 1080 },
@@ -306,10 +309,10 @@ export function DesktopSettingsView({ settings, error, onChange, onReset }: Prop
             label={t("desktop.quick.network")}
             value={settings.network_profile}
             onChange={(value) => commit({ network_profile: value as NetworkProfile })}
-            choices={profiles.map((profile) => ({
+            choices={NETWORK_PROFILES.map((profile) => ({
               value: profile,
-              label: t(`desktop.quick.${profile === "maximum" ? "fast" : profile}`),
-              hint: t(`desktop.quick.rate.${profile}`),
+              label: t(`desktop.quick.${profile}`),
+              hint: t("desktop.quick.rate", { max: NETWORK_PACING[profile].max_rps }),
             }))}
           />
         </QuickOption>
@@ -408,14 +411,35 @@ export function DesktopSettingsView({ settings, error, onChange, onReset }: Prop
                 </table>
               ) : null}
               {help === "network" ? (
-                <dl>
-                  {profiles.map((profile) => (
-                    <div key={profile}>
-                      <dt>{t(`desktop.quick.${profile === "maximum" ? "fast" : profile}`)}</dt>
-                      <dd>{t(`desktop.quick.rate.${profile}`)}</dd>
-                    </div>
-                  ))}
-                </dl>
+                <>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th scope="col">{t("desktop.quick.networkMode")}</th>
+                        <th scope="col">{t("desktop.quick.networkStart")}</th>
+                        <th scope="col">{t("desktop.quick.networkMax")}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {NETWORK_PROFILES.map((profile) => (
+                        <tr key={profile}>
+                          <th scope="row">{t(`desktop.quick.${profile}`)}</th>
+                          <td>
+                            {t("desktop.quick.requestsPerSecond", {
+                              rate: NETWORK_PACING[profile].start_rps,
+                            })}
+                          </td>
+                          <td>
+                            {t("desktop.quick.requestsPerSecond", {
+                              rate: NETWORK_PACING[profile].max_rps,
+                            })}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <p>{t("desktop.quick.networkAdaptive")}</p>
+                </>
               ) : null}
             </div>
           ) : (
