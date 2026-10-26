@@ -36,7 +36,7 @@ export class ViewerCollector {
     );
   }
 
-  async read(object: PageObject, doc: Document, until: number): Promise<boolean> {
+  async read(object: PageObject, doc: Document): Promise<boolean> {
     for (const adapter of adapters) {
       const element = adapter.identify(object, this.access);
       if (!element) continue;
@@ -45,15 +45,15 @@ export class ViewerCollector {
       this.seenElements.add(element);
       doc = this.access.document(element, doc);
       this.state.diagnostics.viewers++;
-      await this.readImages(adapter.images(object), doc, until);
+      await this.readImages(adapter.images(object), doc);
       return true;
     }
     return false;
   }
 
-  private async readImages(images: ViewerImage[], doc: Document, until: number): Promise<void> {
+  private async readImages(images: ViewerImage[], doc: Document): Promise<void> {
     for (const image of images) {
-      if (this.state.expired(until)) break;
+      if (this.state.full()) break;
       if (this.seenSources.has(image.identity)) continue;
       this.seenSources.add(image.identity);
       try {
@@ -75,31 +75,32 @@ export class ViewerCollector {
     }
   }
 
-  async readAll(values: Iterable<PageObject>, doc: Document, until: number): Promise<void> {
+  private async readAll(values: Iterable<PageObject | undefined>, doc: Document): Promise<void> {
     for (const value of values) {
-      if (this.state.expired(until)) break;
+      if (!this.state.takeReference()) break;
       try {
-        await this.read(value, doc, until);
+        if (value) await this.read(value, doc);
       } catch {
         this.state.diagnostics.rejected++;
       }
+      await this.state.yieldSlice();
     }
   }
 
-  async registry(object: PageObject, realm: PageRealm, until: number): Promise<boolean> {
+  async registry(object: PageObject, realm: PageRealm): Promise<boolean> {
     for (const adapter of adapters) {
       const values = adapter.registry?.(object, realm);
       if (!values) continue;
-      await this.readAll(values, realm.document, until);
+      await this.readAll(values, realm.document);
       return true;
     }
     return false;
   }
 
-  async probe(realm: PageRealm, elements: Element[], until: number): Promise<void> {
+  async probe(realm: PageRealm, elements: Element[]): Promise<void> {
     for (const adapter of adapters) {
-      const values = await adapter.probe?.(realm, elements, this.seenElements, this.state, until);
-      if (values) await this.readAll(values, realm.document, until);
+      const values = await adapter.probe?.(realm, elements, this.seenElements, this.state);
+      if (values) await this.readAll(values, realm.document);
     }
   }
 }
