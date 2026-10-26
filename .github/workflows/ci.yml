@@ -33,8 +33,8 @@ jobs:
           fetch-depth: 0
       - uses: ./.github/actions/setup-pnpm
         with:
-          # Native AVIF tests independently decode with the existing Sharp dependency.
-          install: ${{ matrix.lane-group != 'wasm' }}
+          # WASM integration exercises the browser Host; native AVIF tests use Sharp.
+          install: true
       - uses: ./.github/actions/setup-build
         with:
           key: ${{ (matrix.lane-group == 'browser+web' || matrix.lane-group == 'extension') && 'web' || matrix.lane-group }}

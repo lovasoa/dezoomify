@@ -56,7 +56,6 @@ export class BrowserHost implements Host {
   private readonly pending = new Set<Promise<unknown>>();
   private settling: Promise<void> | undefined;
   private readonly displayOrigins = new Set<string>();
-  private readonly classifying = new Map<string, Promise<boolean>>();
   private resumePending: (() => void) | undefined;
   private pauseWait: Promise<void> | undefined;
   paused = false;
@@ -287,57 +286,29 @@ export class BrowserHost implements Host {
     }
   }
 
+  /** Rust bounds concurrent attempts. Never queue an origin behind its first
+   * tile; remember only a successfully established display-only fallback. */
   private async loadTile(tile: Tile): Promise<ArrayBuffer | TileImageLike> {
     const origin = originOfUrl(tile.request.uri);
     const ordinary =
       tile.placement.processing === "none" &&
       this.deps.loadDisplayImage !== undefined &&
       !(tile.request.headers ?? []).some(({ name }) => name.toLowerCase() === "range");
-    let classified: ((displayOnly: boolean) => void) | undefined;
+    this.signal.throwIfAborted();
+    if (ordinary && this.displayOrigins.has(origin)) return await this.display(tile.request);
     try {
-      this.signal.throwIfAborted();
+      return await this.readable(tile.request);
+    } catch (error) {
+      const failure = this.failure(error, tile.request);
+      const cause = causeOf(failure);
       if (
         ordinary &&
-        (await this.classifyOrigin(origin, (resolve) => {
-          classified = resolve;
-        }))
+        (cause.kind === "network-failure" || cause.kind === "timeout") &&
+        !this.signal.aborted
       )
         return await this.display(tile.request);
-      let bytes: ArrayBuffer;
-      try {
-        bytes = await this.readable(tile.request);
-      } catch (error) {
-        const failure = this.failure(error, tile.request);
-        const cause = causeOf(failure);
-        if (
-          ordinary &&
-          (cause.kind === "network-failure" || cause.kind === "timeout") &&
-          !this.signal.aborted
-        ) {
-          const image = await this.display(tile.request);
-          classified?.(true);
-          return image;
-        }
-        throw failure;
-      }
-      return bytes;
-    } finally {
-      if (classified) {
-        classified(false);
-        this.classifying.delete(origin);
-      }
+      throw failure;
     }
-  }
-
-  private async classifyOrigin(
-    origin: string,
-    register: (resolve: (displayOnly: boolean) => void) => void,
-  ): Promise<boolean> {
-    if (this.displayOrigins.has(origin)) return true;
-    const pending = this.classifying.get(origin);
-    if (pending) return await this.wait(pending);
-    this.classifying.set(origin, new Promise(register));
-    return false;
   }
 
   finish(request: FinishRequest): Promise<Output> {

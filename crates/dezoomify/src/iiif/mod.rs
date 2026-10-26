@@ -13,8 +13,8 @@ use crate::core::discovery::{
 use crate::core::{
     AdaptiveSource, CatalogPlan, DeferredResource, DiscoveryCatalog, DiscoveryError,
     DiscoveryResource, DiscoveryRoute, FormatSpec, Grid, GridRequests, GridTile, ImagePlan,
-    ObservationResult, ParsedResource, Request, ResolvedGrid, ResolvedLevel, TileRole, TileSpec,
-    resolve_relative,
+    ObservationResult, ParsedResource, Request, ResolvedGrid, ResolvedLevel, TileRole, TileSource,
+    TileSpec, resolve_relative,
 };
 use crate::iiif::tile_info::TileSizeFormat;
 use crate::json_utils::all_json;
@@ -526,11 +526,15 @@ fn levels_from_info(url: &str, mut image_info: ImageInfo) -> Result<Vec<Resolved
                 .map_err(|error| IIIFError::GeometryError {
                     description: error.to_string(),
                 })?;
-                let adaptive = AdaptiveSource::Iiif(IiifProbe {
-                    declared: source,
-                    requests,
-                });
-                Ok(ResolvedLevel::new(adaptive)
+                let source = if requests.use_size_upscaling {
+                    TileSource::Adaptive(AdaptiveSource::IiifUpscaling(IiifUpscalingProbe {
+                        declared: source,
+                        requests,
+                    }))
+                } else {
+                    TileSource::Grid(source)
+                };
+                Ok(ResolvedLevel::new(source)
                     .with_title(Some(format!("IIIF level {tile_ordinal}")))
                     .with_scale_factor(Some(scale_factor))
                     .with_warnings(warnings.clone()))
@@ -596,25 +600,23 @@ impl GridRequests for IIIFLevel {
     }
 }
 
+/// Full-resolution IIIF 3 size-upscaling compatibility only: some services
+/// require a caret-prefixed width instead of the ordinary width/height form.
+/// Other IIIF levels have metadata-defined geometry and need no serial probe.
 #[derive(Clone, Debug)]
-pub struct IiifProbe {
+pub struct IiifUpscalingProbe {
     pub(crate) declared: Grid,
     requests: IIIFLevel,
 }
 
-impl IiifProbe {
+impl IiifUpscalingProbe {
     #[allow(clippy::result_large_err)]
     pub(crate) async fn resolve(
         self,
         host: &impl crate::Host,
         mut remaining_probes: u32,
     ) -> Result<Option<ResolvedGrid>, crate::model::Error> {
-        let tries = if self.requests.use_size_upscaling {
-            2
-        } else {
-            1
-        };
-        for attempt in 0..tries {
+        for attempt in 0..2 {
             let mut requests = self.requests.clone();
             requests.force_width_only = attempt > 0;
             let tile = Grid::new(
@@ -924,10 +926,9 @@ fn discovery_requests_metadata_then_returns_normalized_replayable_levels() {
         .collect();
     assert!(areas.windows(2).all(|pair| pair[0] <= pair[1]));
     let level = level_with_scale(&image.levels, 1);
-    let crate::core::TileSource::Adaptive(source) = &level.source else {
-        panic!("IIIF tile geometry is adaptive");
+    let TileSource::Grid(plan) = &level.source else {
+        panic!("ordinary IIIF geometry must not require probing");
     };
-    let plan = source.declared_grid().expect("declared IIIF grid");
     let first = plan.tiles_row_major().next().unwrap().unwrap();
     assert_eq!(
         (first.ordinal, first.request.header("Referer")),

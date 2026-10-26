@@ -6,9 +6,7 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { createCanvasAssembly } from "../../browser-runtime/src/assembly.ts";
-import { BrowserHost } from "../../browser-runtime/src/browser-host.ts";
-import { selectionLimitsFor } from "../../browser-runtime/src/limits.ts";
+import { BrowserHost, createCanvasAssembly, selectionLimitsFor } from "@dezoomify/browser-runtime";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const target = JSON.parse(
@@ -125,6 +123,7 @@ test("Gallica viewer and manifest save the largest fitting IIIF resolution witho
     manifestUrl,
   ]) {
     const requests = [];
+    const probes = [];
     const decoded = (bytes) => {
       const [width, height] = JSON.parse(new TextDecoder().decode(bytes));
       return { width, height, close() {} };
@@ -149,6 +148,7 @@ test("Gallica viewer and manifest save the largest fitting IIIF resolution witho
       decoder: { decode: async (bytes) => decoded(bytes), dispose() {}, async settle() {} },
       async fetchResource(request) {
         requests.push(request.uri);
+        if (request.purpose === "probe") probes.push(request.uri);
         let response = request.uri === manifestUrl ? manifest : info;
         if (request.purpose !== "metadata") {
           const suffix = request.uri.slice(service.length);
@@ -177,6 +177,7 @@ test("Gallica viewer and manifest save the largest fitting IIIF resolution witho
     assert.deepEqual(output.canvas, { width: 11771, height: 10873 });
     assert.deepEqual(saved, output.canvas);
     assert.equal(output.disposition, "browser-save-ready");
+    assert.deepEqual(probes, [], "declared IIIF geometry must not block acquisition on a probe");
     assert.ok(requests.includes(`${service}/0,0,1024,1024/512,512/0/native.jpg`));
     assert.ok(requests.includes(`${service}/22528,21504,1013,242/507,121/0/native.jpg`));
   }

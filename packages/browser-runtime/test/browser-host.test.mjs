@@ -156,7 +156,34 @@ test("HTTP failures retain status, retry hints and preview without ordinary-imag
   }
 });
 
-test("an unreadable origin is classified once across concurrent probes and ordinary tiles", async () => {
+test("a slow first tile cannot hold back another tile from the same origin", async () => {
+  let release;
+  const blocked = new Promise((resolve) => {
+    release = resolve;
+  });
+  const h = setup({
+    async fetchResource(request) {
+      if (request.uri === tile.request.uri) await blocked;
+      return { kind: "response", response: { bytes: [1] } };
+    },
+    loadDisplayImage: async () => assert.fail("readable bytes need no display fallback"),
+  });
+  const first = h.host.acquireTile(acquisition(tile));
+  const second = h.host.acquireTile(
+    acquisition({
+      ...tile,
+      index: 1,
+      request: { ...tile.request, uri: "https://tiles.test/1.jpg" },
+    }),
+  );
+  await tick();
+  const completedBeforeRelease = h.painted.map(([index]) => index);
+  release();
+  await Promise.all([first, second]);
+  assert.deepEqual(completedBeforeRelease, [1]);
+});
+
+test("confirmed display fallback is reused after independent in-flight reads settle", async () => {
   let reads = 0,
     displays = 0;
   const h = setup({
@@ -174,11 +201,11 @@ test("an unreadable origin is classified once across concurrent probes and ordin
     ...[1, 2].map((index) => h.host.acquireTile(acquisition({ ...tile, index }))),
   ]);
   assert.deepEqual(measured, { status: "available", width: 256, height: 256 });
-  assert.equal(reads, 1);
+  assert.equal(reads, 3);
   assert.equal(displays, 3);
   assert.ok(results.every((result) => result === undefined));
   await h.host.acquireTile(acquisition({ ...tile, index: 3 }));
-  assert.equal(reads, 1);
+  assert.equal(reads, 3);
 });
 
 test("ranged tiles require readable bytes even on a display-only origin", async () => {
