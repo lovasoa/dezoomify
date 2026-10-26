@@ -209,6 +209,16 @@ impl ImageInfo {
             .any(|feature| matches!(feature.as_str(), "sizeByW" | "sizeByWh"))
     }
 
+    fn supports_scaled_regions(&self) -> bool {
+        self.supports_custom_size()
+            && self
+                .profile_info()
+                .supports
+                .iter()
+                .flatten()
+                .any(|feature| feature == "regionByPx")
+    }
+
     #[must_use]
     pub fn supports_v3_size_upscaling(&self) -> bool {
         self.iiif_type
@@ -220,6 +230,9 @@ impl ImageInfo {
                 .is_some_and(|features| features.iter().any(|feature| feature == "sizeUpscaling"))
     }
 
+    /// Advertised grids plus a full-resolution fallback. Without a declared
+    /// pyramid, services supporting scaled pixel regions also get reduced
+    /// power-of-two levels; restricted services never gain guessed scales.
     #[must_use]
     pub fn tiles(&self) -> Vec<TileInfo> {
         let profile_info = self.profile_info();
@@ -259,6 +272,8 @@ impl ImageInfo {
             info.height = Some(cropped_size.y);
             if let Some(scale_factors) = &self.scale_factors {
                 info.scale_factors.clone_from(scale_factors);
+            } else if tiles.is_empty() && self.supports_scaled_regions() {
+                info.scale_factors = info.pyramid_scales(self.size());
             }
             tiles.push(info);
         }
@@ -307,12 +322,8 @@ impl ImageInfo {
             || self.height == 0
             || self.has_presentation_signature()
             || self.iiif_type.as_ref().is_some_and(|value| {
-                value.matches(|value| {
-                    matches!(value, "ImageProfile" | "iiif:ImageProfile")
-                        || matches!(
-                            without_scheme(value),
-                            "iiif.io/api/image/2#ImageProfile" | "iiif.io/api/image/3#ImageProfile"
-                        )
+                !value.matches(|value| {
+                    image_service_version(value).is_some() || value == "iiif:Image"
                 })
             })
         {
@@ -450,6 +461,25 @@ pub struct TileInfo {
 }
 
 impl TileInfo {
+    /// When a service declares no pyramid but supports arbitrary scaled pixel
+    /// regions, offer powers of two down to one tile. Declared pyramids and
+    /// restricted services keep their advertised resolutions unchanged.
+    fn pyramid_scales(&self, image: Vec2d) -> Vec<u32> {
+        let mut scales = vec![1];
+        let mut scale = 1_u32;
+        while image.ceil_div(scale).x > self.size().x || image.ceil_div(scale).y > self.size().y {
+            let Some(next) = scale.checked_mul(2) else {
+                break;
+            };
+            if self.size().checked_mul(Vec2d::square(next)).is_none() {
+                break;
+            }
+            scales.push(next);
+            scale = next;
+        }
+        scales
+    }
+
     #[must_use]
     pub fn size(&self) -> Vec2d {
         Vec2d {
@@ -646,7 +676,7 @@ fn test_deserialisation() {
 }
 
 #[test]
-fn schema_image_objects_need_an_explicit_iiif_signature() {
+fn schema_image_objects_are_not_image_services() {
     let image = |iiif_type: &str, context: &str, protocol: Option<&str>| ImageInfo {
         context: Some(context.into()),
         iiif_type: Some(iiif_type.into()),
@@ -663,10 +693,18 @@ fn schema_image_objects_need_an_explicit_iiif_signature() {
         "https://schema.org/ImageObject",
     ] {
         assert!(!image(iiif_type, "https://schema.org", None).has_distinctive_iiif_properties());
+        assert!(
+            !image(
+                iiif_type,
+                "https://schema.org",
+                Some("http://iiif.io/api/image")
+            )
+            .has_distinctive_iiif_properties()
+        );
     }
     assert!(
         image(
-            "ImageObject",
+            "ImageService3",
             "https://schema.org",
             Some("http://iiif.io/api/image")
         )
@@ -676,7 +714,7 @@ fn schema_image_objects_need_an_explicit_iiif_signature() {
         "http://library.stanford.edu/iiif/image-api/1.1/context.json",
         "http://iiif.io/api/image/3/context.json",
     ] {
-        assert!(image("ImageObject", context, None).has_distinctive_iiif_properties());
+        assert!(!image("ImageObject", context, None).has_distinctive_iiif_properties());
     }
 
     // An untyped identifier and dimensions can equally describe a thumbnail.
@@ -742,6 +780,7 @@ fn ordinary_images_and_lookalike_contexts_are_not_image_services() {
         serde_json::json!({"@type": "iiif:ImageProfile"}),
         serde_json::json!({"type": "ImageProfile", "@context": "http://iiif.io/api/image/3/context.json"}),
         serde_json::json!({"type": "Canvas"}),
+        serde_json::json!({"@type": "dctypes:Image", "@context": "http://iiif.io/api/image/2/context.json"}),
         serde_json::json!({"tiles": []}),
         serde_json::json!({"tiles": [{"width": 256, "scaleFactors": [0]}]}),
         serde_json::json!({"type": "Product", "tiles": [{"width": 256, "scaleFactors": [1]}]}),
@@ -756,6 +795,52 @@ fn ordinary_images_and_lookalike_contexts_are_not_image_services() {
         let image: ImageInfo = serde_json::from_value(value.clone()).unwrap();
         assert!(!image.has_distinctive_iiif_properties(), "{value}");
     }
+}
+
+#[test]
+fn undeclared_pyramids_require_scaled_region_capabilities() {
+    for (profile, expected) in [
+        (
+            "http://library.stanford.edu/iiif/image-api/1.1/compliance.html#level2",
+            vec![1, 2, 4, 8, 16, 32, 64],
+        ),
+        (
+            "http://iiif.io/api/image/2/level1.json",
+            vec![1, 2, 4, 8, 16, 32, 64],
+        ),
+        ("level2", vec![1, 2, 4, 8, 16, 32, 64]),
+        ("http://iiif.io/api/image/2/level0.json", vec![1]),
+        ("unknown", vec![1]),
+    ] {
+        let mut info = ImageInfo {
+            width: 23541,
+            height: 21746,
+            profile: Some(Profile::Reference(profile.into())),
+            ..Default::default()
+        };
+        assert_eq!(info.tiles()[0].scale_factors, expected, "{profile}");
+        info.scale_factors = Some(vec![1, 3]);
+        assert_eq!(info.tiles()[0].scale_factors, [1, 3], "declared v1 pyramid");
+        info.tiles = Some(vec![TileInfo {
+            width: 256,
+            height: None,
+            scale_factors: vec![1, 4],
+        }]);
+        assert_eq!(
+            info.tiles()[0].scale_factors,
+            [1, 4],
+            "declared v2/v3 pyramid"
+        );
+    }
+    let size_only: ImageInfo = serde_json::from_value(serde_json::json!({
+        "width": 23541, "height": 21746, "profile": {"supports": ["sizeByW"]}
+    }))
+    .unwrap();
+    assert_eq!(
+        size_only.tiles()[0].scale_factors,
+        [1],
+        "resizing alone does not permit pixel crops"
+    );
 }
 
 #[test]

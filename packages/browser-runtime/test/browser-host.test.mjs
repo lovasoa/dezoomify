@@ -156,7 +156,34 @@ test("HTTP failures retain status, retry hints and preview without ordinary-imag
   }
 });
 
-test("an unreadable origin is classified once across concurrent probes and ordinary tiles", async () => {
+test("a slow first tile cannot hold back another tile from the same origin", async () => {
+  let release;
+  const blocked = new Promise((resolve) => {
+    release = resolve;
+  });
+  const h = setup({
+    async fetchResource(request) {
+      if (request.uri === tile.request.uri) await blocked;
+      return { kind: "response", response: { bytes: [1] } };
+    },
+    loadDisplayImage: async () => assert.fail("readable bytes need no display fallback"),
+  });
+  const first = h.host.acquireTile(acquisition(tile));
+  const second = h.host.acquireTile(
+    acquisition({
+      ...tile,
+      index: 1,
+      request: { ...tile.request, uri: "https://tiles.test/1.jpg" },
+    }),
+  );
+  await tick();
+  const completedBeforeRelease = h.painted.map(([index]) => index);
+  release();
+  await Promise.all([first, second]);
+  assert.deepEqual(completedBeforeRelease, [1]);
+});
+
+test("confirmed display fallback is reused after independent in-flight reads settle", async () => {
   let reads = 0,
     displays = 0;
   const h = setup({
@@ -174,11 +201,11 @@ test("an unreadable origin is classified once across concurrent probes and ordin
     ...[1, 2].map((index) => h.host.acquireTile(acquisition({ ...tile, index }))),
   ]);
   assert.deepEqual(measured, { status: "available", width: 256, height: 256 });
-  assert.equal(reads, 1);
+  assert.equal(reads, 3);
   assert.equal(displays, 3);
   assert.ok(results.every((result) => result === undefined));
   await h.host.acquireTile(acquisition({ ...tile, index: 3 }));
-  assert.equal(reads, 1);
+  assert.equal(reads, 3);
 });
 
 test("ranged tiles require readable bytes even on a display-only origin", async () => {
@@ -533,6 +560,19 @@ test("output preflight ignores acquisition pause and classifies cancellation", a
   await assert.rejects(h.host.beginOutput({}), { kind: "cancelled" });
 });
 
+test("output preflight rejects oversized geometry before tile requests without blaming a tile", async () => {
+  const h = setup();
+  h.deps.assembly = createCanvasAssembly({
+    ...h.deps,
+    createCanvas() {
+      assert.fail("an oversized canvas must not be allocated");
+    },
+  });
+  await assert.rejects(h.host.beginOutput({ canvas: { width: 23541, height: 21746 } }), {
+    kind: "plan-invalid",
+  });
+});
+
 test("pause gates acquisition, resume releases it, cancellation interrupts waits and late progress", async () => {
   const h = setup();
   h.host.pause();
@@ -682,11 +722,10 @@ test("multiple images await the supplied choice while a single pyramid continues
   await assert.rejects(host.chooseImage({ entries: [] }), { kind: "plan-empty" });
 });
 
-test("resolution choice fits device limits and preserves fallback behavior", async () => {
+test("resolution choice fits device limits and defers only unknown geometry", async () => {
   const host = setup().host;
   for (const [sizes, expected] of [
     [[square(1), square(256), square(512)], 1],
-    [[square(512), square(1024)], 0],
     [[undefined, undefined], 1],
     [[square(0), square(256)], 1],
     [[square(256), square(256)], 1],
@@ -699,6 +738,9 @@ test("resolution choice fits device limits and preserves fallback behavior", asy
     ],
   ])
     assert.equal(await host.chooseLevel(image(sizes)), expected);
+  await assert.rejects(host.chooseLevel(image([square(512), square(1024)])), {
+    kind: "plan-invalid",
+  });
   const areaHost = setup({
     selectionLimits: { maxWidth: 1000, maxHeight: 1000, maxArea: 100 },
   }).host;

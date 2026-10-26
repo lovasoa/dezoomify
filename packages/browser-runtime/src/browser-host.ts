@@ -25,6 +25,7 @@ import { causeOf, isJobError, unknownDetail } from "../../shared-ui/src/failure.
 import type { CanvasAssembly } from "./assembly.ts";
 import { originOfUrl } from "./fetch-primitives.ts";
 import type { SelectionLimits } from "./limits.ts";
+import { canvasTooLargeFailure } from "./plan-gates.ts";
 import type { TileDecoder } from "./tile-decode.ts";
 import type { TileImageLike } from "./tile-draw.ts";
 
@@ -55,7 +56,6 @@ export class BrowserHost implements Host {
   private readonly pending = new Set<Promise<unknown>>();
   private settling: Promise<void> | undefined;
   private readonly displayOrigins = new Set<string>();
-  private readonly classifying = new Map<string, Promise<boolean>>();
   private resumePending: (() => void) | undefined;
   private pauseWait: Promise<void> | undefined;
   paused = false;
@@ -74,8 +74,13 @@ export class BrowserHost implements Host {
     this.signal = AbortSignal.any([deps.signal, this.resources.signal]);
   }
 
-  async beginOutput(_plan: OutputPlan): Promise<void> {
-    await this.checkpoint("cancellation");
+  async beginOutput(plan: OutputPlan): Promise<void> {
+    try {
+      await this.checkpoint("cancellation");
+      this.deps.assembly.prepare(plan.canvas);
+    } catch (error) {
+      throw this.failure(error);
+    }
   }
 
   /** Classify one thrown value into the typed error contract, attaching the
@@ -281,57 +286,29 @@ export class BrowserHost implements Host {
     }
   }
 
+  /** Rust bounds concurrent attempts. Never queue an origin behind its first
+   * tile; remember only a successfully established display-only fallback. */
   private async loadTile(tile: Tile): Promise<ArrayBuffer | TileImageLike> {
     const origin = originOfUrl(tile.request.uri);
     const ordinary =
       tile.placement.processing === "none" &&
       this.deps.loadDisplayImage !== undefined &&
       !(tile.request.headers ?? []).some(({ name }) => name.toLowerCase() === "range");
-    let classified: ((displayOnly: boolean) => void) | undefined;
+    this.signal.throwIfAborted();
+    if (ordinary && this.displayOrigins.has(origin)) return await this.display(tile.request);
     try {
-      this.signal.throwIfAborted();
+      return await this.readable(tile.request);
+    } catch (error) {
+      const failure = this.failure(error, tile.request);
+      const cause = causeOf(failure);
       if (
         ordinary &&
-        (await this.classifyOrigin(origin, (resolve) => {
-          classified = resolve;
-        }))
+        (cause.kind === "network-failure" || cause.kind === "timeout") &&
+        !this.signal.aborted
       )
         return await this.display(tile.request);
-      let bytes: ArrayBuffer;
-      try {
-        bytes = await this.readable(tile.request);
-      } catch (error) {
-        const failure = this.failure(error, tile.request);
-        const cause = causeOf(failure);
-        if (
-          ordinary &&
-          (cause.kind === "network-failure" || cause.kind === "timeout") &&
-          !this.signal.aborted
-        ) {
-          const image = await this.display(tile.request);
-          classified?.(true);
-          return image;
-        }
-        throw failure;
-      }
-      return bytes;
-    } finally {
-      if (classified) {
-        classified(false);
-        this.classifying.delete(origin);
-      }
+      throw failure;
     }
-  }
-
-  private async classifyOrigin(
-    origin: string,
-    register: (resolve: (displayOnly: boolean) => void) => void,
-  ): Promise<boolean> {
-    if (this.displayOrigins.has(origin)) return true;
-    const pending = this.classifying.get(origin);
-    if (pending) return await this.wait(pending);
-    this.classifying.set(origin, new Promise(register));
-    return false;
   }
 
   finish(request: FinishRequest): Promise<Output> {
@@ -358,6 +335,7 @@ export class BrowserHost implements Host {
     if (catalog.entries.length === 1) return 0;
     return this.own(() => this.deps.chooseImage(catalog, this.signal));
   }
+  /** Select only a fitting declared level; unknown geometry is checked at output preflight. */
   async chooseLevel(image: Image): Promise<number> {
     await this.checkpoint("cancellation");
     const { maxWidth, maxHeight, maxArea } = this.deps.selectionLimits;
@@ -370,7 +348,12 @@ export class BrowserHost implements Host {
     const fitting = levels.filter(
       ({ size, area }) => size.width <= maxWidth && size.height <= maxHeight && area <= maxArea,
     );
-    return fitting.at(-1)?.index ?? levels[0]?.index ?? image.levels.length - 1;
+    const selected = fitting.at(-1);
+    if (selected) return selected.index;
+    const smallest = levels[0];
+    if (smallest)
+      throw canvasTooLargeFailure(smallest.size.width, smallest.size.height, image.sourceUrl ?? "");
+    return image.levels.length - 1;
   }
   private updatePauseGate(): void {
     if (this.paused || this.retryWaiting) {

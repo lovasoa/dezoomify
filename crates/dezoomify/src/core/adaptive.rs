@@ -81,10 +81,10 @@ pub struct DiscoverableGrid {
     template: Template<Dimension>,
 }
 
-/// A format whose decoded first tile supplies geometry.
+/// A format needing a first-tile observation for geometry or request syntax.
 #[derive(Clone, Debug)]
 pub enum AdaptiveSource {
-    Iiif(crate::iiif::IiifProbe),
+    IiifUpscaling(crate::iiif::IiifUpscalingProbe),
     Pnav(crate::pnav::PnavSource),
 }
 
@@ -97,7 +97,7 @@ pub struct ResolvedGrid {
 impl AdaptiveSource {
     pub fn declared_grid(&self) -> Option<&Grid> {
         match self {
-            Self::Iiif(source) => Some(&source.declared),
+            Self::IiifUpscaling(source) => Some(&source.declared),
             Self::Pnav(_) => None,
         }
     }
@@ -107,7 +107,7 @@ impl AdaptiveSource {
         max_probes: u32,
     ) -> Result<Option<ResolvedGrid>, crate::model::Error> {
         match self {
-            Self::Iiif(source) => source.clone().resolve(host, max_probes).await,
+            Self::IiifUpscaling(source) => source.clone().resolve(host, max_probes).await,
             Self::Pnav(source) => source.clone().resolve(host, max_probes).await,
         }
     }
