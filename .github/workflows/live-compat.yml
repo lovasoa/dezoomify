@@ -23,4 +23,5 @@ jobs:
       - uses: ./.github/actions/setup-build
         with:
           key: live
+      - uses: ./.github/actions/setup-nasm
       - run: cargo xtask test live --public --limit 2
