@@ -1,7 +1,9 @@
 // Store submissions consume a frozen GitHub release, never a fresh build.
+// The release workflow serializes callers. Acceptance is recorded only after
+// confirmation; uncertain mutations require ledger reconciliation, not retries.
 import { execFile } from "node:child_process";
 import { createHash, createHmac, randomUUID } from "node:crypto";
-import { appendFile, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -16,9 +18,11 @@ async function request(fetcher, url, options = {}) {
     const definiteRejection =
       response.status >= 400 && response.status < 500 && ["POST", "PUT"].includes(options.method);
     const ErrorType = definiteRejection ? Rejected : Error;
-    throw new ErrorType(
-      `${options.method || "GET"} ${url}: HTTP ${response.status}: ${body.slice(0, 500)}`,
+    const error = new ErrorType(
+      `${options.method || "GET"} ${url}: HTTP ${response.status}: ${body.slice(0, 2000)}`,
     );
+    error.status = response.status;
+    throw error;
   }
   return JSON.parse(body);
 }
@@ -50,10 +54,10 @@ export async function downloadAsset({ repository, token, fetcher = fetch }, asse
 }
 
 export async function freezeRelease(api, tag) {
-  const release = await api(tag ? `releases/tags/${encodeURIComponent(tag)}` : "releases/latest");
+  const release = await api(`releases/tags/${encodeURIComponent(tag)}`);
   if (release.draft || release.prerelease)
     throw new Error("Store releases must be published releases");
-  const version = /^(?:rolling-)?v(\d+\.\d+\.\d+)$/.exec(release.tag_name)?.[1];
+  const version = /^(\d+\.\d+\.\d+)$/.exec(release.tag_name)?.[1];
   if (!version) throw new Error(`Invalid release tag: ${release.tag_name}`);
   let { object } = await api(`git/ref/tags/${encodeURIComponent(release.tag_name)}`);
   for (let depth = 0; object.type === "tag" && depth < 10; depth++) {
@@ -73,10 +77,6 @@ export async function freezeRelease(api, tag) {
   return { tag: release.tag_name, commit: object.sha, version, assets };
 }
 
-function nightly(now, date) {
-  return now.getUTCHours() < 6 && (!date || now.toISOString().slice(0, 10) === date);
-}
-
 async function verifyPackage(bytes, version) {
   const directory = await mkdtemp(join(tmpdir(), "dezoomify-store-"));
   try {
@@ -92,17 +92,12 @@ async function verifyPackage(bytes, version) {
   }
 }
 
-function automaticSkip(records, commit, now, date) {
-  if (!nightly(now)) return "outside nightly window";
+function submissionSkip(records, tag) {
   if (records.some((record) => !["success", "failure"].includes(record.state))) {
-    throw new Error(
-      "Unresolved store attempt: reconcile its deployment status before automatic submission",
-    );
+    throw new Error("Unresolved store attempt: reconcile its deployment status before retrying");
   }
-  if (records.find((record) => record.state === "success")?.sha === commit)
-    return "unchanged released commit";
-  if (records.some((record) => record.payload.attempt_date === date))
-    return "already attempted today";
+  if (records.some((record) => record.state === "success" && record.payload.release_tag === tag))
+    return "already submitted";
   return undefined;
 }
 
@@ -122,27 +117,15 @@ async function submissionState(api, browser) {
   }
 }
 
-export async function submitRelease({
-  api,
-  browser,
-  plan,
-  automatic,
-  download,
-  submit,
-  now = () => new Date(),
-}) {
+export async function submitRelease({ api, browser, plan, download, submit }) {
   if (!["chromium", "firefox"].includes(browser)) throw new Error("Unknown browser");
   const records = await submissionState(api, browser);
-  const date = now().toISOString().slice(0, 10);
-  if (automatic) {
-    const skip = automaticSkip(records, plan.commit, now(), date);
-    if (skip) return skip;
-  }
+  const skip = submissionSkip(records, plan.tag);
+  if (skip) return skip;
   const bytes = await download(plan.assets[browser]);
   const digest = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
   if (digest !== plan.assets[browser].digest) throw new Error("Release ZIP digest changed");
   await verifyPackage(bytes, plan.version);
-  if (automatic && !nightly(now(), date)) return "outside nightly window";
   const deployment = await api("deployments", "POST", {
     ref: plan.commit,
     environment: `store-${browser}`,
@@ -155,8 +138,6 @@ export async function submitRelease({
       browser,
       release_tag: plan.tag,
       version: plan.version,
-      attempt_date: date,
-      automatic,
       asset_id: plan.assets[browser].id,
       asset_digest: digest,
     },
@@ -171,8 +152,6 @@ export async function submitRelease({
   await status("in_progress", "Attempt recorded before contacting store");
   let started = false;
   const beforeMutation = () => {
-    if (automatic && !nightly(now(), date))
-      throw new Rejected("Nightly window expired before store mutation");
     started = true;
   };
   try {
@@ -252,8 +231,10 @@ async function chromium({ version, bytes, beforeMutation }, { env, fetcher, slee
           ["PENDING_REVIEW", "STAGED", "PUBLISHED"].includes(revision?.state) &&
           revision.distributionChannels?.some((channel) => channel.crxVersion === version),
       )
-    )
+    ) {
+      console.log(`Chrome accepted ${version}: ${JSON.stringify(revisions).slice(0, 2000)}`);
       return;
+    }
     await sleep(5000);
   }
   throw new Error(`Chrome did not confirm submitted version ${version}`);
@@ -300,7 +281,9 @@ async function firefox({ version, bytes, beforeMutation }, { env, fetcher, sleep
       continue;
     }
     if (!detail.valid || detail.version !== version)
-      throw new Rejected(`AMO did not validate intended version ${version}`);
+      throw new Rejected(
+        `AMO did not validate intended version ${version}: ${JSON.stringify(detail).slice(0, 2000)}`,
+      );
     beforeMutation();
     const result = await request(fetcher, `${base}addon/${addon}/versions/`, {
       method: "POST",
@@ -309,6 +292,7 @@ async function firefox({ version, bytes, beforeMutation }, { env, fetcher, sleep
     });
     if (result.version !== version || !result.id)
       throw new Error(`AMO did not confirm submitted version ${version}`);
+    console.log(`AMO accepted ${version}: version ID ${result.id}`);
     return;
   }
   throw new Error("AMO validation timed out");
@@ -330,13 +314,7 @@ async function main() {
     token: required(env, "GH_TOKEN"),
   };
   const api = githubApi(github);
-  if (process.argv[2] === "freeze") {
-    const plan = await freezeRelease(api, env.RELEASE_TAG || undefined);
-    await appendFile(required(env, "GITHUB_OUTPUT"), `plan=${JSON.stringify(plan)}\n`);
-    console.log(`Frozen ${plan.tag} at ${plan.commit}`);
-    return;
-  }
-  if (process.argv[2] !== "submit") throw new Error("Expected freeze or submit command");
+  if (process.argv[2] !== "submit") throw new Error("Expected submit command");
   const config = await readFile("release/config.toml", "utf8");
   env.EXTENSION_ID = /\[extension.chromium\][\s\S]*?\nid = "([^"]+)"/.exec(config)?.[1];
   env.AMO_GUID = /\[extension.firefox\][\s\S]*?\nid = "([^"]+)"/.exec(config)?.[1];
@@ -344,8 +322,7 @@ async function main() {
     await submitRelease({
       api,
       browser: env.BROWSER,
-      plan: JSON.parse(required(env, "RELEASE_PLAN")),
-      automatic: env.AUTOMATIC === "true",
+      plan: await freezeRelease(api, required(env, "RELEASE_TAG")),
       download: (asset) => downloadAsset(github, asset),
       submit: storeSubmitter(),
     }),

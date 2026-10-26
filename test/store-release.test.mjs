@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
+import { prepareRelease } from "../scripts/daily-release.mjs";
 import {
   downloadAsset,
   freezeRelease,
@@ -9,12 +10,12 @@ import {
   submitRelease,
 } from "../scripts/store-release.mjs";
 
-// One ZIP containing manifest.json with version 3.1.300, used by both stores.
+// One ZIP containing manifest.json with the calendar version, used by both stores.
 const zip = Buffer.from(
-  "UEsDBBQAAAAAAIlFUF0roFBbFQAAABUAAAANAAAAbWFuaWZlc3QuanNvbnsidmVyc2lvbiI6IjMuMS4zMDAifVBLAQIUAxQAAAAAAIlFUF0roFBbFQAAABUAAAANAAAAAAAAAAAAAACAAQAAAABtYW5pZmVzdC5qc29uUEsFBgAAAAABAAEAOwAAAEAAAAAAAA==",
+  "UEsDBBQAAAAAAAAAWl3q1sdJFgAAABYAAAANAAAAbWFuaWZlc3QuanNvbnsidmVyc2lvbiI6IjI2LjEwLjI2In1QSwECFAMUAAAAAAAAAFpd6tbHSRYAAAAWAAAADQAAAAAAAAAAAAAAgAEAAAAAbWFuaWZlc3QuanNvblBLBQYAAAAAAQABADsAAABBAAAAAAA=",
   "base64",
 );
-const version = "3.1.300";
+const version = "26.10.26";
 const digest = `sha256:${createHash("sha256").update(zip).digest("hex")}`;
 const env = Object.fromEntries(
   [
@@ -61,7 +62,7 @@ function chromeStatus(s) {
 }
 
 async function storeResponse(s, url, body) {
-  const crxVersion = s.fault === "version" ? "3.1.299" : undefined;
+  const crxVersion = s.fault === "version" ? "26.10.25" : undefined;
   if (url.includes("oauth2.googleapis.com")) return json({ access_token: "fixture" });
   if (url.includes("/upload/upload/")) return json({ processed: true, valid: true, version });
   if (url.includes(":upload") || url.endsWith("/upload/")) {
@@ -87,28 +88,27 @@ async function storeResponse(s, url, body) {
   s.publications++;
   s.published = true;
   if (s.fault === "network") throw new Error("response lost after acceptance");
-  return json({ id: 1, version: s.fault === "version" ? "3.1.299" : version });
+  return json({ id: 1, version: s.fault === "version" ? "26.10.25" : version });
 }
 
 async function scenario(browser = "chromium") {
   const s = {
     browser,
-    time: "2026-10-16T02:30:00Z",
     records: [],
     fault: "",
     uploads: 0,
     publications: 0,
   };
   const fixtures = {
-    "/repos/owner/repo/releases/latest": {
-      tag_name: `rolling-v${version}`,
+    [`/repos/owner/repo/releases/tags/${version}`]: {
+      tag_name: version,
       assets: ["chromium", "firefox"].map((name, id) => ({
         id,
         name: `dezoomify-${name}-v${version}.zip`,
         digest,
       })),
     },
-    [`/repos/owner/repo/git/ref/tags/rolling-v${version}`]: {
+    [`/repos/owner/repo/git/ref/tags/${version}`]: {
       object: { type: "tag", sha: "annotated" },
     },
     "/repos/owner/repo/git/tags/annotated": { object: { type: "commit", sha: "a".repeat(40) } },
@@ -128,75 +128,42 @@ async function scenario(browser = "chromium") {
   };
   const github = { repository: "owner/repo", token: "fixture", fetcher };
   const api = githubApi(github);
-  s.plan = await freezeRelease(api);
-  s.run = (automatic = true) =>
+  s.plan = await freezeRelease(api, version);
+  s.run = () =>
     submitRelease({
       api,
       browser,
       plan: s.plan,
-      automatic,
-      now: () => new Date(s.time),
       download: (asset) => downloadAsset(github, asset),
       submit: storeSubmitter({ env, fetcher, sleep: async () => {} }),
     });
   return s;
 }
 
-test("both stores reuse a frozen ZIP, skip unchanged commits, and submit at most daily", async () => {
+test("both stores reuse the daily ZIP and reruns skip accepted versions, even from another commit", async () => {
   for (const browser of ["chromium", "firefox"]) {
     const s = await scenario(browser);
     assert.equal(await s.run(), "submitted");
     assert.deepEqual(s.uploaded, zip);
     assert.equal(s.recordedBeforeUpload, "in_progress");
     assert.equal(s.records[0].statuses[0].state, "success");
-    assert.equal(await s.run(), "unchanged released commit");
+    assert.equal(await s.run(), "already submitted");
     s.plan.commit = "b".repeat(40);
-    assert.equal(await s.run(), "already attempted today");
-    s.time = "2026-10-18T02:30:00Z";
-    assert.equal(await s.run(), "submitted");
-    assert.equal(s.uploads, 2);
+    assert.equal(await s.run(), "already submitted");
+    assert.equal(s.uploads, 1);
   }
 });
 
-test("late automatic runs skip; manual submissions override the time and daily limits", async () => {
-  const s = await scenario();
-  s.time = "2026-10-16T06:00:00Z";
-  assert.equal(await s.run(), "outside nightly window");
-  assert.equal(s.uploads, 0);
-  assert.equal(await s.run(false), "submitted");
-  assert.equal(await s.run(false), "submitted");
-  assert.equal(s.records[0].payload.automatic, false);
-});
-
-test("the nightly window is checked after download and again before publishing", async () => {
-  const s = await scenario();
-  s.afterDownload = () => {
-    s.time = "2026-10-16T06:00:00Z";
-  };
-  assert.equal(await s.run(), "outside nightly window");
-  assert.equal(s.records.length, 0);
-  s.time = "2026-10-16T05:59:59Z";
-  s.afterDownload = undefined;
-  s.afterUpload = () => {
-    s.time = "2026-10-16T06:00:00Z";
-  };
-  await assert.rejects(s.run(), /window expired/);
-  assert.equal(s.publications, 0);
-  assert.equal(s.records[0].statuses[0].state, "failure");
-});
-
-test("definite rejection consumes the day; a later night may retry", async () => {
+test("a definite rejection can retry the same immutable release", async () => {
   const s = await scenario();
   s.fault = "rejection";
   await assert.rejects(s.run(), /HTTP 400/);
   assert.equal(s.records[0].statuses[0].state, "failure");
-  assert.equal(await s.run(), "already attempted today");
-  s.time = "2026-10-17T02:30:00Z";
   s.fault = "";
   assert.equal(await s.run(), "submitted");
 });
 
-test("uncertain acceptance blocks retries until a manual submission establishes a baseline", async (t) => {
+test("uncertain acceptance blocks retries until the deployment ledger is reconciled", async (t) => {
   const s = await scenario("firefox");
   s.fault = "network";
   s.denyOutcome = true;
@@ -204,12 +171,12 @@ test("uncertain acceptance blocks retries until a manual submission establishes 
   await assert.rejects(s.run(), /response lost/);
   assert.match(log.mock.calls[0].arguments[0], /Recording store outcome failed:.*write denied/);
   assert.equal(s.records[0].statuses[0].state, "in_progress");
-  s.time = "2026-10-17T02:30:00Z";
   await assert.rejects(s.run(), /reconcile/);
   s.fault = "";
   s.denyOutcome = false;
-  assert.equal(await s.run(false), "submitted");
-  assert.equal(await s.run(), "unchanged released commit");
+  await assert.rejects(s.run(), /reconcile/);
+  s.records[0].statuses.unshift({ state: "success" });
+  assert.equal(await s.run(), "already submitted");
 });
 
 test("confirmation or ledger write failures never turn accepted submissions into retryable failures", async () => {
@@ -228,10 +195,45 @@ test("tampered ZIPs and mismatched manifest versions fail before contacting a st
   s.fault = "digest";
   await assert.rejects(s.run(), /digest changed/);
   s.fault = "";
-  s.plan.version = "3.1.301";
+  s.plan.version = "26.10.27";
   await assert.rejects(s.run(), /manifest version differs/);
   assert.equal(s.uploads, 0);
   assert.equal(s.records.length, 0);
+});
+
+test("a published date is reused; drafts and failed lookups never authorize a rebuild", async () => {
+  const api = githubApi({
+    repository: "owner/repo",
+    token: "fixture",
+    fetcher: async () => json({}, 404),
+  });
+  assert.deepEqual(await prepareRelease(api, version), { version, build: true });
+  assert.deepEqual(await prepareRelease(async () => ({ draft: false }), version), {
+    version,
+    build: false,
+  });
+  await assert.rejects(
+    prepareRelease(async () => ({ draft: true }), version),
+    /reconcile/,
+  );
+  const forbidden = githubApi({
+    repository: "owner/repo",
+    token: "fixture",
+    fetcher: async () => json({}, 403),
+  });
+  await assert.rejects(prepareRelease(forbidden, version), /HTTP 403/);
+});
+
+test("a release that finished after midnight prevents a second publication that day", async () => {
+  const api = githubApi({
+    repository: "owner/repo",
+    token: "fixture",
+    fetcher: async (url) =>
+      url.endsWith("/releases/latest")
+        ? json({ tag_name: "26.10.25", published_at: "2026-10-26T00:02:00Z" })
+        : json({}, 404),
+  });
+  assert.deepEqual(await prepareRelease(api, version), { version: "26.10.25", build: false });
 });
 
 test("neither store records acceptance of another version", async () => {

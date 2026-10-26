@@ -37,17 +37,12 @@ pub(crate) fn verify_cmd(args: &[String]) -> Result<(), String> {
 
 pub(crate) fn release_verify(plan: &Plan, artifacts: &Path) -> Result<(), String> {
     validate_version(&plan.version)?;
-    let expected_tag = match plan.channel.as_str() {
-        "rolling" => format!("rolling-v{}", plan.version),
-        "stable" => format!("v{}", plan.version),
-        _ => return Err(format!("unknown release channel {}", plan.channel)),
-    };
-    if plan.tag != expected_tag {
+    if plan.tag != plan.version {
         return Err("plan tag does not match version".to_string());
     }
     let caps = load_capabilities()?;
     let targets = load_targets()?;
-    if plan.version != super::common::app_version()?.0
+    if plan.commit != super::common::git_commit()?
         || caps.capabilities != plan.capabilities
         || plan.targets.len() != targets.list.len()
         || plan

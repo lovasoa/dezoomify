@@ -5,10 +5,13 @@ existing version. Source URLs must not enter monitoring.
 
 ## Release runbook
 
-Use the [publication workflows](../.github/workflows/) for schedules, inputs and
-credentials, and [release tooling](../crates/xtask/src/release/) for versioning
-and artifact checks. Reuse verified artifacts for downloads, store submissions
-and updates; store acceptance does not mean review has completed.
+The [release workflow](../.github/workflows/release.yml) publishes desktop, CLI
+and extensions together, at most once per UTC date. Versions and tags use
+`YY.M.D` without leading zeroes. A delayed schedule is still valid; reruns reuse
+the published artifacts and skip stores that already accepted that version.
+Manual dispatch publishes the selected branch after its exact commit passes CI.
+Store acceptance does not mean review has completed. Uncertain submissions and
+incomplete draft releases require reconciliation before retrying.
 
 Keep signing keys backed up and separate from source. Losing the updater key
 prevents existing installations from trusting future updates. Follow

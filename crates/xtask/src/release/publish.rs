@@ -1,9 +1,9 @@
 //! `cargo xtask release publish`: publish a verified release to GitHub.
 //!
 //! Publishing is the only stage that touches the network beyond the local
-//! git remote: it requires the `gh` CLI to be authenticated, the plan's tag
-//! to exist and point at the planned commit, and no pre-existing GitHub
-//! release for the tag.
+//! git remote: it requires authenticated `gh`, the verified source checkout,
+//! and no existing release for the frozen date. An existing tag must identify
+//! the same commit. The workflow owns CI approval and serializes publishers.
 
 use super::common::{expected_artifact_name, read_plan, Plan};
 use super::verify::release_verify;
@@ -52,24 +52,11 @@ fn release_publish(plan: &Plan, artifacts: &std::path::Path) -> Result<(), Strin
     {
         return Err("gh is not available or authenticated; cannot publish".to_string());
     }
-    let main = remote_main_commit()?;
-    if main != plan.commit {
-        return Err(format!(
-            "plan pins {}, but origin/main is {main}; refusing to publish an outdated commit",
-            plan.commit
-        ));
-    }
     match remote_tag_commit(&plan.tag)? {
         Some(commit) if commit != plan.commit => {
             return Err(format!(
                 "tag {} points at {commit}, not the planned commit {}",
                 plan.tag, plan.commit
-            ));
-        }
-        None if plan.channel == "stable" => {
-            return Err(format!(
-                "tag {} does not exist on origin; push it before publishing",
-                plan.tag
             ));
         }
         _ => {}
@@ -96,7 +83,7 @@ fn release_publish(plan: &Plan, artifacts: &std::path::Path) -> Result<(), Strin
     let mut cmd = Command::new("gh");
     cmd.args(["release", "create", &tag, "--target", &plan.commit])
         .arg("--title")
-        .arg(format!("dezoomify v{}", plan.version))
+        .arg(&plan.version)
         .arg("--notes-file")
         .arg(artifacts.join("notes.md"));
     let mut assets = std::collections::BTreeSet::new();
@@ -148,20 +135,6 @@ fn labeled_asset(path: &std::path::Path) -> std::ffi::OsString {
     let mut argument = path.as_os_str().to_owned();
     argument.push(format!("#{label}"));
     argument
-}
-
-fn remote_main_commit() -> Result<String, String> {
-    let out = Command::new("git")
-        .args(["ls-remote", "origin", "refs/heads/main"])
-        .current_dir(crate::repo_root())
-        .output()
-        .map_err(|e| format!("failed to inspect origin/main: {e}"))?;
-    let text = String::from_utf8(out.stdout).map_err(|e| format!("git output: {e}"))?;
-    let commit = text
-        .split_whitespace()
-        .next()
-        .ok_or_else(|| "origin/main did not resolve".to_string())?;
-    Ok(commit.to_string())
 }
 
 fn remote_tag_commit(tag: &str) -> Result<Option<String>, String> {
