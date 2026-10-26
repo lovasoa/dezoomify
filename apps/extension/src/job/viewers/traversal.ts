@@ -21,28 +21,29 @@ export class PageTraversal {
   }
 
   async scan(win: Window): Promise<void> {
-    if (this.seenFrames.has(win) || this.state.expired(this.state.end)) return;
+    if (this.seenFrames.has(win) || this.state.full()) return;
     if (this.frameLimit()) return;
     const realm = this.access.realm(win);
     const doc = realm.document;
     this.seenFrames.add(win);
     const root = PageObject.from(win);
     recordDocument(this.state, doc);
-    const until = Math.min(this.state.end, Date.now() + scanLimits.documentMs);
     const roots = root ? this.viewers.roots(root) : [];
     const queue = [...roots, ...(root ? [root] : [])];
-    for (const value of roots) await this.viewers.registry(value, realm, until);
-    const elements = await this.collectElements(doc, queue, until);
+    for (const value of roots) await this.viewers.registry(value, realm);
+    const elements = await this.collectElements(doc, queue);
     // Image containers and their element-data stores precede the broad window
     // graph. Bundled viewers can hide their namespace while retaining a DOM link.
     for (const element of elements) {
+      if (this.state.full()) break;
       const anchors = this.viewers.anchors(element);
-      if (anchors.length) await this.scanReferences(realm, anchors, until);
+      if (anchors.length) await this.scanReferences(realm, anchors);
+      await this.state.yieldSlice();
     }
-    // Probe known canvases before broad reference traversal can exhaust the budget.
-    await this.viewers.probe(realm, elements, until);
-    await this.scanReferences(realm, queue, until);
+    // Broad traversal must not exhaust the budget before targeted probes or inline frames.
+    await this.viewers.probe(realm, elements);
     await this.scanInlineFrames(win);
+    await this.scanReferences(realm, queue);
   }
 
   private frameLimit(): boolean {
@@ -51,14 +52,10 @@ export class PageTraversal {
     return true;
   }
 
-  private async collectElements(
-    doc: Document,
-    queue: PageObject[],
-    until: number,
-  ): Promise<Element[]> {
+  private async collectElements(doc: Document, queue: PageObject[]): Promise<Element[]> {
     const elements: Element[] = [];
     const walker = doc.createTreeWalker(doc, 1);
-    while (!this.state.expired(until) && this.state.diagnostics.nodes < scanLimits.nodes) {
+    while (!this.state.full() && this.state.diagnostics.nodes < scanLimits.nodes) {
       const node = walker.nextNode();
       if (!node) break;
       const reference = PageObject.from(node);
@@ -73,14 +70,10 @@ export class PageTraversal {
     return elements;
   }
 
-  private async enqueueProperties(
-    value: PageObject,
-    queue: PageObject[],
-    until: number,
-  ): Promise<void> {
+  private async enqueueProperties(value: PageObject, queue: PageObject[]): Promise<void> {
     if (value.nativeFunction()) return;
     for (const key of value.keys()) {
-      if (this.state.expired(until) || queue.length >= scanLimits.references) break;
+      if (!this.state.takeReference() || queue.length >= scanLimits.references) break;
       const reference = value.reference(key);
       if (reference) queue.push(reference);
       await this.state.yieldSlice();
@@ -91,47 +84,30 @@ export class PageTraversal {
     value: PageObject,
     realm: PageRealm,
     queue: PageObject[],
-    until: number,
-  ): Promise<boolean> {
-    if (await this.viewers.read(value, realm.document, until)) return true;
-    if (await this.viewers.registry(value, realm, until)) return true;
-    await this.enqueueProperties(value, queue, until);
-    return false;
+  ): Promise<void> {
+    if (await this.viewers.read(value, realm.document)) return;
+    if (await this.viewers.registry(value, realm)) return;
+    await this.enqueueProperties(value, queue);
   }
 
-  private async scanReferences(
-    realm: PageRealm,
-    queue: PageObject[],
-    until: number,
-  ): Promise<void> {
+  private async scanReferences(realm: PageRealm, queue: PageObject[]): Promise<void> {
     const seen = new Set<object>();
-    for (
-      let head = 0;
-      head < queue.length &&
-      !this.state.expired(until) &&
-      this.state.diagnostics.references < scanLimits.references;
-      head++
-    ) {
+    for (let head = 0; head < queue.length && this.state.takeReference(); head++) {
+      await this.state.yieldSlice();
       const value = queue[head];
       if (seen.has(value.identity)) continue;
       seen.add(value.identity);
-      this.state.diagnostics.references++;
       try {
-        if (await this.readReference(value, realm, queue, until)) continue;
+        await this.readReference(value, realm, queue);
       } catch {
         this.state.diagnostics.rejected++;
       }
-      await this.state.yieldSlice();
     }
-    if (
-      this.state.diagnostics.references >= scanLimits.references ||
-      queue.length >= scanLimits.references
-    )
-      this.state.truncate("reference-limit");
+    if (queue.length >= scanLimits.references) this.state.truncate("reference-limit");
   }
 
   private async scanInlineFrames(win: Window): Promise<void> {
-    for (let index = 0; index < win.length && !this.state.expired(this.state.end); index++) {
+    for (let index = 0; index < win.length && this.state.takeReference(); index++) {
       if (this.frameLimit()) break;
       try {
         const child = win[index];
