@@ -3,7 +3,7 @@ mod controller;
 
 use crate::{
     Host,
-    model::{Error, Gate, HostTiming},
+    model::{Error, Gate, HostTiming, RequestPacing},
 };
 use controller::{Admission, Controller, Feedback};
 use futures_util::future::poll_fn;
@@ -31,17 +31,16 @@ pub(crate) struct Ticket {
 /// All calls must use the same Host timing origin.
 pub(crate) struct Scheduler {
     origins: RefCell<HashMap<String, Origin>>,
-    initial_interval_ms: u32,
+    pacing: Option<RequestPacing>,
     observed_ms: Cell<u64>,
 }
 
 impl Scheduler {
-    /// Set the initial per-origin start gap in milliseconds; zero defers pacing
-    /// until throttling is observed.
-    pub(crate) fn new(initial_interval_ms: u32) -> Self {
+    /// Use validated per-origin pacing; absence defers pacing until throttling.
+    pub(crate) fn new(pacing: Option<RequestPacing>) -> Self {
         Self {
             origins: RefCell::default(),
-            initial_interval_ms,
+            pacing,
             observed_ms: Cell::new(0),
         }
     }
@@ -145,7 +144,7 @@ impl Scheduler {
     fn with_origin<T>(&self, key: &str, action: impl FnOnce(&mut Controller) -> T) -> T {
         let mut origins = self.origins.borrow_mut();
         let origin = origins.entry(key.into()).or_insert_with(|| Origin {
-            controller: Controller::new(self.initial_interval_ms),
+            controller: Controller::new(self.pacing),
             waiters: Vec::new(),
         });
         action(&mut origin.controller)

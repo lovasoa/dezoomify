@@ -1,0 +1,5 @@
+{
+  "gentle": { "start_rps": 2, "max_rps": 2 },
+  "automatic": { "start_rps": 5, "max_rps": 16 },
+  "aggressive": { "start_rps": 16, "max_rps": 128 }
+}

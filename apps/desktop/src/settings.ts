@@ -20,10 +20,11 @@
 // Keep erasable syntax only so node type-stripping can read this file. No
 // imports from apps/web, apps/extension, or browser-runtime. No fetch/XHR.
 
-import type { OutputPreference } from "@dezoomify/wasm-bindings";
+import type { OutputPreference, RequestPacing } from "@dezoomify/wasm-bindings";
 import { defaultOutputFormat, outputOptions } from "@dezoomify/wasm-bindings/codecs";
 import { invoke } from "@tauri-apps/api/core";
 import { downloadDir } from "@tauri-apps/api/path";
+import networkProfiles from "../network-profiles.json" with { type: "json" };
 
 export interface DesktopSettings {
   readonly output_dir: string | null;
@@ -44,13 +45,12 @@ export const OUTPUT_FORMATS: ReadonlyArray<DesktopSettings["output_format"]> = o
 export const DEFAULT_OUTPUT_FORMAT = defaultOutputFormat;
 export const DEFAULT_COMPRESSION = 5 as const;
 export const DEFAULT_RETRIES = 3 as const;
-export type NetworkProfile = "maximum" | "balanced" | "gentle";
-export const NETWORK_PROFILES: ReadonlyArray<NetworkProfile> = [
-  "maximum",
-  "balanced",
-  "gentle",
-] as const;
-export const DEFAULT_NETWORK_PROFILE: NetworkProfile = "maximum";
+export type NetworkProfile = keyof typeof networkProfiles;
+export const NETWORK_PACING: Readonly<Record<NetworkProfile, RequestPacing>> = networkProfiles;
+export const NETWORK_PROFILES: ReadonlyArray<NetworkProfile> = Object.keys(
+  networkProfiles,
+) as NetworkProfile[];
+export const DEFAULT_NETWORK_PROFILE: NetworkProfile = "automatic";
 export const MAX_PATH_LEN = 4096 as const;
 
 export function defaultSettings(): DesktopSettings {
@@ -140,6 +140,12 @@ function normalizeSettings(raw: unknown): DesktopSettings {
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return defaultSettings();
   const obj = raw as Record<string, unknown>;
   const defaults = defaultSettings();
+  const profile =
+    obj.network_profile === "maximum"
+      ? "aggressive"
+      : obj.network_profile === "balanced"
+        ? "automatic"
+        : obj.network_profile;
   return {
     output_dir: typeof obj.output_dir === "string" && obj.output_dir !== "" ? obj.output_dir : null,
     output_format: (OUTPUT_FORMATS as ReadonlyArray<string>).includes(obj.output_format as string)
@@ -149,10 +155,8 @@ function normalizeSettings(raw: unknown): DesktopSettings {
     max_width: typeof obj.max_width === "number" ? obj.max_width : null,
     max_height: typeof obj.max_height === "number" ? obj.max_height : null,
     retries: typeof obj.retries === "number" ? obj.retries : defaults.retries,
-    network_profile: (NETWORK_PROFILES as ReadonlyArray<string>).includes(
-      obj.network_profile as string,
-    )
-      ? (obj.network_profile as NetworkProfile)
+    network_profile: (NETWORK_PROFILES as ReadonlyArray<string>).includes(profile as string)
+      ? (profile as NetworkProfile)
       : defaults.network_profile,
     cache_dir: typeof obj.cache_dir === "string" && obj.cache_dir !== "" ? obj.cache_dir : null,
     headers: normalizeHeaderLines(obj.headers),

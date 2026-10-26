@@ -47,6 +47,18 @@ Output names choose the format: `.png`, `.jpg`/`.jpeg`, `.tif`/`.tiff`, `.zif`,
 folder. Other extensions are rejected. See
 [choosing a format](../../apps/desktop/desktop-app.md#choosing-the-file-format).
 
+## Request pacing
+
+The CLI gradually increases tile-request rates after successful requests and
+backs off when a server signals limits, respecting its requested wait time.
+Use `--start-rps` and `--max-rps` for arbitrary positive rates per server;
+`--help` lists defaults. Rates count request starts, not downloaded bytes, and
+`--parallelism` independently bounds overlapping work.
+
+`--min-interval` adds a rate ceiling and caps the starting rate to fit. It also
+spaces bulk image starts. All tile pacing and recovery use the shared core,
+including when an interval is supplied.
+
 ## Saving many images
 
 Put one address per line, optionally followed by a title:

@@ -265,7 +265,7 @@ fn job_options_for(parsed: &Args, input: &str, output: &Path) -> JobOptions {
         max_idle_per_host: parsed.max_idle_per_host,
         accept_invalid_certs: parsed.accept_invalid_certs,
         max_concurrent: parsed.parallelism,
-        min_interval: parsed.min_interval,
+        pacing: Some(parsed.pacing),
         ..JobOptions::default()
     }
 }

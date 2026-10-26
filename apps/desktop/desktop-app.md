@@ -124,6 +124,12 @@ Choose an output folder, format, compression, optional size caps, retry budget,
 cache folder, and request headers. Settings persist on this device. Invalid
 values are refused rather than starting a job with them.
 
+Network offers **Gentle**, **Automatic** (default), and **Aggressive**. All use
+adaptive pacing and respect server limits; Gentle keeps requests slow from the
+start. Open Network’s information button for the starting and maximum rates.
+These count tile-request starts per server, not download speed. For custom rates,
+use the [CLI](../../docs/user/command-line.md#request-pacing).
+
 ## If a save fails
 
 Read the error's suggested next step. After automatic retries are exhausted,

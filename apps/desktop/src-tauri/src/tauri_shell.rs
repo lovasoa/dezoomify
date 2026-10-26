@@ -208,6 +208,8 @@ async fn dezoomify(
         .transpose()
         .map_err(|message| Error::InvalidSettings(message.into()))?
         .unwrap_or_else(crate::settings::DesktopSettings::with_defaults);
+    let mut options = crate::settings::job_options_for(&settings)
+        .map_err(|message| Error::InvalidSettings(message.into()))?;
     let registration = lock_table(&state)?.insert(&job)?;
     if let Err(error) = app.emit(
         crate::jobs::CHANNEL_REGISTERED,
@@ -218,7 +220,6 @@ async fn dezoomify(
             format!("the native invocation could not be acknowledged: {error}").into(),
         ));
     }
-    let mut options = crate::settings::job_options_for(&settings);
     options.input_url = input_url;
     let dir = settings.output_dir.unwrap_or_else(std::env::temp_dir);
     options.output = match settings.output_format.format() {

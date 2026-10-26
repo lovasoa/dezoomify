@@ -29,6 +29,109 @@ fn forbidden() -> Error {
 }
 
 #[test]
+fn configured_rates_ramp_without_exceeding_the_ceiling() {
+    for (start_rps, max_rps, side) in [(2.0, 2.0, 8192), (1.5, 3.0, 8192), (96.0, 128.0, 32768)] {
+        let host = MemoryHost::default();
+        let starts = Rc::new(RefCell::new(Vec::new()));
+        let recorded = starts.clone();
+        *host.acquire_hook.borrow_mut() = Some(Box::new(move |_, now| {
+            recorded.borrow_mut().push(now);
+            Ok(())
+        }));
+        futures::executor::block_on(dezoomify(
+            image(side, side),
+            Options {
+                max_concurrent: 1,
+                max_tiles: 16384,
+                pacing: Some(RequestPacing { start_rps, max_rps }),
+                ..Default::default()
+            },
+            &host,
+        ))
+        .unwrap();
+        let starts = starts.borrow();
+        assert_eq!(starts[1] - starts[0], (1000.0 / start_rps).ceil() as u64);
+        let gaps: Vec<_> = starts.windows(2).map(|pair| pair[1] - pair[0]).collect();
+        assert_eq!(
+            gaps.iter().min().copied(),
+            Some((1000.0 / max_rps).ceil() as u64)
+        );
+        assert_eq!(host.outputs.borrow().len(), 1);
+    }
+}
+
+#[test]
+fn recovery_probes_respect_even_very_low_configured_rates() {
+    for rate in [0.005, 1.5] {
+        let host = MemoryHost::default();
+        let starts = Rc::new(RefCell::new(Vec::new()));
+        let recorded = starts.clone();
+        *host.acquire_hook.borrow_mut() = Some(Box::new(move |_, now| {
+            let first = recorded.borrow().is_empty();
+            recorded.borrow_mut().push(now);
+            if first {
+                Err(Error::HttpError {
+                    status: 429,
+                    retry_after_ms: Some(1000),
+                    preview: None,
+                    transport: ErrorTransport::Direct,
+                    failure: Failure::default(),
+                })
+            } else {
+                Ok(())
+            }
+        }));
+        futures::executor::block_on(dezoomify(
+            image(1024, 256),
+            Options {
+                max_concurrent: 1,
+                pacing: Some(RequestPacing {
+                    start_rps: rate,
+                    max_rps: rate,
+                }),
+                ..Default::default()
+            },
+            &host,
+        ))
+        .unwrap();
+        let starts = starts.borrow();
+        assert!(starts[1] - starts[0] >= (2000.0 / rate).ceil() as u64);
+        assert!(
+            starts
+                .windows(2)
+                .all(|pair| pair[1] - pair[0] >= (1000.0 / rate).ceil() as u64)
+        );
+        assert_eq!(host.outputs.borrow().len(), 1);
+    }
+}
+
+#[test]
+fn invalid_pacing_is_rejected_before_host_io() {
+    for (start_rps, max_rps) in [
+        (0.0, 2.0),
+        (-1.0, 2.0),
+        (3.0, 2.0),
+        (1.0, 0.0),
+        (f64::NAN, 2.0),
+        (1.0, f64::INFINITY),
+    ] {
+        let host = MemoryHost::default();
+        let error = futures::executor::block_on(dezoomify(
+            image(1024, 256),
+            Options {
+                pacing: Some(RequestPacing { start_rps, max_rps }),
+                ..Default::default()
+            },
+            &host,
+        ))
+        .unwrap_err();
+        assert_eq!(error.kind(), "invalid-options");
+        assert!(host.fetched.borrow().is_empty());
+        assert!(host.attempts.borrow().is_empty());
+    }
+}
+
+#[test]
 fn concurrent_midstream_refusals_recover_once_and_retain_successful_tiles() {
     let host = MemoryHost::default();
     host.yield_tiles.set(true);
@@ -127,7 +230,10 @@ fn adaptive_pacing_finishes_an_image_behind_a_sliding_window_waf() {
         image(8192, 8192),
         Options {
             max_concurrent: 6,
-            initial_tile_interval_ms: 250,
+            pacing: Some(RequestPacing {
+                start_rps: 4.0,
+                max_rps: 64.0,
+            }),
             ..Default::default()
         },
         &host,
@@ -185,7 +291,10 @@ fn cancellation_interrupts_both_pacing_and_cooldown() {
         let result = futures::executor::block_on(dezoomify(
             image(4096, 256),
             Options {
-                initial_tile_interval_ms: 250,
+                pacing: Some(RequestPacing {
+                    start_rps: 4.0,
+                    max_rps: 64.0,
+                }),
                 ..Default::default()
             },
             &host,
@@ -276,7 +385,10 @@ fn overlapping_waits_do_not_burst_with_arbitrary_clock_origins() {
         let mut job = Box::pin(dezoomify(
             image(1024, 256),
             Options {
-                initial_tile_interval_ms: 250,
+                pacing: Some(RequestPacing {
+                    start_rps: 4.0,
+                    max_rps: 64.0,
+                }),
                 ..Default::default()
             },
             &host,
