@@ -14,39 +14,20 @@ use super::common::{Plan, PlanTarget};
 use std::path::{Path, PathBuf};
 
 pub(crate) fn plan_cmd(args: &[String]) -> Result<(), String> {
-    let numbered = match args {
-        [] => false,
-        [arg] if arg == "--numbered" => true,
-        _ => return Err("usage: cargo xtask release plan [--numbered]".to_string()),
-    };
-    let plan_path = release_plan(numbered)?;
+    crate::reject_unknown_args("release plan", args)?;
+    let plan_path = release_plan_at(&crate::repo_root().join(ARTIFACTS_ROOT))?;
     println!("release plan: {}", plan_path.display());
     Ok(())
 }
 
-/// Writes the deterministic plan and notes; returns the plan path.
-pub(crate) fn release_plan(numbered: bool) -> Result<PathBuf, String> {
-    release_plan_at(&crate::repo_root().join(ARTIFACTS_ROOT), numbered)
-}
-
-fn release_plan_at(base: &Path, numbered: bool) -> Result<PathBuf, String> {
-    let (version, exactly_tagged) = app_version()?;
+fn release_plan_at(base: &Path) -> Result<PathBuf, String> {
+    let version = app_version()?;
     validate_version(&version)?;
-    if numbered && !exactly_tagged {
-        return Err(format!(
-            "numbered release requires annotated tag v{version} at HEAD"
-        ));
-    }
     let targets = load_targets()?;
     let caps = load_capabilities()?;
     let commit = git_commit()?;
     let plan = Plan {
-        tag: if numbered {
-            format!("v{version}")
-        } else {
-            format!("rolling-v{version}")
-        },
-        channel: if numbered { "stable" } else { "rolling" }.to_string(),
+        tag: version.clone(),
         version: version.clone(),
         commit,
         capabilities: caps.capabilities,
@@ -108,6 +89,7 @@ fn release_notes(plan: &Plan) -> Result<String, String> {
                 "--tags",
                 "--match=v[0-9]*.[0-9]*.[0-9]*",
                 "--match=rolling-v[0-9]*.[0-9]*.[0-9]*",
+                "--match=[0-9]*.[0-9]*.[0-9]*",
                 "--abbrev=0",
                 &parent,
             ])?;
@@ -125,13 +107,13 @@ mod tests {
 
     #[test]
     fn plan_is_deterministic() {
-        let version = app_version().unwrap().0;
+        let version = app_version().unwrap();
         let base = temp_root("plan");
-        let first = std::fs::read_to_string(release_plan_at(&base, false).unwrap()).unwrap();
+        let first = std::fs::read_to_string(release_plan_at(&base).unwrap()).unwrap();
         // Repeating the same freeze is idempotent, including its final newline.
         assert_eq!(
             first,
-            std::fs::read_to_string(release_plan_at(&base, false).unwrap()).unwrap()
+            std::fs::read_to_string(release_plan_at(&base).unwrap()).unwrap()
         );
         let notes = std::fs::read_to_string(base.join(&version).join("notes.md")).unwrap();
         assert!(!notes.starts_with('#'));

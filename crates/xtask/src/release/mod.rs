@@ -8,11 +8,8 @@
 //!   notes.md       user-facing release description and changes
 //!   <target>/<artifact>   one directory per buildable target
 //!
-//! The pipeline is split by stage (`plan`, `build`, `verify`, `publish`) over
-//! shared inventory helpers (`common`) so no
-//! single file carries the whole pipeline (todo 6.2 xtask slim-down). The
-//! command surface and strict unknown-argument rejection are unchanged; the
-//! stable surface is documented in `crates/xtask/README.md`.
+//! The workflow freezes one UTC date and source commit for every product,
+//! serializes publication, and requires green CI before building a new release.
 
 mod build;
 mod common;
@@ -25,7 +22,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
     match args.first().map(String::as_str) {
         Some("version") => {
             crate::reject_unknown_args("release version", &args[1..])?;
-            println!("{}", common::app_version()?.0);
+            println!("{}", common::app_version()?);
             Ok(())
         }
         Some("plan") => plan::plan_cmd(&args[1..]),

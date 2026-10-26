@@ -64,7 +64,6 @@ pub(crate) fn load_capabilities() -> Result<Capabilities, String> {
 pub(crate) struct Plan {
     pub(crate) version: String,
     pub(crate) tag: String,
-    pub(crate) channel: String,
     pub(crate) commit: String,
     pub(crate) capabilities: Vec<String>,
     pub(crate) targets: Vec<PlanTarget>,
@@ -108,46 +107,20 @@ pub(crate) fn git_commit() -> Result<String, String> {
     Ok(commit)
 }
 
-/// Cargo owns the major/minor series; the complete first-parent history owns
-/// the patch. An annotated matching tag can promote, but never assign, a version.
-pub(crate) fn app_version() -> Result<(String, bool), String> {
-    app_version_at(&crate::repo_root())
-}
-
-fn app_version_at(root: &Path) -> Result<(String, bool), String> {
-    if git_output_at(root, &["rev-parse", "--is-shallow-repository"])? != "false" {
-        return Err(
-            "cannot derive app version from shallow history; fetch the complete history"
-                .to_string(),
-        );
-    }
-    let text = std::fs::read_to_string(root.join("Cargo.toml"))
-        .map_err(|e| format!("read workspace Cargo.toml: {e}"))?;
-    let manifest: toml::Value =
-        toml::from_str(&text).map_err(|e| format!("parse workspace Cargo.toml: {e}"))?;
-    let base = manifest
-        .get("workspace")
-        .and_then(|workspace| workspace.get("package"))
-        .and_then(|package| package.get("version"))
-        .and_then(toml::Value::as_str)
-        .ok_or("workspace.package.version must be a numeric version")?;
-    let (series, _) = base
-        .rsplit_once('.')
-        .ok_or("workspace version must be a triplet")?;
-    let count = git_output_at(root, &["rev-list", "--first-parent", "--count", "HEAD"])?;
-    let version = format!("{series}.{count}");
+/// UTC calendar version, without leading zeroes. Coordinated builds must pass
+/// the frozen DEZOOMIFY_VERSION so crossing midnight cannot change their version.
+pub(crate) fn app_version() -> Result<String, String> {
+    let version = std::env::var("DEZOOMIFY_VERSION").unwrap_or_else(|_| {
+        let date = time::OffsetDateTime::now_utc().date();
+        format!(
+            "{}.{}.{}",
+            date.year() - 2000,
+            u8::from(date.month()),
+            date.day()
+        )
+    });
     validate_version(&version)?;
-    let tag = format!("refs/tags/v{version}");
-    let tagged = git_output_at(
-        root,
-        &[
-            "for-each-ref",
-            "--points-at=HEAD",
-            "--format=%(refname)%00%(objecttype)",
-            &tag,
-        ],
-    )?;
-    Ok((version, tagged == format!("{tag}\0tag")))
+    Ok(version)
 }
 
 pub(crate) fn plan_dir(version: &str) -> PathBuf {
@@ -173,28 +146,28 @@ pub(crate) fn expected_artifact_name(target: &str, version: &str) -> Option<Stri
 }
 
 pub(crate) fn validate_version(version: &str) -> Result<(), String> {
-    let mut parts = version.split('.');
-    for limit in [255_u64, 255, 65535] {
-        let p = parts
-            .next()
-            .ok_or_else(|| format!("version '{version}' is not a triplet"))?;
-        if p.is_empty()
-            || !p.chars().all(|c| c.is_ascii_digit())
-            || (p.len() > 1 && p.starts_with('0'))
-        {
-            return Err(format!("version '{version}' is not a numeric triplet"));
-        }
-        // MSI ProductVersion is the tightest shared packaging constraint:
-        // https://learn.microsoft.com/windows/win32/msi/productversion
-        if p.parse::<u64>().map_or(true, |part| part > limit) {
-            return Err(format!(
-                "version '{version}' exceeds packaging limits (255.255.65535)"
-            ));
-        }
+    let invalid =
+        || format!("version '{version}' must be a UTC date YY.M.D without leading zeroes");
+    let parts = version
+        .split('.')
+        .map(|part| {
+            if part.is_empty()
+                || !part.chars().all(|c| c.is_ascii_digit())
+                || (part.len() > 1 && part.starts_with('0'))
+            {
+                return Err(invalid());
+            }
+            part.parse::<u8>().map_err(|_| invalid())
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let [year, month, day] = parts.as_slice() else {
+        return Err(invalid());
+    };
+    if *year > 99 {
+        return Err(invalid());
     }
-    if parts.next().is_some() {
-        return Err(format!("version '{version}' is not a triplet"));
-    }
+    let month = time::Month::try_from(*month).map_err(|_| invalid())?;
+    time::Date::from_calendar_date(2000 + i32::from(*year), month, *day).map_err(|_| invalid())?;
     Ok(())
 }
 
@@ -211,11 +184,10 @@ pub(crate) fn temp_root(name: &str) -> PathBuf {
 pub(crate) fn plan_from_repo() -> Plan {
     let targets = load_targets().unwrap();
     let caps = load_capabilities().unwrap();
-    let version = app_version().unwrap().0;
+    let version = "26.10.26".to_string();
     Plan {
-        tag: format!("rolling-v{version}"),
+        tag: version.clone(),
         version,
-        channel: "rolling".to_string(),
         commit: "0".repeat(40),
         capabilities: caps.capabilities,
         targets: targets
@@ -231,88 +203,23 @@ pub(crate) fn plan_from_repo() -> Plan {
 
 #[cfg(test)]
 mod tests {
-    use super::{app_version_at, git_output_at, temp_root};
-    use std::path::{Path, PathBuf};
-
-    fn git(root: &Path, args: &[&str]) {
-        git_output_at(root, args).unwrap();
-    }
-
-    fn set_version(root: &Path, version: &str) {
-        std::fs::write(
-            root.join("Cargo.toml"),
-            format!("[workspace.package]\nversion = \"{version}\"\n"),
-        )
-        .unwrap();
-    }
-
-    fn repository() -> PathBuf {
-        let root = temp_root("version-history");
-        git(&root, &["init", "--initial-branch=main"]);
-        git(&root, &["config", "user.name", "Release Test"]);
-        git(&root, &["config", "user.email", "release@example.invalid"]);
-        git(&root, &["config", "commit.gpgsign", "false"]);
-        git(&root, &["config", "tag.gpgsign", "false"]);
-        set_version(&root, "3.1.0");
-        commit(&root);
-        root
-    }
-
-    fn commit(root: &Path) {
-        git(root, &["add", "Cargo.toml"]);
-        git(root, &["commit", "--allow-empty", "-m", "test commit"]);
-    }
+    use super::validate_version;
 
     #[test]
-    fn versions_follow_cargo_and_history_with_annotated_promotion() {
-        let root = repository();
-        assert_eq!(app_version_at(&root).unwrap(), ("3.1.1".into(), false));
-        git(&root, &["tag", "-a", "v99.0.1", "-m", "old scheme"]);
-        git(&root, &["checkout", "-b", "feature"]);
-        commit(&root);
-        commit(&root);
-        git(&root, &["checkout", "main"]);
-        commit(&root);
-        git(
-            &root,
-            &["merge", "--no-ff", "feature", "-m", "merge feature"],
-        );
-        assert_eq!(app_version_at(&root).unwrap().0, "3.1.3");
-        set_version(&root, "3.2.999999");
-        commit(&root);
-        assert_eq!(app_version_at(&root).unwrap().0, "3.2.4");
-        set_version(&root, "4.0.0");
-        commit(&root);
-        assert_eq!(app_version_at(&root).unwrap().0, "4.0.5");
-
-        git(&root, &["tag", "v4.0.5"]);
-        assert!(!app_version_at(&root).unwrap().1);
-        git(&root, &["tag", "-d", "v4.0.5"]);
-        git(&root, &["tag", "-a", "v4.0.6", "-m", "mismatched patch"]);
-        assert!(!app_version_at(&root).unwrap().1);
-        git(&root, &["tag", "-a", "v4.0.5", "-m", "promote"]);
-        assert_eq!(app_version_at(&root).unwrap(), ("4.0.5".into(), true));
-        commit(&root);
-        assert_eq!(app_version_at(&root).unwrap(), ("4.0.6".into(), false));
-
-        let shallow = temp_root("version-shallow");
-        git(
-            &root,
-            &[
-                "clone",
-                "--depth=1",
-                &format!("file://{}", root.display()),
-                shallow.to_str().unwrap(),
-            ],
-        );
-        assert!(app_version_at(&shallow)
-            .unwrap_err()
-            .contains("shallow history"));
-        set_version(&root, "256.0.0");
-        assert!(app_version_at(&root)
-            .unwrap_err()
-            .contains("packaging limits"));
-        std::fs::remove_dir_all(shallow).unwrap();
-        std::fs::remove_dir_all(root).unwrap();
+    fn versions_are_real_calendar_dates_accepted_by_every_packager() {
+        for version in ["26.10.26", "26.1.1", "28.2.29"] {
+            validate_version(version).unwrap();
+        }
+        for version in [
+            "2026.10.26",
+            "26.01.1",
+            "26.2.29",
+            "26.13.1",
+            "26.1.0",
+            "3.1.783",
+            "26.1.1.1",
+        ] {
+            assert!(validate_version(version).is_err(), "{version}");
+        }
     }
 }
