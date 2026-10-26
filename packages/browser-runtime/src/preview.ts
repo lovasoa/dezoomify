@@ -14,6 +14,11 @@ export interface PreviewTransform {
   ty: number;
 }
 
+interface PreviewPoint {
+  x: number;
+  y: number;
+}
+
 export interface PreviewStyleLike {
   transformOrigin: string;
   transform: string;
@@ -27,6 +32,7 @@ export interface PreviewElementLike {
   height?: number;
   clientWidth?: number;
   clientHeight?: number;
+  getBoundingClientRect?: () => { left: number; top: number; width: number; height: number };
   addEventListener(type: string, listener: (event: unknown) => void, opts?: unknown): void;
   setPointerCapture?: (id: number) => void;
   isConnected?: boolean;
@@ -50,6 +56,7 @@ export interface PreviewControls {
   initControls(doc: PreviewDocumentLike): void;
 }
 
+/** Programmatic zoom anchors at the viewport center; wheel zoom anchors at the pointer. */
 export function createPreviewControls(): PreviewControls {
   let transform: PreviewTransform = { scale: 1, tx: 0, ty: 0 };
   let wired = false;
@@ -119,23 +126,41 @@ export function createPreviewControls(): PreviewControls {
 
   function zoomBy(factor: unknown, doc?: PreviewDocumentLike | null): PreviewTransform {
     const value = typeof factor === "number" ? factor : Number(factor);
-    const next = Math.max(
-      fitScale(doc),
-      Math.min(1, transform.scale * (Number.isFinite(value) ? value : 1)),
-    );
-    transform = { ...transform, scale: next };
+    return setScale(transform.scale * (Number.isFinite(value) ? value : 1), doc);
+  }
+
+  function setScale(scale: unknown, doc?: PreviewDocumentLike | null): PreviewTransform {
+    const value = typeof scale === "number" ? scale : Number(scale);
+    return scaleAt(Number.isFinite(value) ? value : 1, doc);
+  }
+
+  // Anchor is in CSS pixels relative to the viewport center. Keep its image
+  // point stationary, subject to the pan bounds.
+  function scaleAt(
+    scale: number,
+    doc?: PreviewDocumentLike | null,
+    anchor: PreviewPoint = { x: 0, y: 0 },
+  ): PreviewTransform {
+    const next = Math.max(fitScale(doc), Math.min(1, scale));
+    const ratio = next / transform.scale;
+    transform = {
+      scale: next,
+      tx: anchor.x - (anchor.x - transform.tx) * ratio,
+      ty: anchor.y - (anchor.y - transform.ty) * ratio,
+    };
     clampTranslation(doc);
     applyTransform(doc);
     return getTransform();
   }
 
-  function setScale(scale: unknown, doc?: PreviewDocumentLike | null): PreviewTransform {
-    const value = typeof scale === "number" ? scale : Number(scale);
-    const next = Number.isFinite(value) ? Math.max(fitScale(doc), Math.min(1, value)) : 1;
-    transform = { ...transform, scale: next };
-    clampTranslation(doc);
-    applyTransform(doc);
-    return getTransform();
+  function pointerAnchor(wrapper: PreviewElementLike, event: unknown): PreviewPoint {
+    const { clientX, clientY } = event as { clientX: number; clientY: number };
+    const bounds = wrapper.getBoundingClientRect?.();
+    if (!bounds || !Number.isFinite(clientX) || !Number.isFinite(clientY)) return { x: 0, y: 0 };
+    return {
+      x: clientX - bounds.left - bounds.width / 2,
+      y: clientY - bounds.top - bounds.height / 2,
+    };
   }
 
   function panBy(dx: number, dy: number, doc?: PreviewDocumentLike | null): void {
@@ -163,7 +188,7 @@ export function createPreviewControls(): PreviewControls {
       doc.getElementById("preview-zoom-fit")?.addEventListener("click", () => resetTransform(doc));
       doc.getElementById("preview-zoom-100")?.addEventListener("click", () => setScale(1, doc));
 
-      // Wheel zoom (ctrl/pinch friendly): scale around the viewport center via
+      // Wheel zoom (ctrl/pinch friendly): scale around the pointer via
       // transform only; no pixel reads so tainted canvases stay viewable.
       wrapper.addEventListener(
         "wheel",
@@ -180,7 +205,7 @@ export function createPreviewControls(): PreviewControls {
             Math.min(PREVIEW_WHEEL_STEP_PIXELS, delta),
           );
           const factor = PREVIEW_ZOOM_STEP ** (-boundedDelta / PREVIEW_WHEEL_STEP_PIXELS);
-          zoomBy(factor, doc);
+          scaleAt(transform.scale * factor, doc, pointerAnchor(wrapper, event));
         },
         { passive: false },
       );
