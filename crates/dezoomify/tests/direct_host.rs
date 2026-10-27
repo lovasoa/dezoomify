@@ -514,14 +514,19 @@ fn invalid_inputs_and_limits_are_rejected_before_host_reads() {
         assert!(host.fetched.borrow().is_empty());
         assert_eq!(host.settled.get(), 1);
     }
-    let host = MemoryHost::default();
-    assert_eq!(
-        futures::executor::block_on(dezoomify(Vec::new(), options(), &host))
-            .unwrap_err()
-            .kind(),
-        "invalid-input"
-    );
-    assert_eq!(host.settled.get(), 1);
+    let oversized =
+        vec![input().remove(0); dezoomify::core::discovery::DiscoveryLimits::default().inputs + 1];
+    for (inputs, kind) in [(Vec::new(), "invalid-input"), (oversized, "resource-limit")] {
+        let host = MemoryHost::default();
+        assert_eq!(
+            futures::executor::block_on(dezoomify(inputs, options(), &host))
+                .unwrap_err()
+                .kind(),
+            kind
+        );
+        assert!(host.fetched.borrow().is_empty());
+        assert_eq!(host.settled.get(), 1);
+    }
 }
 #[test]
 fn supplied_documents_obey_resource_limits_before_host_io() {

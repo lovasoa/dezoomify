@@ -24,13 +24,8 @@ import type {
 import type { PublicPath, WxtBrowser } from "wxt/browser";
 import { transportError } from "../runtime/fetch.ts";
 import { findImageDownloadLink, findLoadedImage } from "./loaded-image.ts";
-import type { SourceSnapshot } from "./source-operations.ts";
-import {
-  cancelSourceFetch,
-  collectCandidates,
-  fetchSource,
-  inspectSourceDocument,
-} from "./source-operations.ts";
+import { cancelSourceFetch, fetchSource, inspectSourceDocument } from "./source-operations.ts";
+import { collectCandidates, type SourceSnapshot, sourceSnapshotLimits } from "./source-snapshot.ts";
 import { readViewerTile, releaseViewerTiles } from "./viewers/session.ts";
 
 type SourceApi = Pick<WxtBrowser, "tabs" | "scripting">;
@@ -55,9 +50,8 @@ type SourceScript<Args extends unknown[], Result> =
     }
   | { files: Extract<PublicPath, `${string}.js`>[]; world: "MAIN" };
 
-const MAX_URL_LENGTH = 2048;
-const MAX_CANDIDATES = 100;
-const MAX_DOM_BYTES = 8 * 1024 * 1024;
+const MAX_URL_LENGTH = sourceSnapshotLimits.urlLength;
+const MAX_DOM_BYTES = sourceSnapshotLimits.documentBytes;
 const MAX_BASE64_CHARS = Math.ceil((SOURCE_FETCH_BYTE_LIMIT + 2) / 3) * 4;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -93,6 +87,21 @@ function validCandidate(value: unknown): value is JobInput {
   return new TextEncoder().encode(value.contents).byteLength <= MAX_DOM_BYTES;
 }
 
+function validSnapshotInputs(inputs: unknown[]): boolean {
+  const encoder = new TextEncoder();
+  let resourceBytes = 0;
+  for (const [index, input] of inputs.entries()) {
+    if (!validCandidate(input)) return false;
+    if (index === 0) continue;
+    // Only the document carries contents. Memory observations are validated
+    // separately; resource inventory replies cannot multiply document payloads.
+    if (input.contents !== undefined || input.kind !== "observed-resource") return false;
+    resourceBytes += encoder.encode(input.url).byteLength;
+    if (resourceBytes > sourceSnapshotLimits.resourceBytes) return false;
+  }
+  return true;
+}
+
 function validSnapshot(value: unknown, expectedUrl: string): value is CandidateSnapshot {
   return (
     isRecord(value) &&
@@ -104,8 +113,7 @@ function validSnapshot(value: unknown, expectedUrl: string): value is CandidateS
     Number.isSafeInteger(value.overflow) &&
     value.overflow >= 0 &&
     Array.isArray(value.inputs) &&
-    value.inputs.length <= MAX_CANDIDATES &&
-    value.inputs.every(validCandidate)
+    validSnapshotInputs(value.inputs)
   );
 }
 
@@ -490,7 +498,7 @@ export function createSourceAccess(
       };
     }
     const snapshot = await inject(
-      { func: collectCandidates, args: [] },
+      { func: collectCandidates, args: [sourceSnapshotLimits] },
       signal,
       undefined,
       scanDeadline,

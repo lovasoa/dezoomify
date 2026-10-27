@@ -15,7 +15,7 @@ const scanner = (
   await build({
     stdin: {
       contents: `export {scanViewers} from './viewer-scanner.ts';
-export {collectCandidates} from './source-operations.ts';
+export {collectCandidates,sourceSnapshotLimits} from './source-snapshot.ts';
 export {BrowserHost,selectionLimitsFor} from '@dezoomify/browser-runtime';`,
       resolveDir: new URL("../../src/job/", import.meta.url).pathname,
     },
@@ -61,7 +61,7 @@ for (const [name, engine] of [
       await page.addScriptTag({ content: scanner });
       const result = await page.evaluate(async () => {
         const scan = await Inspector.scanViewers();
-        const snapshot = Inspector.collectCandidates();
+        const snapshot = Inspector.collectCandidates(Inspector.sourceSnapshotLimits);
         const wasm = await import("/__wasm/dezoomify-wasm.js");
         await wasm.default();
         const reads = [];

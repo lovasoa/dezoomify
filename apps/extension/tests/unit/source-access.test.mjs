@@ -4,10 +4,10 @@ import { errorPayload, HttpError } from "@dezoomify/browser-runtime";
 import { createSourceAccess } from "../../src/job/source-access.ts";
 import {
   cancelSourceFetch,
-  collectCandidates,
   fetchSource,
   inspectSourceDocument,
 } from "../../src/job/source-operations.ts";
+import { collectCandidates, sourceSnapshotLimits } from "../../src/job/source-snapshot.ts";
 import { readViewerTile, releaseViewerTiles } from "../../src/job/viewers/session.ts";
 
 const SOURCE_URL = "https://gallery.example/page?view=1";
@@ -456,7 +456,10 @@ test("memory injection failure preserves its cause and falls back to document di
 test("job-page source access calls injected scan and fetch with inferred argument shapes", async () => {
   const fake = fakeBrowser(async ({ func, args }) => {
     if (!func) return { ...snapshot(), inputs: [] };
-    if (func === collectCandidates) return snapshot();
+    if (func === collectCandidates) {
+      assert.deepEqual(args, [sourceSnapshotLimits]);
+      return snapshot();
+    }
     assert.equal(func, fetchSource);
     assert.equal(args[0].url, "https://gallery.example/info.json");
     assert.equal(args[0].documentToken, "root");
@@ -500,13 +503,21 @@ test("job-page source access calls injected scan and fetch with inferred argumen
 });
 
 test("source scan rejects a malformed boundary result", async () => {
-  const fake = fakeBrowser(async () => ({
-    ...snapshot(),
-    inputs: [{ url: "javascript:alert(1)" }],
-  }));
-  const source = createSourceAccess(fake.api, { tabId: 9, documentUrl: SOURCE_URL });
-  await assert.rejects(source.scan(), { kind: "bad-url" });
-  source.dispose();
+  for (const inputs of [
+    [{ url: "javascript:alert(1)" }],
+    [
+      { url: SOURCE_URL, kind: "source", contents: "<html></html>" },
+      { url: `${SOURCE_URL}#resource`, kind: "observed-resource", contents: "extra payload" },
+    ],
+  ]) {
+    const fake = fakeBrowser(async () => ({ ...snapshot(), inputs }));
+    const source = createSourceAccess(fake.api, { tabId: 9, documentUrl: SOURCE_URL });
+    try {
+      await assert.rejects(source.scan(), { kind: "bad-url" });
+    } finally {
+      source.dispose();
+    }
+  }
 });
 
 test("source access validates partial response range headers and exact payload length", async () => {

@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { cancelSourceFetch, fetchSource } from "../../src/job/source-operations.ts";
 import {
-  cancelSourceFetch,
-  collectCandidates,
-  fetchSource,
-} from "../../src/job/source-operations.ts";
+  collectCandidates as collectSnapshot,
+  sourceSnapshotLimits,
+} from "../../src/job/source-snapshot.ts";
+
+const collectCandidates = () => collectSnapshot(sourceSnapshotLimits);
 
 // Test-only polyfill: the pinned Node toolchain predates
 // Uint8Array.prototype.toBase64 (Baseline 2025), while the extension
@@ -157,24 +159,56 @@ test("metadata documents retain their URL without supplying the browser's render
   }
 });
 
-test("candidate snapshot applies URL and count caps with overflow diagnostics", () => {
+test("candidate snapshot retains late image resources after a busy page's assets", () => {
   const oldLocation = globalThis.location;
   const oldPerformance = globalThis.performance;
   globalThis.location = { href: "https://gallery.example/page" };
-  const entries = Array.from({ length: 105 }, (_, i) => ({
-    name: `https://cdn.example/${i}.json`,
+  const entries = Array.from({ length: 400 }, (_, i) => ({
+    name: `https://cdn.example/${i}.js`,
   }));
-  entries.push({ name: `https://cdn.example/${"x".repeat(2048)}` });
+  const tile = "https://gallery.example/proxy?filename=painting_files/9/0_0.jpg";
+  entries.push({ name: tile }, { name: tile });
+  entries.push({ name: `https://cdn.example/${"x".repeat(sourceSnapshotLimits.urlLength)}` });
   globalThis.performance = { getEntriesByType: () => entries };
   try {
     const result = collectCandidates();
-    assert.equal(result.inputs.length, 100);
     assert.equal(result.inputs[0].url, "https://gallery.example/page");
-    assert.equal(result.overflow, 6);
-    assert.ok(result.inputs.every((input) => input.url.length <= 2048));
+    assert.deepEqual(
+      result.inputs.slice(1).map((input) => input.url),
+      [...entries.slice(0, 400).map((entry) => entry.name), tile],
+    );
+    assert.equal(result.overflow, 0);
   } finally {
     globalThis.location = oldLocation;
     globalThis.performance = oldPerformance;
+  }
+});
+
+test("resource URL bytes are bounded independently of the document", () => {
+  const previous = {
+    location: globalThis.location,
+    document: globalThis.document,
+    performance: globalThis.performance,
+  };
+  const url = "https://gallery.example/é";
+  globalThis.location = { href: "https://gallery.example/page" };
+  globalThis.document = {
+    contentType: "text/html",
+    documentElement: { outerHTML: "<html>rendered document</html>" },
+  };
+  globalThis.performance = {
+    getEntriesByType: () => [{ name: url }, { name: `${url}/too-large` }],
+  };
+  try {
+    const result = collectSnapshot({
+      ...sourceSnapshotLimits,
+      resourceBytes: new TextEncoder().encode(url).byteLength,
+    });
+    assert.equal(result.inputs[0].contents, globalThis.document.documentElement.outerHTML);
+    assert.deepEqual(result.inputs[1], { url, kind: "observed-resource" });
+    assert.equal(result.overflow, 1);
+  } finally {
+    Object.assign(globalThis, previous);
   }
 });
 

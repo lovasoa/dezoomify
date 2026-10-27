@@ -407,7 +407,7 @@ fn discovery_failure(error: core::DiscoveryError) -> Error {
                 }));
             match &error {
                 core::DiscoveryError::ParseLimitExceeded
-                | core::DiscoveryError::ResourceLimitExceeded
+                | core::DiscoveryError::InputLimitExceeded
                 | core::DiscoveryError::MetadataSizeLimitExceeded => {
                     Error::ResourceLimit(Failure {
                         request: None,
@@ -514,6 +514,9 @@ impl From<core::TileSourceError> for Error {
     }
 }
 fn validate(inputs: &[JobInput], options: &Options) -> Result<(), Error> {
+    if inputs.len() > DiscoveryLimits::default().inputs {
+        return Err(discovery_failure(core::DiscoveryError::InputLimitExceeded));
+    }
     let valid = |input: &str| {
         if input.is_empty() || input.len() > 2048 {
             return false;
@@ -539,15 +542,16 @@ fn validate(inputs: &[JobInput], options: &Options) -> Result<(), Error> {
         }
     };
     if inputs.is_empty()
-        || inputs.len() > 256
         || !inputs
             .iter()
             .any(|i| i.kind.unwrap_or_default() == DiscoveryInputKind::Source)
         || inputs.iter().any(|i| !valid(&i.url))
     {
-        return Err(Error::InvalidInput("inputs require a user source and at most 256 valid URLs or local paths up to 2048 bytes"
+        return Err(Error::InvalidInput(
+            "inputs require a user source and valid URLs or local paths up to 2048 bytes"
                 .to_string()
-                .into()));
+                .into(),
+        ));
     }
     if let Some(pacing) = options.pacing {
         pacing.validate()?;
