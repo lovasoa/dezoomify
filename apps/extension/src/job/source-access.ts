@@ -15,6 +15,8 @@ import {
 } from "@dezoomify/browser-runtime";
 import type {
   Interaction,
+  JobInput,
+  ObservedInput,
   ResourceRequest,
   Size,
   ViewerTileRequest,
@@ -22,6 +24,7 @@ import type {
 import type { PublicPath, WxtBrowser } from "wxt/browser";
 import { transportError } from "../runtime/fetch.ts";
 import { findImageDownloadLink, findLoadedImage } from "./loaded-image.ts";
+import type { SourceSnapshot } from "./source-operations.ts";
 import {
   cancelSourceFetch,
   collectCandidates,
@@ -32,10 +35,11 @@ import { readViewerTile, releaseViewerTiles } from "./viewers/session.ts";
 
 type SourceApi = Pick<WxtBrowser, "tabs" | "scripting">;
 type SourceFrame = { frameId: number; documentUrl: string; token?: string; documentId?: string };
-type CandidateSnapshot = Awaited<ReturnType<typeof collectCandidates>> & {
-  memory?: Record<string, number | boolean | string | string[]>;
-};
-type CandidateInput = CandidateSnapshot["inputs"][number];
+type DiagnosticValue = number | boolean | string | string[];
+type MemoryDiagnostics = Record<string, DiagnosticValue>;
+interface CandidateSnapshot extends SourceSnapshot {
+  memory?: MemoryDiagnostics;
+}
 type SourceRequest = Parameters<typeof fetchSource>[0];
 type InspectionReply = {
   frameId: number;
@@ -72,14 +76,15 @@ function sameDocumentUrl(a: string, b: string): boolean {
   }
 }
 
-function validCandidate(value: unknown): value is CandidateInput {
+function validCandidate(value: unknown): value is JobInput {
   if (!isRecord(value) || typeof value.url !== "string") return false;
   if (
     value.kind !== undefined &&
     value.kind !== "source" &&
     value.kind !== "observed-document" &&
     value.kind !== "observed-resource" &&
-    value.kind !== "observed-metadata"
+    value.kind !== "observed-metadata" &&
+    value.kind !== "observed-viewer"
   )
     return false;
   if (value.url.length > MAX_URL_LENGTH || !isPublicHttpUrl(value.url)) return false;
@@ -166,15 +171,19 @@ function readSourcePayload(
   return { bytes, finalUri: result.url, http: result.status, contentType: result.contentType };
 }
 
-function observedMetadata(inputs: unknown[]): CandidateInput[] {
+function observedInputs(inputs: unknown[]): ObservedInput[] {
   let bytes = 0;
-  const observed: CandidateInput[] = [];
+  const observed: ObservedInput[] = [];
   for (const input of inputs) {
     if (!validCandidate(input)) continue;
-    if (input.kind !== "observed-metadata" || typeof input.contents !== "string") continue;
-    const candidate: CandidateInput = {
+    if (
+      (input.kind !== "observed-metadata" && input.kind !== "observed-viewer") ||
+      typeof input.contents !== "string"
+    )
+      continue;
+    const candidate: ObservedInput = {
       url: input.url,
-      kind: "observed-metadata",
+      kind: input.kind,
       contents: input.contents,
     };
     bytes += new TextEncoder().encode(JSON.stringify(candidate)).byteLength;
@@ -183,7 +192,7 @@ function observedMetadata(inputs: unknown[]): CandidateInput[] {
   return observed;
 }
 
-function validMemoryValue(value: unknown): value is number | boolean | string | string[] {
+function validMemoryValue(value: unknown): value is DiagnosticValue {
   if (typeof value === "number") return Number.isFinite(value) && value >= 0;
   if (typeof value === "boolean") return true;
   if (typeof value === "string") return value.length <= 1024;
@@ -194,9 +203,9 @@ function validMemoryValue(value: unknown): value is number | boolean | string | 
   );
 }
 
-function memoryDiagnostics(value: unknown): CandidateSnapshot["memory"] {
+function memoryDiagnostics(value: unknown): MemoryDiagnostics | undefined {
   if (!isRecord(value)) return undefined;
-  const memory: NonNullable<CandidateSnapshot["memory"]> = {};
+  const memory: MemoryDiagnostics = {};
   for (const key of [
     "documents",
     "nodes",
@@ -218,12 +227,12 @@ function memoryDiagnostics(value: unknown): CandidateSnapshot["memory"] {
 }
 
 function memoryScanReply(reply: unknown): {
-  observed: CandidateInput[];
-  memory?: CandidateSnapshot["memory"];
+  observed: ObservedInput[];
+  memory?: MemoryDiagnostics;
 } {
   if (!isRecord(reply) || !Array.isArray(reply.inputs) || reply.inputs.length > 100)
     return { observed: [] };
-  return { observed: observedMetadata(reply.inputs), memory: memoryDiagnostics(reply.diagnostics) };
+  return { observed: observedInputs(reply.inputs), memory: memoryDiagnostics(reply.diagnostics) };
 }
 
 /**
@@ -456,8 +465,8 @@ export function createSourceAccess(
 
   async function scan(signal?: AbortSignal, frame = rootFrame): Promise<CandidateSnapshot> {
     const scanDeadline = Date.now() + timeoutMs;
-    let observed: CandidateInput[] = [];
-    let memory: CandidateSnapshot["memory"];
+    let observed: ObservedInput[] = [];
+    let memory: MemoryDiagnostics | undefined;
     try {
       const reply = await inject(
         { files: ["/viewer-scanner.js"], world: "MAIN" },
@@ -687,7 +696,7 @@ export function createSourceAccess(
       return true;
     }
 
-    return async (interaction: Interaction, signal: AbortSignal): Promise<CandidateInput[]> => {
+    return async (interaction: Interaction, signal: AbortSignal): Promise<JobInput[]> => {
       signal = AbortSignal.any([signal, lifetime.signal]);
       assertLive();
       signal.throwIfAborted();

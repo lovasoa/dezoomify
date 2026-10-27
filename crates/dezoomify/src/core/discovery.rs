@@ -992,8 +992,26 @@ type SharedRead<'a> = futures_util::future::Shared<
     futures_util::future::LocalBoxFuture<'a, Result<Read, crate::model::Error>>,
 >;
 
-type Priority = (u8, usize, usize, usize);
-type Root = (u8, usize, usize, DiscoveryInput);
+/// Earlier variants take precedence; distance and source order break ties.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum Evidence {
+    Source,
+    ObservedMetadata,
+    ObservedDocument,
+    KnownResource,
+    ObservedViewer,
+    ViewerPage,
+    Unknown,
+}
+
+impl Evidence {
+    fn is_observation(self) -> bool {
+        matches!(self, Self::ObservedMetadata | Self::ObservedViewer)
+    }
+}
+
+type Priority = (Evidence, usize, usize, usize);
+type Root = (Evidence, usize, usize, DiscoveryInput);
 type Candidate = (Priority, FormatSpec, String, bool);
 type BlockedCandidate = (Priority, FormatSpec, String);
 type Resolution = Result<Option<(usize, DiscoveryCatalog)>, DiscoveryError>;
@@ -1175,7 +1193,12 @@ where
                 };
                 if supported && visited.insert(uri.clone()) && roots.len() < self.limits.resources {
                     let depth = self.depths.borrow().get(request).copied().unwrap_or(0) + 1;
-                    roots.push((4, depth, *branch, DiscoveryInput::new(uri)));
+                    roots.push((
+                        Evidence::ViewerPage,
+                        depth,
+                        *branch,
+                        DiscoveryInput::new(uri),
+                    ));
                     *branch += 1;
                 }
             }
@@ -1223,7 +1246,14 @@ where
     ) -> Result<Option<DiscoveryCatalog>, DiscoveryError> {
         for (rank, spec, uri) in candidates {
             match self
-                .resolve(spec, &uri, true, &Cell::new(rank), rank, rank.0 == 0)
+                .resolve(
+                    spec,
+                    &uri,
+                    true,
+                    &Cell::new(rank),
+                    rank,
+                    rank.0.is_observation(),
+                )
                 .await
             {
                 Ok(Some((_, catalog))) => return Ok(Some(catalog)),
@@ -1365,12 +1395,12 @@ where
             if metadata_only && !self.supplied.contains_key(&request) {
                 return Ok(None);
             }
-            priority.set((
-                base.0.min(if history.is_empty() { base.0 } else { 3 }),
-                base.1 + history.len() + 1,
-                base.2,
-                base.3,
-            ));
+            let evidence = if history.is_empty() {
+                base.0
+            } else {
+                base.0.min(Evidence::KnownResource)
+            };
+            priority.set((evidence, base.1 + history.len() + 1, base.2, base.3));
             self.depths
                 .borrow_mut()
                 .entry(request.clone())
@@ -1464,24 +1494,32 @@ fn decode_resource(
     }
 }
 
-fn evidence_rank(input: &DiscoveryInput, specs: &[FormatSpec]) -> u8 {
+fn input_evidence(input: &DiscoveryInput, specs: &[FormatSpec]) -> Evidence {
     match input.kind {
-        DiscoveryInputKind::ObservedMetadata if input.contents.is_some() => 0,
-        DiscoveryInputKind::Source => 1,
-        DiscoveryInputKind::ObservedDocument if input.contents.is_some() => 2,
+        DiscoveryInputKind::ObservedMetadata if input.contents.is_some() => {
+            Evidence::ObservedMetadata
+        }
+        DiscoveryInputKind::ObservedViewer if input.contents.is_some() => Evidence::ObservedViewer,
+        DiscoveryInputKind::Source => Evidence::Source,
+        DiscoveryInputKind::ObservedDocument if input.contents.is_some() => {
+            Evidence::ObservedDocument
+        }
         _ => match specs
             .iter()
             .filter_map(|spec| spec.url_kind(&input.url))
             .min()
         {
-            Some(RouteKind::Metadata | RouteKind::Image) => 3,
-            Some(RouteKind::Viewer) => 4,
-            None => 5,
+            Some(RouteKind::Metadata | RouteKind::Image) => Evidence::KnownResource,
+            Some(RouteKind::Viewer) => Evidence::ViewerPage,
+            None => Evidence::Unknown,
         },
     }
 }
 
 /// Resolve formats through shared, bounded resource reads and Host observations.
+/// Declared source catalogs precede reconstructed format metadata. Complete
+/// snapshots retain loader-only siblings; otherwise recognized resource URLs
+/// precede live page-loader fallback. All precede speculative navigation.
 pub async fn discover<F, Fut, P, PFut, O, OFut>(
     inputs: Vec<DiscoveryInput>,
     specs: &[FormatSpec],
@@ -1513,7 +1551,7 @@ where
     let mut roots: Vec<_> = inputs
         .into_iter()
         .enumerate()
-        .map(|(order, input)| (evidence_rank(&input, specs), 0usize, order, input))
+        .map(|(order, input)| (input_evidence(&input, specs), 0usize, order, input))
         .collect();
     roots.sort_by_key(|(evidence, depth, order, _)| (*evidence, *depth, *order));
     let mut resources = Resources::new(&fetch, &parse_html, &roots, specs, limits, supplied_bytes);
@@ -1545,7 +1583,8 @@ where
             blocked.sort_by_key(|(rank, _, _)| *rank);
             // Concrete source/metadata evidence precedes viewer access. Unrelated
             // observed scripts and fonts must not prompt before a frame can win.
-            let concrete = blocked.partition_point(|(rank, _, _)| rank.0 < 4);
+            let concrete =
+                blocked.partition_point(|(rank, _, _)| rank.0 < Evidence::ObservedViewer);
             if let Some(catalog) = resources
                 .resolve_blocked(blocked.drain(..concrete), &mut diagnostics)
                 .await?
@@ -1573,7 +1612,7 @@ where
             if branch >= limits.resources {
                 return Err(DiscoveryError::ResourceLimitExceeded);
             }
-            roots.push((evidence_rank(&input, specs), 0, branch, input));
+            roots.push((input_evidence(&input, specs), 0, branch, input));
             branch += 1;
         }
     }
@@ -1585,12 +1624,20 @@ fn tier_candidates(roots: &mut Vec<Root>, specs: &[FormatSpec]) -> Vec<Candidate
     let tier = roots
         .first()
         .map(|(evidence, depth, _, _)| (*evidence, *depth));
-    let ready = roots
-        .iter()
-        .take_while(|(evidence, depth, _, _)| Some((*evidence, *depth)) == tier)
-        .count();
-    for (evidence, depth, order, input) in roots.drain(..ready) {
-        let metadata_only = input.kind == DiscoveryInputKind::ObservedMetadata;
+    // A complete format snapshot starts a catalog of all loaded images,
+    // including siblings that can only be read through their page loader.
+    let include_viewers = tier.is_some_and(|(evidence, _)| evidence == Evidence::ObservedMetadata);
+    for (evidence, depth, order, input) in std::mem::take(roots) {
+        if Some((evidence, depth)) != tier
+            && !(include_viewers && evidence == Evidence::ObservedViewer)
+        {
+            roots.push((evidence, depth, order, input));
+            continue;
+        }
+        let metadata_only = matches!(
+            input.kind,
+            DiscoveryInputKind::ObservedMetadata | DiscoveryInputKind::ObservedViewer
+        );
         let mut formats = specs.to_vec();
         formats.sort_by_key(|spec| {
             let kind = spec.url_kind(&input.url);
@@ -1631,13 +1678,13 @@ fn record_resolution(
     let (rank, spec, uri, result) = outcome;
     match result {
         Ok(Some((distance, catalog))) => {
-            let rank = (
-                rank.0.min(if distance > 1 { 3 } else { rank.0 }),
-                rank.1 + distance,
-                rank.2,
-                rank.3,
-            );
-            if rank.0 == 0 {
+            let evidence = if distance > 1 {
+                rank.0.min(Evidence::KnownResource)
+            } else {
+                rank.0
+            };
+            let rank = (evidence, rank.1 + distance, rank.2, rank.3);
+            if rank.0.is_observation() {
                 metadata.push((rank, catalog));
             } else if winner.as_ref().is_none_or(|(best, _)| rank < *best) {
                 *winner = Some((rank, catalog));

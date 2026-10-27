@@ -3,8 +3,8 @@
 use super::discovery::{DiscoveryInput, DiscoveryLimits, FormatSpec};
 use crate::{
     arcgis, bulk_text, custom_yaml, dzi, fsi, fzp, generic, google_arts_and_culture, hungaricana,
-    iiif, iipimage, krpano, lizardtech, pnav, second_canvas, topviewer, vls, wmts, xlimage, zif,
-    zoomify,
+    iiif, iipimage, krpano, lizardtech, pnav, second_canvas, topviewer, viewer, vls, wmts, xlimage,
+    zif, zoomify,
 };
 
 /// Every built-in format, in candidate priority order.
@@ -30,6 +30,7 @@ const BUILTINS: &[FormatSpec] = &[
     arcgis::SPEC,
     pnav::SPEC,
     bulk_text::SPEC,
+    viewer::SPEC,
 ];
 
 /// Built-in format names in candidate priority order.

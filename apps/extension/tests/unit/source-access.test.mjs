@@ -178,7 +178,7 @@ test("live tile capabilities stay bound to their exact viewer frame and are rele
           frameId === 9
             ? [
                 {
-                  kind: "observed-metadata",
+                  kind: "observed-viewer",
                   url: viewerUrl,
                   contents: JSON.stringify({ dezoomify_viewer: { handle, source_url: viewerUrl } }),
                 },

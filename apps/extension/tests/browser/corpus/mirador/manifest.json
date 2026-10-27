@@ -1,0 +1,106 @@
+{
+  "@context": "http://iiif.io/api/presentation/2/context.json",
+  "@id": "https://iiif.nichibun.ac.jp/IIIF/manifest/YSD/002463024.json",
+  "@type": "sc:Manifest",
+  "label": "佐渡商船會社航路案内",
+  "description": "吉田初三郎　鳥瞰図",
+  "metadata": [
+    {
+      "label": "identifier",
+      "value": "002463024"
+    },
+    {
+      "label": "title",
+      "value": "佐渡商船會社航路案内"
+    },
+    {
+      "label": "creator",
+      "value": "吉田初三郎"
+    },
+    {
+      "label": "edition",
+      "value": "-"
+    },
+    {
+      "label": "publisher",
+      "value": "佐渡商船"
+    },
+    {
+      "label": "date",
+      "value": "1930.3"
+    },
+    {
+      "label": "size",
+      "value": "20×100cm"
+    },
+    {
+      "label": "coverage",
+      "value": "新潟県"
+    }
+  ],
+  "attribution": "attribution",
+  "license": "https://creativecommons.org/publicdomain/mark/1.0/",
+  "sequences": [
+    {
+      "@id": "https://iiif.nichibun.ac.jp/sequence.json",
+      "@type": "sc:Sequence",
+      "label": "user0 sequence label",
+      "canvases": [
+        {
+          "@id": "https://iiif.nichibun.ac.jp/IIIF/YSD/1_canvas.json",
+          "@type": "sc:Canvas",
+          "label": "1",
+          "height": 8189,
+          "width": 24428,
+          "images": [
+            {
+              "@id": "https://iiif.nichibun.ac.jp/IIIF/YSD/1_image.json",
+              "@type": "oa:Annotation",
+              "motivation": "sc:painting",
+              "resource": {
+                "@id": "https://iiif.nichibun.ac.jp/iipsrv/?IIIF=/YSD/002463024/002463024_o.tif/full/full/0/default.jpg",
+                "@type": "dctypes:Image",
+                "format": "image/jpeg",
+                "height": 8189,
+                "width": 24428,
+                "service": {
+                  "@context": "http://iiif.io/api/image/2/context.json",
+                  "@id": "https://iiif.nichibun.ac.jp/iipsrv?IIIF=/YSD/002463024/002463024_o.tif",
+                  "profile": "http://iiif.io/api/image/2/level1.json"
+                }
+              },
+              "on": "https://iiif.nichibun.ac.jp/IIIF/YSD/1_canvas.json"
+            }
+          ]
+        },
+        {
+          "@id": "https://iiif.nichibun.ac.jp/IIIF/YSD/2_canvas.json",
+          "@type": "sc:Canvas",
+          "label": "2",
+          "height": 8200,
+          "width": 24385,
+          "images": [
+            {
+              "@id": "https://iiif.nichibun.ac.jp/IIIF/YSD/2_image.json",
+              "@type": "oa:Annotation",
+              "motivation": "sc:painting",
+              "resource": {
+                "@id": "https://iiif.nichibun.ac.jp/iipsrv/?IIIF=/YSD/002463024/002463024_u.tif/full/full/0/default.jpg",
+                "@type": "dctypes:Image",
+                "format": "image/jpeg",
+                "height": 8200,
+                "width": 24385,
+                "service": {
+                  "@context": "http://iiif.io/api/image/2/context.json",
+                  "@id": "https://iiif.nichibun.ac.jp/iipsrv?IIIF=/YSD/002463024/002463024_u.tif",
+                  "profile": "http://iiif.io/api/image/2/level1.json"
+                }
+              },
+              "on": "https://iiif.nichibun.ac.jp/IIIF/YSD/2_canvas.json"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

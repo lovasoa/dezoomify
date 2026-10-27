@@ -1,10 +1,5 @@
-import type {
-  ObservedMetadata,
-  ScanDiagnostics,
-  ScanResult,
-  StopReason,
-  ViewerEvidence,
-} from "./types.ts";
+import type { ObservedInput } from "@dezoomify/wasm-bindings";
+import type { ScanDiagnostics, ScanResult, StopReason, ViewerEvidence } from "./types.ts";
 
 export const scanLimits = {
   documents: 16,
@@ -29,7 +24,7 @@ function yieldTask(): Promise<void> {
 }
 
 export class ScanState {
-  readonly inputs: ObservedMetadata[] = [];
+  readonly inputs: ObservedInput[] = [];
   readonly handles = new Set<string>();
   readonly diagnostics: ScanDiagnostics = {
     documents: 0,
