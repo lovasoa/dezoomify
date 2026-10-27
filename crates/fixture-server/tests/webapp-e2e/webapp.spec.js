@@ -25,6 +25,70 @@ const {
   startPublicFixtureSource,
 } = require("../../../../test/support/public-relay.mjs");
 
+test("source URL clips in the middle, copies natively, and leaves timing visible", async ({ page }) => {
+  const root = path.resolve(__dirname, "../../../..");
+  const { outputFiles } = require("esbuild").buildSync({
+    stdin: {
+      contents: `export { renderView } from "./packages/shared-ui/src/view.tsx";
+        export { presentProgress } from "./packages/shared-ui/src/presentation.ts";`,
+      resolveDir: root,
+    },
+    bundle: true,
+    write: false,
+    format: "iife",
+    globalName: "sourceTest",
+    jsx: "automatic",
+  });
+  await page.setContent('<main class="dz-main"><div id="source-test"></div><textarea></textarea></main>');
+  await page.addStyleTag({ path: path.join(root, "packages/shared-ui/src/styles/theme.css") });
+  await page.addScriptTag({ content: outputFiles[0].text });
+  const source = page.locator("#dz-job-source-url");
+  const longUrl = `https://collections.chateauversailles.fr/cc/${"imageproxy/".repeat(30)}imageproxy.aspx?&filename=objectimages/MV%208181_014.dzi`;
+  for (const [url, width] of [[longUrl, 1280], [longUrl, 600], [longUrl, 375], ["https://museum.test/a.dzi", 1280]]) {
+    await page.setViewportSize({ width, height: 720 });
+    await page.evaluate((url) => {
+      const { renderView, presentProgress } = window.sourceTest;
+      renderView(document.querySelector("#source-test"),
+        presentProgress({ phase: "acquisition", completed: 8, total: 13 }), {},
+        { sourceUrl: url, jobActivity: { startedAt: 0, now: 72000 } });
+    }, url);
+    await expect(source).toHaveText(url);
+    await expect(page.locator("#dz-job-time")).toHaveText("1 min 12 s / ~1 min 57 s");
+    const layout = await source.evaluate((element) => {
+      const [start, end] = element.children;
+      const time = document.querySelector("#dz-job-time");
+      const row = element.parentElement.getBoundingClientRect();
+      const startBox = start.getBoundingClientRect(), endBox = end.getBoundingClientRect();
+      const first = document.createRange(), last = document.createRange();
+      first.setStart(start.firstChild, 0);
+      first.setEnd(start.firstChild, 1);
+      const tail = end.firstChild.firstChild;
+      last.setStart(tail, tail.length - 1);
+      last.setEnd(tail, tail.length);
+      return {
+        clipped: start.scrollWidth > start.clientWidth && end.scrollWidth > end.clientWidth,
+        firstVisible: first.getBoundingClientRect().left >= startBox.left - 1,
+        lastVisible: last.getBoundingClientRect().right <= endBox.right + 1,
+        timeFits: time.scrollWidth <= time.clientWidth && time.getBoundingClientRect().right <= row.right + 1,
+        urlFits: endBox.right <= time.getBoundingClientRect().left,
+      };
+    });
+    assert.deepEqual(layout, {
+      clipped: url === longUrl, firstVisible: true, lastVisible: true, timeFits: true, urlFits: true,
+    });
+    const box = await source.boundingBox();
+    await page.mouse.move(box.x, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width, box.y + box.height / 2, { steps: 10 });
+    await page.mouse.up();
+    assert.equal(await page.evaluate(() => getSelection().toString()), url);
+    await page.keyboard.press("ControlOrMeta+c");
+    await page.locator("textarea").fill("");
+    await page.keyboard.press("ControlOrMeta+v");
+    await expect(page.locator("textarea")).toHaveValue(url);
+  }
+});
+
 for (const colorScheme of ["light", "dark"]) {
   test(`page text and navigation links have AA contrast in ${colorScheme} mode`, async ({ page }) => {
     await page.emulateMedia({ colorScheme });

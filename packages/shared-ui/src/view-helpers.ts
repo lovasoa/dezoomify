@@ -14,26 +14,10 @@ export function formatPixelCount(pixels: number): string {
   });
 }
 
-export function truncateMiddle(value: string, max = 90): string {
-  const text = String(value ?? "");
-  if (text.length <= max) return text;
-  const half = Math.floor((max - 1) / 2);
-  return `${text.slice(0, half)}…${text.slice(text.length - half)}`;
-}
-
 // Bound free-form technical text while preserving the original details.
 export function trimTechnical(text: string, max = 2000): string {
   if (text.length <= max) return text;
   return `${text.slice(0, max)}…`;
-}
-
-export function displaySourceUrl(value: string): string {
-  try {
-    const url = new URL(value);
-    return truncateMiddle(`${url.host}${url.pathname}${url.search}${url.hash}`, 90);
-  } catch {
-    return "source unavailable";
-  }
 }
 
 export function hostFromUrl(url?: string): string {

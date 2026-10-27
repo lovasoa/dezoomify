@@ -1,7 +1,7 @@
 // Host-neutral React views for progress, interaction, and output.
 
 import type { Error as JobError } from "@dezoomify/wasm-bindings";
-import type { ReactElement, ReactNode } from "react";
+import type { CSSProperties, ReactElement, ReactNode } from "react";
 import { useEffect, useId, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import type { Root } from "react-dom/client";
@@ -10,7 +10,7 @@ import type { JobActivity } from "./activity.ts";
 import { canRetry, isDiscoveryFailure, plainMessageFor } from "./failure.ts";
 import { HistorySection } from "./history-view.tsx";
 import type { Presentation, ResolutionChoice } from "./presentation.ts";
-import { displaySourceUrl, formatPixelCount, hostFromUrl } from "./view-helpers.ts";
+import { formatPixelCount, hostFromUrl } from "./view-helpers.ts";
 import type { PlatformHints, ViewCallbacks, ViewContext, ViewRenderOptions } from "./view-types.ts";
 
 export { DEFAULT_PAGE_TITLE, jobPageTitle } from "./view-helpers.ts";
@@ -240,7 +240,6 @@ interface JobDerived {
   step: string;
   detail?: string;
   sourceUrl: string;
-  sourceTitle: string;
   timeText: string;
   countsText: string;
   determinate: boolean;
@@ -340,14 +339,12 @@ function deriveJob(presentation: Presentation, ctx?: ViewContext): JobDerived {
   const detail = presentation.detailKey
     ? t(presentation.detailKey, presentation.detailVars)
     : undefined;
-  const sourceTitle = ctx?.sourceUrl ?? activity.url ?? "";
-  const sourceUrl = sourceTitle ? displaySourceUrl(sourceTitle) : "";
+  const sourceUrl = ctx?.sourceUrl ?? activity.url ?? "";
   return {
     paused,
     step: jobStep(presentation, activity, paused, retrying, showStalled),
     ...(detail ? { detail } : {}),
     sourceUrl,
-    sourceTitle,
     timeText,
     countsText: jobCounts(progress),
     determinate,
@@ -367,6 +364,24 @@ function progressValueText(d: JobDerived, presentation: Presentation): string {
     active: d.active,
     remaining: Math.max(0, d.total - d.current - d.active),
   });
+}
+
+function SourceUrl({ url }: { url: string }) {
+  const midpoint = Math.ceil(url.length / 2);
+  return (
+    <span
+      className="dz-source-url"
+      id="dz-job-source-url"
+      style={
+        { "--dz-source-midpoint": `${(midpoint / (url.length || 1)) * 100}%` } as CSSProperties
+      }
+    >
+      <span className="dz-source-url-start">{url.slice(0, midpoint)}</span>
+      <span className="dz-source-url-end">
+        <bdi dir="ltr">{url.slice(midpoint)}</bdi>
+      </span>
+    </span>
+  );
 }
 
 function JobView({
@@ -410,12 +425,10 @@ function JobView({
         className="dz-job-source-row"
         id="dz-job-source-line"
         style={{ display: d.sourceUrl ? "" : "none" }}
-        title={d.sourceTitle}
+        title={d.sourceUrl}
       >
         <span className="dz-job-source-label">{t("view.job.sourceLabel")}</span>
-        <span className="dz-source-url" id="dz-job-source-url">
-          {d.sourceUrl}
-        </span>
+        <SourceUrl url={d.sourceUrl} />
         <span className="dz-job-time" id="dz-job-time">
           {d.timeText}
         </span>
