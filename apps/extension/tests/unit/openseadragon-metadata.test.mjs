@@ -69,3 +69,18 @@ test("malformed IIIF arrays cannot become partially valid snapshots", () => {
     assert.throws(() => readTileSource(PageObject.from({ ...source, tiles }), context.documentUrl));
   }
 });
+
+test("IIIF identifiers cover older and current OpenSeadragon sources", () => {
+  for (const key of ["@id", "_id", "id"]) {
+    const source = {
+      width: 1024,
+      height: 768,
+      tileFormat: "jpg",
+      [key]: "/iiif/image",
+      tiles: [{ width: 256, scaleFactors: [1, 2, 4] }],
+    };
+    const snapshot = readTileSource(PageObject.from(source), context.documentUrl);
+    assert.equal(snapshot.protocol, "iiif");
+    assert.equal(snapshot.id, "https://viewer.example/iiif/image");
+  }
+});

@@ -56,6 +56,7 @@ fn discover(
 #[test]
 fn live_grids_share_edge_geometry_and_keep_the_viewer_canonical() {
     let image = support::ready_image(discover(observation()).unwrap());
+    assert_eq!(image.format, "viewer");
     assert_eq!(image.source_url.as_deref(), Some("https://museum.test/art"));
     let dezoomify::core::TileSource::Grid(grid) = &image.levels[0].source else {
         panic!("viewer grid")
@@ -79,6 +80,40 @@ fn live_grids_share_edge_geometry_and_keep_the_viewer_canonical() {
         tiles[8].expected_size,
         Some(dezoomify::Vec2d { x: 1, y: 1 })
     );
+}
+
+#[test]
+fn recognized_metadata_precedes_a_live_loader_and_failure_keeps_the_loader_available() {
+    for (uri, available) in [
+        ("https://museum.test/image/info.json", true),
+        ("https://museum.test/iipsrv?IIIF=/image.tif/info.json", true),
+        ("https://museum.test/image/info.json", false),
+    ] {
+        let (result, requests) = support::discover_inputs(
+            default_registry(),
+            vec![
+                DiscoveryInput::with_contents(
+                    "https://museum.test/art#observed",
+                    serde_json::to_vec(&observation()).unwrap(),
+                )
+                .with_kind(DiscoveryInputKind::ObservedMetadata),
+                DiscoveryInput::new(uri).with_kind(DiscoveryInputKind::ObservedResource),
+            ],
+            Default::default(),
+            |request| {
+                assert_eq!(request, uri);
+                available.then(|| {
+                    Ok((
+                        include_bytes!("../../../fixtures/iiif/v3/info.json").to_vec(),
+                        None,
+                    ))
+                })
+            },
+        );
+        let image = support::ready_image(result.unwrap());
+        assert_eq!(image.format, if available { "iiif" } else { "viewer" });
+        assert_eq!(requests.len(), 1);
+    }
 }
 
 #[test]

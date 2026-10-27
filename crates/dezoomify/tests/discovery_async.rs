@@ -339,7 +339,7 @@ fn live_observations_win_before_blocked_http_access() {
 }
 
 #[test]
-fn loaded_page_wins_without_reading_the_viewers_catalog() {
+fn declared_catalog_precedes_the_loaded_pages_snapshot() {
     use dezoomify::model::DiscoveryInputKind;
     let catalog = futures::executor::block_on(core::default_registry().discover(
         vec![
@@ -357,15 +357,26 @@ fn loaded_page_wins_without_reading_the_viewers_catalog() {
                 .with_kind(DiscoveryInputKind::ObservedResource),
         ],
         Default::default(),
-        |_, _| async { panic!("the loaded image already supplies its metadata") },
+        |request, _| async move {
+            assert_eq!(
+                request.uri,
+                "https://api.onb.ac.at/iiif/presentation/v3/manifest/1000ABD0"
+            );
+            Ok(ResourceRead::Response {
+                response: ResourceResponse {
+                    bytes: include_bytes!("../../../fixtures/iiif/manifest/manifest.json").to_vec(),
+                    final_uri: None,
+                },
+            })
+        },
         support::parse_html,
         |_| async { panic!("no additional source access is needed") },
     ))
     .unwrap();
     assert_eq!(catalog.len(), 1);
-    assert_eq!(
-        support::ready_image(catalog).source_url.as_deref(),
-        Some("https://images.test/first/info.json")
+    assert!(
+        matches!(&catalog.entries()[0], core::DiscoveredEntry::Deferred(resource)
+        if resource.uri == "https://api.onb.ac.at/iiif/presentation/v3/v3/info.json")
     );
 }
 

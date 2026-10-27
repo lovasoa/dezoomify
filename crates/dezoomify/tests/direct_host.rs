@@ -15,7 +15,7 @@ fn supplied_viewer_metadata_preserves_all_images_without_fetching() {
     let larger = DZI.replace("512", "1024");
     let catalog = futures::executor::block_on(default_registry().discover(
         vec![
-            DiscoveryInput::with_contents("https://page.test", DZI),
+            DiscoveryInput::with_contents("https://page.test", "<html></html>"),
             DiscoveryInput::with_contents("https://page.test#openseadragon-0", DZI)
                 .with_kind(DiscoveryInputKind::ObservedMetadata),
             DiscoveryInput::with_contents("https://page.test#openseadragon-1", larger)

@@ -1,0 +1,24 @@
+<!doctype html>
+<meta charset="utf-8">
+<style>
+  #viewer, .mirador-viewer, .mirador-container, .mirador-osd-container {
+    width: 800px;
+    height: 600px;
+  }
+</style>
+<script src="/IIIF/mirador/mirador.js"></script>
+<div id="viewer" style="width:800px;height:600px"></div>
+<script>
+  $(() => {
+    Mirador({
+      id: "viewer",
+      layout: "1x1",
+      data: [{ manifestUri: "/IIIF/manifest/YSD/002463024.json", location: "My Repository" }],
+      windowObjects: [{
+        loadedManifest: "/IIIF/manifest/YSD/002463024.json",
+        canvasID: "https://iiif.nichibun.ac.jp/IIIF/YSD/1_canvas.json",
+        viewType: "ImageView"
+      }]
+    });
+  });
+</script>

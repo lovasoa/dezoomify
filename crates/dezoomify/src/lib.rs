@@ -26,6 +26,7 @@ pub mod pnav;
 pub mod second_canvas;
 pub mod topviewer;
 pub mod vec2d;
+pub mod viewer;
 pub mod vls;
 pub mod wmts;
 pub mod xlimage;

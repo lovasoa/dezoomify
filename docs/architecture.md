@@ -33,6 +33,9 @@ For shared tiled-image discovery, inputs can describe a source, an observed
 document, or an observed resource.
 The core interprets this evidence, orders discovery, and bounds traversal; an
 extension scan supplies evidence rather than recognizing formats itself.
+Declared source catalogs and recognized metadata resources precede reconstructed
+viewer snapshots, so a loaded canvas does not hide the rest of its manifest.
+The `viewer` format uses the page's tile loader; `generic` remains URL-template discovery.
 Discovery explores accessible alternatives before requesting interactive access.
 The Host owns the actual permission prompt. It can supply additional observations
 while discovery is running; each batch shares the existing job's cache and limits.

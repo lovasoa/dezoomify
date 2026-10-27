@@ -416,6 +416,9 @@ fn legacy_type(value: &StringOrArray, names: &[&str]) -> bool {
 
 fn image_service_info_uri(manifest_url: &str, service_id: &str) -> String {
     let resolved_uri = resolve_relative(manifest_url, service_id);
+    if let Some(uri) = super::append_to_iiif_query(&resolved_uri, "info.json") {
+        return uri;
+    }
     let Ok(mut url) = url::Url::parse(&resolved_uri) else {
         return resolved_uri;
     };

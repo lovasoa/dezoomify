@@ -81,7 +81,7 @@ function readIiifSource(source: PageObject, shape: SourceGeometry, baseURI: stri
   const version = source.number("version", 2);
   if ((version !== 2 && version !== 3) || source.matches("isLevel0", true))
     throw new Error("unsupported IIIF service");
-  const id = address(source.string("_id"), baseURI);
+  const id = address(iiifId(source), baseURI);
   const tiles = source.objects("tiles", 64).map(readIiifTile);
   if (!tiles.length) throw new Error("untiled IIIF");
   return { ...shape, protocol: "iiif", id, version, tiles };
@@ -123,12 +123,15 @@ function readIipTransforms(transform: PageObject | undefined): string {
   );
 }
 
+function iiifId(source: PageObject): string {
+  return source.string("_id") || source.string("@id") || source.string("id");
+}
+
 export function readTileSource(source: PageObject, baseURI: string): TileSource {
   const shape = geometry(source);
   if (source.truthy("tilesUrl") && source.truthy("fileFormat"))
     return readTiledSource(source, shape, baseURI);
-  if (source.truthy("_id") && source.truthy("tileFormat"))
-    return readIiifSource(source, shape, baseURI);
+  if (source.truthy("tileFormat") && iiifId(source)) return readIiifSource(source, shape, baseURI);
   if (source.truthy("iipsrv") && source.truthy("image"))
     return readIipSource(source, shape, baseURI);
   throw new Error("unsupported protocol");

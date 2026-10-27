@@ -4,9 +4,15 @@
 use std::collections::HashSet;
 
 use crate::Vec2d;
-use crate::core::discovery::Metadata;
-use crate::core::{DiscoveryError, DiscoveryResource, ImagePlan, ParsedResource, ResolvedLevel};
+use crate::core::discovery::{Metadata, json_metadata};
+use crate::core::{
+    DiscoveryError, DiscoveryResource, FormatSpec, ImagePlan, ParsedResource,
+    ResolvedLevel,
+};
 use crate::model::{TileSource, ViewerLevel, ViewerObservation, ViewerTileRequest};
+
+pub const SPEC: FormatSpec = FormatSpec::new("viewer", &[json_metadata::<ViewerObservation>()])
+    .with_display_name("Page viewer");
 
 impl Metadata for ViewerObservation {
     fn decode(self, _: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {

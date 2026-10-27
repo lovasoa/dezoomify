@@ -993,6 +993,8 @@ type SharedRead<'a> = futures_util::future::Shared<
 >;
 
 type Priority = (u8, usize, usize, usize);
+// Loaded snapshots supplement declared catalogs and recognized resource URLs.
+const OBSERVED_METADATA_RANK: u8 = 4;
 type Root = (u8, usize, usize, DiscoveryInput);
 type Candidate = (Priority, FormatSpec, String, bool);
 type BlockedCandidate = (Priority, FormatSpec, String);
@@ -1175,7 +1177,7 @@ where
                 };
                 if supported && visited.insert(uri.clone()) && roots.len() < self.limits.resources {
                     let depth = self.depths.borrow().get(request).copied().unwrap_or(0) + 1;
-                    roots.push((4, depth, *branch, DiscoveryInput::new(uri)));
+                    roots.push((5, depth, *branch, DiscoveryInput::new(uri)));
                     *branch += 1;
                 }
             }
@@ -1223,7 +1225,14 @@ where
     ) -> Result<Option<DiscoveryCatalog>, DiscoveryError> {
         for (rank, spec, uri) in candidates {
             match self
-                .resolve(spec, &uri, true, &Cell::new(rank), rank, rank.0 == 0)
+                .resolve(
+                    spec,
+                    &uri,
+                    true,
+                    &Cell::new(rank),
+                    rank,
+                    rank.0 == OBSERVED_METADATA_RANK,
+                )
                 .await
             {
                 Ok(Some((_, catalog))) => return Ok(Some(catalog)),
@@ -1466,7 +1475,7 @@ fn decode_resource(
 
 fn evidence_rank(input: &DiscoveryInput, specs: &[FormatSpec]) -> u8 {
     match input.kind {
-        DiscoveryInputKind::ObservedMetadata if input.contents.is_some() => 0,
+        DiscoveryInputKind::ObservedMetadata if input.contents.is_some() => OBSERVED_METADATA_RANK,
         DiscoveryInputKind::Source => 1,
         DiscoveryInputKind::ObservedDocument if input.contents.is_some() => 2,
         _ => match specs
@@ -1475,13 +1484,15 @@ fn evidence_rank(input: &DiscoveryInput, specs: &[FormatSpec]) -> u8 {
             .min()
         {
             Some(RouteKind::Metadata | RouteKind::Image) => 3,
-            Some(RouteKind::Viewer) => 4,
-            None => 5,
+            Some(RouteKind::Viewer) => 5,
+            None => 6,
         },
     }
 }
 
 /// Resolve formats through shared, bounded resource reads and Host observations.
+/// Declared source catalogs and recognized metadata URLs precede reconstructed
+/// viewer snapshots; snapshots still precede speculative viewer navigation.
 pub async fn discover<F, Fut, P, PFut, O, OFut>(
     inputs: Vec<DiscoveryInput>,
     specs: &[FormatSpec],
@@ -1637,7 +1648,7 @@ fn record_resolution(
                 rank.2,
                 rank.3,
             );
-            if rank.0 == 0 {
+            if rank.0 == OBSERVED_METADATA_RANK {
                 metadata.push((rank, catalog));
             } else if winner.as_ref().is_none_or(|(best, _)| rank < *best) {
                 *winner = Some((rank, catalog));
