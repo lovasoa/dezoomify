@@ -231,47 +231,50 @@ fn an_earlier_ordinary_read_keeps_precedence_over_a_later_ready_image() {
 }
 #[test]
 fn a_later_stalled_read_cannot_delay_an_earlier_winner() {
-    let started = Cell::new(0);
-    let registry = registry();
-    let future = registry.discover(
-        vec![DiscoveryInput::new("https://test/root")],
-        Default::default(),
-        |request, _| {
-            started.set(started.get() + 1);
-            async move {
-                if request.uri.ends_with("/b") {
-                    return std::future::pending().await;
-                }
-                let mut yielded = false;
-                futures::future::poll_fn(|cx| {
-                    if yielded {
-                        Poll::Ready(())
-                    } else {
-                        yielded = true;
-                        cx.waker().wake_by_ref();
-                        Poll::Pending
+    for resources in [1, 2] {
+        let started = Cell::new(0);
+        let (send, receive) = futures::channel::oneshot::channel();
+        let receive = RefCell::new(Some(receive));
+        let registry = registry();
+        let future = registry.discover(
+            vec![DiscoveryInput::new("https://test/root")],
+            DiscoveryLimits {
+                resources,
+                ..Default::default()
+            },
+            |request, _| {
+                started.set(started.get() + 1);
+                let receive = if request.uri.ends_with("/a") {
+                    receive.borrow_mut().take()
+                } else {
+                    None
+                };
+                async move {
+                    if request.uri.ends_with("/b") {
+                        return std::future::pending().await;
                     }
-                })
-                .await;
-                Ok(response("first"))
-            }
-        },
-        support::parse_html,
-        |_| async { Ok(Vec::new()) },
-    );
-    let mut future = Box::pin(future);
-    assert!(future.as_mut().now_or_never().is_none());
-    assert_eq!(started.get(), 2);
-    assert_eq!(
-        selected(
-            future
-                .as_mut()
-                .now_or_never()
-                .expect("later pending read must not block")
-                .unwrap()
-        ),
-        "first"
-    );
+                    receive.expect("first read waits").await.unwrap();
+                    Ok(response("first"))
+                }
+            },
+            support::parse_html,
+            |_| async { Ok(Vec::new()) },
+        );
+        let mut future = Box::pin(future);
+        assert!(future.as_mut().now_or_never().is_none());
+        assert_eq!(started.get(), resources);
+        send.send(()).unwrap();
+        assert_eq!(
+            selected(
+                future
+                    .as_mut()
+                    .now_or_never()
+                    .expect("later pending read must not block")
+                    .unwrap()
+            ),
+            "first"
+        );
+    }
 }
 #[test]
 fn blocked_access_yields_to_ordinary_work_without_asking_for_permission() {
@@ -412,11 +415,12 @@ fn deferred_frame_observations_precede_permissions_for_unrelated_resources() {
 #[test]
 fn a_new_source_session_can_make_an_already_rejected_metadata_url_readable() {
     const URL: &str = "https://viewer.test/file.dzi";
-    let granted = Cell::new(false);
-    let reads = Cell::new(0);
-    let catalog = futures::executor::block_on(core::default_registry().discover(
+    for resources in [1, 2] {
+        let granted = Cell::new(false);
+        let reads = Cell::new(0);
+        let result = futures::executor::block_on(core::default_registry().discover(
         vec![DiscoveryInput::new(URL)],
-        Default::default(),
+        DiscoveryLimits { resources, ..Default::default() },
         |_, _| {
             reads.set(reads.get() + 1);
             let body = if granted.get() {
@@ -431,9 +435,14 @@ fn a_new_source_session_can_make_an_already_rejected_metadata_url_readable() {
             } else { Vec::new() };
             async { Ok(inputs) }
         },
-    )).unwrap();
-    assert_eq!(support::ready_image(catalog).format, "deepzoom");
-    assert_eq!(reads.get(), 2);
+    ));
+        if resources == 1 {
+            assert_eq!(result.unwrap_err(), DiscoveryError::ResourceLimitExceeded);
+        } else {
+            assert_eq!(support::ready_image(result.unwrap()).format, "deepzoom");
+        }
+        assert_eq!(reads.get(), resources);
+    }
 }
 
 #[test]
@@ -482,42 +491,51 @@ fn additional_rendered_documents_replace_inert_reads_and_continue_recursive_disc
 }
 #[test]
 fn deferred_access_runs_after_every_runnable_branch_and_reuses_its_resource() {
-    let calls = RefCell::new(Vec::new());
-    let registry = registry();
-    let catalog = futures::executor::block_on(registry.discover(
-        vec![DiscoveryInput::new("https://test/root")],
-        Default::default(),
-        |request, interaction| {
-            calls.borrow_mut().push((request.uri.clone(), interaction));
-            async move {
-                if request.uri.ends_with("/b") {
-                    return Err(Error::DiscoveryFailed {
-                        failure: "unavailable".to_string().into(),
-                        cause: None,
-                    });
-                }
-                Ok(if interaction == Interaction::Forbidden {
-                    ResourceRead::NeedsAccess {
-                        origin: "https://test".into(),
+    for resources in [2, 3] {
+        let calls = RefCell::new(Vec::new());
+        let registry = registry();
+        let result = futures::executor::block_on(registry.discover(
+            vec![DiscoveryInput::new("https://test/root")],
+            DiscoveryLimits {
+                resources,
+                ..Default::default()
+            },
+            |request, interaction| {
+                calls.borrow_mut().push((request.uri.clone(), interaction));
+                async move {
+                    if request.uri.ends_with("/b") {
+                        return Err(Error::DiscoveryFailed {
+                            failure: "unavailable".to_string().into(),
+                            cause: None,
+                        });
                     }
-                } else {
-                    response("authorized")
-                })
-            }
-        },
-        support::parse_html,
-        |_| async { Ok(Vec::new()) },
-    ))
-    .unwrap();
-    assert_eq!(selected(catalog), "authorized");
-    assert_eq!(
-        *calls.borrow(),
-        [
-            ("https://test/a".into(), Interaction::Forbidden),
-            ("https://test/b".into(), Interaction::Forbidden),
-            ("https://test/a".into(), Interaction::Allowed)
-        ]
-    );
+                    Ok(if interaction == Interaction::Forbidden {
+                        ResourceRead::NeedsAccess {
+                            origin: "https://test".into(),
+                        }
+                    } else {
+                        response("authorized")
+                    })
+                }
+            },
+            support::parse_html,
+            |_| async { Ok(Vec::new()) },
+        ));
+        if resources == 2 {
+            assert_eq!(result.unwrap_err(), DiscoveryError::ResourceLimitExceeded);
+            assert_eq!(calls.borrow().len(), 2);
+            continue;
+        }
+        assert_eq!(selected(result.unwrap()), "authorized");
+        assert_eq!(
+            *calls.borrow(),
+            [
+                ("https://test/a".into(), Interaction::Forbidden),
+                ("https://test/b".into(), Interaction::Forbidden),
+                ("https://test/a".into(), Interaction::Allowed)
+            ]
+        );
+    }
 }
 fn branch(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
     if resource.context().resources().next().is_none() {

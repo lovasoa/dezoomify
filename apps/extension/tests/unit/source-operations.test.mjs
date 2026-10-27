@@ -56,7 +56,6 @@ test("candidate snapshot includes the document and retained resources in one bat
         { url: "https://cdn.example/viewer.js", kind: "observed-resource" },
         { url: "https://gallery.example/info.json", kind: "observed-resource" },
       ],
-      overflow: 0,
     });
   } finally {
     globalThis.location = oldLocation;
@@ -163,8 +162,8 @@ test("candidate snapshot retains late image resources after a busy page's assets
   const oldLocation = globalThis.location;
   const oldPerformance = globalThis.performance;
   globalThis.location = { href: "https://gallery.example/page" };
-  const entries = Array.from({ length: 400 }, (_, i) => ({
-    name: `https://cdn.example/${i}.js`,
+  const entries = Array.from({ length: 5000 }, (_, i) => ({
+    name: `https://cdn.example/${i}.js?${"x".repeat(256)}`,
   }));
   const tile = "https://gallery.example/proxy?filename=painting_files/9/0_0.jpg";
   entries.push({ name: tile }, { name: tile });
@@ -175,40 +174,11 @@ test("candidate snapshot retains late image resources after a busy page's assets
     assert.equal(result.inputs[0].url, "https://gallery.example/page");
     assert.deepEqual(
       result.inputs.slice(1).map((input) => input.url),
-      [...entries.slice(0, 400).map((entry) => entry.name), tile],
+      [...entries.slice(0, 5000).map((entry) => entry.name), tile],
     );
-    assert.equal(result.overflow, 0);
   } finally {
     globalThis.location = oldLocation;
     globalThis.performance = oldPerformance;
-  }
-});
-
-test("resource URL bytes are bounded independently of the document", () => {
-  const previous = {
-    location: globalThis.location,
-    document: globalThis.document,
-    performance: globalThis.performance,
-  };
-  const url = "https://gallery.example/é";
-  globalThis.location = { href: "https://gallery.example/page" };
-  globalThis.document = {
-    contentType: "text/html",
-    documentElement: { outerHTML: "<html>rendered document</html>" },
-  };
-  globalThis.performance = {
-    getEntriesByType: () => [{ name: url }, { name: `${url}/too-large` }],
-  };
-  try {
-    const result = collectSnapshot({
-      ...sourceSnapshotLimits,
-      resourceBytes: new TextEncoder().encode(url).byteLength,
-    });
-    assert.equal(result.inputs[0].contents, globalThis.document.documentElement.outerHTML);
-    assert.deepEqual(result.inputs[1], { url, kind: "observed-resource" });
-    assert.equal(result.overflow, 1);
-  } finally {
-    Object.assign(globalThis, previous);
   }
 });
 

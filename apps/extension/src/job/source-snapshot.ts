@@ -4,29 +4,24 @@ import type { DiscoveryInputKind, JobInput } from "@dezoomify/wasm-bindings";
 export const sourceSnapshotLimits = {
   urlLength: 2048,
   documentBytes: 8 * 1024 * 1024,
-  resourceBytes: 1024 * 1024,
 };
 
-/** The document precedes URL-only resources. Overflow counts resource entries
- * omitted by the URL byte budget. */
+/** The document precedes URL-only resources. */
 export interface SourceSnapshot {
   ok: true;
   documentUrl: string;
   inputs: JobInput[];
-  overflow: number;
 }
 
 /** One finite snapshot after explicit source access. Pass limits as arguments:
  * scripting.executeScript serializes this function without module scope.
- * URL evidence has its own byte budget, independent of discovery's read budget.
+ * Supply the complete URL inventory; Rust ranks it before attempting reads.
  * The job page owns frame traversal and validates the reply before using it. */
 export function collectCandidates(limits: typeof sourceSnapshotLimits): SourceSnapshot {
   const documentUrl = String(globalThis.location?.href ?? "");
   const inputs: JobInput[] = [];
   const seen = new Set<string>();
   const encoder = new TextEncoder();
-  let resourceBytes = 0;
-  let overflow = 0;
   function readableContents(contents: unknown): string | undefined {
     return typeof contents === "string" &&
       contents.length > 0 &&
@@ -45,13 +40,7 @@ export function collectCandidates(limits: typeof sourceSnapshotLimits): SourceSn
   }
   const append = (value: unknown, kind: DiscoveryInputKind, contents?: unknown) => {
     if (!publicUrl(value) || seen.has(value)) return;
-    const bytes = encoder.encode(value).byteLength;
-    if (kind === "observed-resource" && resourceBytes + bytes > limits.resourceBytes) {
-      overflow++;
-      return;
-    }
     seen.add(value);
-    if (kind === "observed-resource") resourceBytes += bytes;
     const supplied = readableContents(contents);
     inputs.push({ url: value, kind, ...(supplied !== undefined ? { contents: supplied } : {}) });
   };
@@ -77,7 +66,7 @@ export function collectCandidates(limits: typeof sourceSnapshotLimits): SourceSn
       }
     } catch {}
   }
-  return { ok: true, documentUrl, inputs, overflow };
+  return { ok: true, documentUrl, inputs };
 
   function imageDocument() {
     return globalThis.document?.contentType?.startsWith("image/") ?? false;
