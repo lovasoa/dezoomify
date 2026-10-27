@@ -70,12 +70,17 @@ export class PageTraversal {
     return elements;
   }
 
-  private async enqueueProperties(value: PageObject, queue: PageObject[]): Promise<void> {
+  /** Collect direct viewers before their neighbors can exhaust the graph budget. */
+  private async enqueueProperties(
+    value: PageObject,
+    realm: PageRealm,
+    queue: PageObject[],
+  ): Promise<void> {
     if (value.nativeFunction()) return;
     for (const key of value.keys()) {
       if (!this.state.takeReference() || queue.length >= scanLimits.references) break;
       const reference = value.reference(key);
-      if (reference) queue.push(reference);
+      if (reference && !(await this.viewers.read(reference, realm.document))) queue.push(reference);
       await this.state.yieldSlice();
     }
   }
@@ -87,7 +92,7 @@ export class PageTraversal {
   ): Promise<void> {
     if (await this.viewers.read(value, realm.document)) return;
     if (await this.viewers.registry(value, realm)) return;
-    await this.enqueueProperties(value, queue);
+    await this.enqueueProperties(value, realm, queue);
   }
 
   private async scanReferences(realm: PageRealm, queue: PageObject[]): Promise<void> {
