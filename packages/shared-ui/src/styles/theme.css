@@ -1025,12 +1025,10 @@ abbr[title] {
 .dz-job-source-row {
   margin: 0;
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 0.55rem;
   font-size: 0.85rem;
   color: var(--dz-text-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 100%;
   min-width: 0;
@@ -1041,10 +1039,36 @@ abbr[title] {
 }
 
 .dz-source-url {
+  --dz-source-tail-width: round(nearest, calc(100% - var(--dz-source-midpoint)), 1ch);
+  flex: 0 1 auto;
+  min-width: 0;
   font-family: var(--dz-font-mono);
   font-size: 0.82rem;
   color: var(--dz-text-secondary);
-  word-break: break-all;
+  user-select: all;
+}
+
+/* Inline boxes preserve native selection and copying across both URL halves. */
+.dz-source-url > span {
+  display: inline-block;
+  overflow: hidden;
+  vertical-align: bottom;
+}
+
+.dz-source-url-start {
+  max-width: calc(100% - var(--dz-source-tail-width));
+  text-overflow: ellipsis;
+}
+
+.dz-source-url-scheme {
+  font-size: 0;
+}
+
+.dz-source-url-end {
+  /* Snap the monospaced suffix to whole characters instead of clipping glyphs. */
+  max-width: var(--dz-source-tail-width);
+  /* Clip the start of this half; its bdi keeps the URL text left-to-right. */
+  direction: rtl;
 }
 
 .dz-job-time {
