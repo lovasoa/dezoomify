@@ -6,8 +6,7 @@ use std::collections::HashSet;
 use crate::Vec2d;
 use crate::core::discovery::{Metadata, json_metadata};
 use crate::core::{
-    DiscoveryError, DiscoveryResource, FormatSpec, ImagePlan, ParsedResource,
-    ResolvedLevel,
+    DiscoveryError, DiscoveryResource, FormatSpec, ImagePlan, ParsedResource, ResolvedLevel,
 };
 use crate::model::{TileSource, ViewerLevel, ViewerObservation, ViewerTileRequest};
 

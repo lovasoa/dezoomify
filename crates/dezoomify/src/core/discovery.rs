@@ -993,8 +993,8 @@ type SharedRead<'a> = futures_util::future::Shared<
 >;
 
 type Priority = (u8, usize, usize, usize);
-// Loaded snapshots supplement declared catalogs and recognized resource URLs.
-const OBSERVED_METADATA_RANK: u8 = 4;
+const OBSERVED_METADATA_RANK: u8 = 1;
+const OBSERVED_VIEWER_RANK: u8 = 4;
 type Root = (u8, usize, usize, DiscoveryInput);
 type Candidate = (Priority, FormatSpec, String, bool);
 type BlockedCandidate = (Priority, FormatSpec, String);
@@ -1231,7 +1231,7 @@ where
                     true,
                     &Cell::new(rank),
                     rank,
-                    rank.0 == OBSERVED_METADATA_RANK,
+                    matches!(rank.0, OBSERVED_METADATA_RANK | OBSERVED_VIEWER_RANK),
                 )
                 .await
             {
@@ -1476,7 +1476,8 @@ fn decode_resource(
 fn evidence_rank(input: &DiscoveryInput, specs: &[FormatSpec]) -> u8 {
     match input.kind {
         DiscoveryInputKind::ObservedMetadata if input.contents.is_some() => OBSERVED_METADATA_RANK,
-        DiscoveryInputKind::Source => 1,
+        DiscoveryInputKind::ObservedViewer if input.contents.is_some() => OBSERVED_VIEWER_RANK,
+        DiscoveryInputKind::Source => 0,
         DiscoveryInputKind::ObservedDocument if input.contents.is_some() => 2,
         _ => match specs
             .iter()
@@ -1491,8 +1492,9 @@ fn evidence_rank(input: &DiscoveryInput, specs: &[FormatSpec]) -> u8 {
 }
 
 /// Resolve formats through shared, bounded resource reads and Host observations.
-/// Declared source catalogs and recognized metadata URLs precede reconstructed
-/// viewer snapshots; snapshots still precede speculative viewer navigation.
+/// Declared source catalogs precede reconstructed format metadata. Complete
+/// snapshots retain loader-only siblings; otherwise recognized resource URLs
+/// precede live page-loader fallback. All precede speculative navigation.
 pub async fn discover<F, Fut, P, PFut, O, OFut>(
     inputs: Vec<DiscoveryInput>,
     specs: &[FormatSpec],
@@ -1596,12 +1598,19 @@ fn tier_candidates(roots: &mut Vec<Root>, specs: &[FormatSpec]) -> Vec<Candidate
     let tier = roots
         .first()
         .map(|(evidence, depth, _, _)| (*evidence, *depth));
-    let ready = roots
-        .iter()
-        .take_while(|(evidence, depth, _, _)| Some((*evidence, *depth)) == tier)
-        .count();
-    for (evidence, depth, order, input) in roots.drain(..ready) {
-        let metadata_only = input.kind == DiscoveryInputKind::ObservedMetadata;
+    // A complete format snapshot starts a catalog of all loaded images,
+    // including siblings that can only be read through their page loader.
+    let include_viewers = tier.is_some_and(|(rank, _)| rank == OBSERVED_METADATA_RANK);
+    for (evidence, depth, order, input) in std::mem::take(roots) {
+        if Some((evidence, depth)) != tier && !(include_viewers && evidence == OBSERVED_VIEWER_RANK)
+        {
+            roots.push((evidence, depth, order, input));
+            continue;
+        }
+        let metadata_only = matches!(
+            input.kind,
+            DiscoveryInputKind::ObservedMetadata | DiscoveryInputKind::ObservedViewer
+        );
         let mut formats = specs.to_vec();
         formats.sort_by_key(|spec| {
             let kind = spec.url_kind(&input.url);
@@ -1648,7 +1657,7 @@ fn record_resolution(
                 rank.2,
                 rank.3,
             );
-            if rank.0 == OBSERVED_METADATA_RANK {
+            if matches!(rank.0, OBSERVED_METADATA_RANK | OBSERVED_VIEWER_RANK) {
                 metadata.push((rank, catalog));
             } else if winner.as_ref().is_none_or(|(best, _)| rank < *best) {
                 *winner = Some((rank, catalog));

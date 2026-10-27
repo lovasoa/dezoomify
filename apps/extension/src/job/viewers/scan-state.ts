@@ -1,10 +1,4 @@
-import type {
-  ObservedMetadata,
-  ScanDiagnostics,
-  ScanResult,
-  StopReason,
-  ViewerEvidence,
-} from "./types.ts";
+import type { ScanDiagnostics, ScanResult, StopReason, ViewerEvidence } from "./types.ts";
 
 export const scanLimits = {
   documents: 16,
@@ -29,7 +23,7 @@ function yieldTask(): Promise<void> {
 }
 
 export class ScanState {
-  readonly inputs: ObservedMetadata[] = [];
+  readonly inputs: ViewerEvidence["input"][] = [];
   readonly handles = new Set<string>();
   readonly diagnostics: ScanDiagnostics = {
     documents: 0,

@@ -79,7 +79,8 @@ function validCandidate(value: unknown): value is CandidateInput {
     value.kind !== "source" &&
     value.kind !== "observed-document" &&
     value.kind !== "observed-resource" &&
-    value.kind !== "observed-metadata"
+    value.kind !== "observed-metadata" &&
+    value.kind !== "observed-viewer"
   )
     return false;
   if (value.url.length > MAX_URL_LENGTH || !isPublicHttpUrl(value.url)) return false;
@@ -171,10 +172,14 @@ function observedMetadata(inputs: unknown[]): CandidateInput[] {
   const observed: CandidateInput[] = [];
   for (const input of inputs) {
     if (!validCandidate(input)) continue;
-    if (input.kind !== "observed-metadata" || typeof input.contents !== "string") continue;
+    if (
+      (input.kind !== "observed-metadata" && input.kind !== "observed-viewer") ||
+      typeof input.contents !== "string"
+    )
+      continue;
     const candidate: CandidateInput = {
       url: input.url,
-      kind: "observed-metadata",
+      kind: input.kind,
       contents: input.contents,
     };
     bytes += new TextEncoder().encode(JSON.stringify(candidate)).byteLength;

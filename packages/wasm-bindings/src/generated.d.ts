@@ -146,7 +146,7 @@ export interface OutputGrid {
 
 /**
  * Complete, finite pixel grids observed in a live viewer. Serialize as supplied
- * `observed-metadata`; the Host resolves `handle` for this job only.
+ * `observed-viewer`; the Host resolves `handle` for this job only.
  * These are source images, independent of viewport rotation, pan or overlays.
  */
 export interface ViewerObservation {
@@ -336,7 +336,8 @@ export interface JobInput {
     url: string;
     /**
      * Supplied UTF-8 document instead of fetching `url`. Initial inputs must be
-     * nonempty and within `Options.max_bytes`; observed metadata never follows links.
+     * nonempty and within `Options.max_bytes`; observed metadata and viewer grids
+     * never follow links.
      */
     contents?: string;
     kind?: DiscoveryInputKind;
@@ -613,7 +614,7 @@ export interface Failure {
  * The source of discovery evidence. Products report facts; core discovery
  * decides when a supplied document or observed resource is relevant.
  */
-export type DiscoveryInputKind = "source" | "observed-document" | "observed-resource" | "observed-metadata";
+export type DiscoveryInputKind = "source" | "observed-document" | "observed-resource" | "observed-metadata" | "observed-viewer";
 
 /**
  * Timing observed when a Host operation completes. Readings must be

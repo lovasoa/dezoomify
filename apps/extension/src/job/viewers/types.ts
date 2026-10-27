@@ -3,7 +3,7 @@ import type { JobInput } from "@dezoomify/wasm-bindings";
 export type ObservedMetadata = JobInput & { kind: "observed-metadata"; contents: string };
 
 export interface ViewerEvidence {
-  input: ObservedMetadata;
+  input: JobInput & { kind: "observed-metadata" | "observed-viewer"; contents: string };
   handle?: string;
 }
 
@@ -80,7 +80,7 @@ export interface ScanDiagnostics {
 export interface ScanResult {
   ok: true;
   documentUrl: string;
-  inputs: ObservedMetadata[];
+  inputs: ViewerEvidence["input"][];
   handles: string[];
   diagnostics: ScanDiagnostics;
 }

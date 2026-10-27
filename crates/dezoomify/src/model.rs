@@ -561,6 +561,9 @@ pub enum DiscoveryInputKind {
     ObservedResource,
     /// Complete metadata reconstructed from a loaded viewer; never fetched.
     ObservedMetadata,
+    /// Finite grids backed by a live page loader, used after supported metadata.
+    /// Supplied contents are required and never follow links.
+    ObservedViewer,
 }
 
 /// One discovery input. An omitted kind is a user-supplied source for
@@ -572,7 +575,8 @@ pub struct JobInput {
     /// Source address and base for relative references; native hosts may accept paths.
     pub url: String,
     /// Supplied UTF-8 document instead of fetching `url`. Initial inputs must be
-    /// nonempty and within `Options.max_bytes`; observed metadata never follows links.
+    /// nonempty and within `Options.max_bytes`; observed metadata and viewer grids
+    /// never follow links.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub contents: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -584,7 +588,7 @@ pub struct JobInput {
 pub type JobInputs = Vec<JobInput>;
 
 /// Complete, finite pixel grids observed in a live viewer. Serialize as supplied
-/// `observed-metadata`; the Host resolves `handle` for this job only.
+/// `observed-viewer`; the Host resolves `handle` for this job only.
 /// These are source images, independent of viewport rotation, pan or overlays.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]

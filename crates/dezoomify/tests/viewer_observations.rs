@@ -45,7 +45,7 @@ fn discover(
                 "https://museum.test/art#observed",
                 serde_json::to_vec(&observation).unwrap(),
             )
-            .with_kind(DiscoveryInputKind::ObservedMetadata),
+            .with_kind(DiscoveryInputKind::ObservedViewer),
         ],
         DiscoveryLimits::default(),
         |_| panic!("complete observations must not fetch metadata"),
@@ -83,6 +83,36 @@ fn live_grids_share_edge_geometry_and_keep_the_viewer_canonical() {
 }
 
 #[test]
+fn complete_format_metadata_keeps_loader_only_siblings_without_fetching() {
+    let (catalog, requests) = support::discover_inputs(
+        default_registry(),
+        vec![
+            DiscoveryInput::with_contents(
+                "https://museum.test/art#observed",
+                serde_json::to_vec(&observation()).unwrap(),
+            )
+            .with_kind(DiscoveryInputKind::ObservedViewer),
+            DiscoveryInput::with_contents(
+                "https://museum.test/image/info.json",
+                include_bytes!("../../../fixtures/iiif/v3/info.json").to_vec(),
+            )
+            .with_kind(DiscoveryInputKind::ObservedMetadata),
+        ],
+        Default::default(),
+        |_| panic!("complete snapshots must not fetch"),
+    );
+    let catalog = catalog.unwrap();
+    assert_eq!(catalog.len(), 2);
+    assert!(
+        matches!(&catalog.entries()[0], dezoomify::core::DiscoveredEntry::Ready(image) if image.format == "iiif")
+    );
+    assert!(
+        matches!(&catalog.entries()[1], dezoomify::core::DiscoveredEntry::Ready(image) if image.format == "viewer")
+    );
+    assert!(requests.is_empty());
+}
+
+#[test]
 fn recognized_metadata_precedes_a_live_loader_and_failure_keeps_the_loader_available() {
     for (uri, available) in [
         ("https://museum.test/image/info.json", true),
@@ -96,7 +126,7 @@ fn recognized_metadata_precedes_a_live_loader_and_failure_keeps_the_loader_avail
                     "https://museum.test/art#observed",
                     serde_json::to_vec(&observation()).unwrap(),
                 )
-                .with_kind(DiscoveryInputKind::ObservedMetadata),
+                .with_kind(DiscoveryInputKind::ObservedViewer),
                 DiscoveryInput::new(uri).with_kind(DiscoveryInputKind::ObservedResource),
             ],
             Default::default(),
