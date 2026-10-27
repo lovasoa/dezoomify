@@ -138,6 +138,12 @@ function prepareViewer(mode) {
     configureReferenceLimit();
   }
   function configureReferenceLimit() {
+    if (mode === "global") {
+      delete window.OpenSeadragon;
+      viewer.setMouseNavEnabled(false);
+      window.referenceFlood = Object.fromEntries(Array.from({ length: 20000 }, (_, i) => [i, i]));
+      window.loadedViewer = viewer;
+    }
     if (mode === "large-properties") {
       delete window.OpenSeadragon;
       viewer.setMouseNavEnabled(false);
@@ -202,6 +208,7 @@ for (const [name, engine] of [
         "http-frame",
         "large-dom",
         "large-properties",
+        "global",
         "large-registry",
         "negative",
         "throwing-listener",
