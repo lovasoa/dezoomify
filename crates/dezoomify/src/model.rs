@@ -587,6 +587,41 @@ pub struct JobInput {
 /// sources are available under the requested interaction policy.
 pub type JobInputs = Vec<JobInput>;
 
+/// A complete snapshot supplied by an identified live viewer. Contents are
+/// required: discovery decodes these bytes without fetching or following links.
+/// Its wire representation is also accepted wherever a [`JobInput`] is expected.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub struct ObservedInput {
+    pub url: String,
+    pub contents: String,
+    pub kind: ObservedInputKind,
+}
+
+/// Supported format metadata can be used directly; viewer grids require a
+/// loader retained by the Host for this exact source document and job.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub enum ObservedInputKind {
+    #[serde(rename = "observed-metadata")]
+    Metadata,
+    #[serde(rename = "observed-viewer")]
+    Viewer,
+}
+
+impl From<ObservedInput> for JobInput {
+    fn from(input: ObservedInput) -> Self {
+        Self {
+            url: input.url,
+            contents: Some(input.contents),
+            kind: Some(match input.kind {
+                ObservedInputKind::Metadata => DiscoveryInputKind::ObservedMetadata,
+                ObservedInputKind::Viewer => DiscoveryInputKind::ObservedViewer,
+            }),
+        }
+    }
+}
+
 /// Complete, finite pixel grids observed in a live viewer. Serialize as supplied
 /// `observed-viewer`; the Host resolves `handle` for this job only.
 /// These are source images, independent of viewport rotation, pan or overlays.
@@ -1737,6 +1772,31 @@ pub fn has_secret_params(url: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn complete_observations_use_the_job_input_wire_format() {
+        for kind in [ObservedInputKind::Metadata, ObservedInputKind::Viewer] {
+            let observed = ObservedInput {
+                url: "https://museum.test/image".into(),
+                contents: "snapshot".into(),
+                kind,
+            };
+            let wire = serde_json::to_value(&observed).unwrap();
+            let input: JobInput = serde_json::from_value(wire.clone()).unwrap();
+            assert_eq!(input, observed.into());
+            for missing in ["contents", "kind"] {
+                let mut incomplete = wire.clone();
+                incomplete.as_object_mut().unwrap().remove(missing);
+                assert!(serde_json::from_value::<ObservedInput>(incomplete).is_err());
+            }
+        }
+        assert!(
+            serde_json::from_value::<ObservedInput>(serde_json::json!({
+                "url": "https://museum.test/image", "contents": "snapshot", "kind": "source"
+            }))
+            .is_err()
+        );
+    }
 
     #[test]
     fn compression_estimates_follow_encoder_mapping_and_output_layout() {

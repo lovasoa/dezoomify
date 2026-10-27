@@ -15,6 +15,17 @@ export function applyProcessing(recipe: ProcessingRecipe, bytes: Uint8Array): Ui
 export type ProcessingRecipe = "none" | "google-arts-decrypt";
 
 /**
+ * A complete snapshot supplied by an identified live viewer. Contents are
+ * required: discovery decodes these bytes without fetching or following links.
+ * Its wire representation is also accepted wherever a [`JobInput`] is expected.
+ */
+export interface ObservedInput {
+    url: string;
+    contents: string;
+    kind: ObservedInputKind;
+}
+
+/**
  * A direct resource read, including its redirected base address. For a ranged
  * request, bytes cover exactly the requested interval; the Host validates this
  * contract before returning a successful response.
@@ -584,6 +595,12 @@ export interface LimitContext {
     bytes_required?: number;
     bytes_available?: number;
 }
+
+/**
+ * Supported format metadata can be used directly; viewer grids require a
+ * loader retained by the Host for this exact source document and job.
+ */
+export type ObservedInputKind = "observed-metadata" | "observed-viewer";
 
 /**
  * The meaning of the existing compression setting for a codec.

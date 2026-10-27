@@ -1,3 +1,4 @@
+import type { ObservedInput } from "@dezoomify/wasm-bindings";
 import type { PageObject } from "../viewers/page-object.ts";
 import type {
   DziSource,
@@ -5,7 +6,6 @@ import type {
   IiifTile,
   IipSource,
   MetadataContext,
-  ObservedMetadata,
   SourceGeometry,
   TileSource,
   ZoomifySource,
@@ -137,7 +137,7 @@ export function readTileSource(source: PageObject, baseURI: string): TileSource 
   throw new Error("unsupported protocol");
 }
 
-function dziMetadata(source: DziSource, context: MetadataContext): ObservedMetadata {
+function dziMetadata(source: DziSource, context: MetadataContext): ObservedInput {
   const identity = new URL(context.documentUrl);
   identity.hash = `dezoomify-openseadragon-${context.imageIndex}`;
   return {
@@ -156,7 +156,7 @@ function dziMetadata(source: DziSource, context: MetadataContext): ObservedMetad
   };
 }
 
-function zoomifyMetadata(source: ZoomifySource): ObservedMetadata {
+function zoomifyMetadata(source: ZoomifySource): ObservedInput {
   return {
     kind: "observed-metadata",
     url: `${source.base.replace(/\/$/, "")}/ImageProperties.xml`,
@@ -164,7 +164,7 @@ function zoomifyMetadata(source: ZoomifySource): ObservedMetadata {
   };
 }
 
-function iiifMetadata(source: IiifSource): ObservedMetadata {
+function iiifMetadata(source: IiifSource): ObservedInput {
   return {
     kind: "observed-metadata",
     url: `${source.id.replace(/\/$/, "")}/info.json`,
@@ -181,7 +181,7 @@ function iiifMetadata(source: IiifSource): ObservedMetadata {
   };
 }
 
-function iipMetadata(source: IipSource): ObservedMetadata {
+function iipMetadata(source: IipSource): ObservedInput {
   return {
     kind: "observed-metadata",
     url: `${source.server}?FIF=${source.image}${source.transforms}&OBJ=Max-size&OBJ=Tile-size&OBJ=Resolution-number`,
@@ -190,7 +190,7 @@ function iipMetadata(source: IipSource): ObservedMetadata {
 }
 
 /** Pure projection of validated page snapshots into the core's metadata input. */
-export function projectMetadata(source: TileSource, context: MetadataContext): ObservedMetadata {
+export function projectMetadata(source: TileSource, context: MetadataContext): ObservedInput {
   switch (source.protocol) {
     case "dzi":
       return dziMetadata(source, context);
