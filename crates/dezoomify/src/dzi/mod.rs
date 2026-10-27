@@ -293,11 +293,16 @@ fn catalog_from_dzi(
         })
         .collect::<Result<Vec<_>, DiscoveryError>>()?;
         levels.reverse();
-        let title = base_url
-            .trim_end_matches('/')
-            .rsplit('/')
-            .next()
-            .map(|s| s.trim_end_matches("_files").to_owned());
+        let title = image
+            .title
+            .filter(|title| !title.trim().is_empty())
+            .or_else(|| {
+                base_url
+                    .trim_end_matches('/')
+                    .rsplit('/')
+                    .next()
+                    .map(|s| s.trim_end_matches("_files").to_owned())
+            });
         plans.push(ImagePlan::new(title, levels));
     }
     Ok(CatalogPlan::images(plans))

@@ -132,6 +132,7 @@ struct Dimensions(
 #[derive(Deserialize)]
 struct Image {
     fid: String,
+    title: Option<String>,
     #[serde(rename = "Max-size")]
     size: Dimensions,
     #[serde(rename = "Tile-size")]
@@ -177,6 +178,7 @@ impl Image {
                 height: self.size.1,
             },
             base_url: Some(template.replace("[FILENAME]", filename)),
+            title: self.title,
         })
     }
 }
@@ -198,9 +200,10 @@ mod tests {
     #[test]
     fn metadata_uses_deep_zoom_levels_and_exact_edges() {
         let metadata = "https://images.test/collection/meta/image.json";
-        let json = br#"{"fid":"painting","Max-size":["104000","64000"],"Tile-size":[256,256],"Resolution-number":10}"#;
+        let json = br#"{"fid":"painting","title":"Painting detail","Max-size":["104000","64000"],"Tile-size":[256,256],"Resolution-number":10}"#;
         let (catalog, _) = discover_resources(default_registry(), metadata, &[(metadata, json)]);
         let image = ready_image(catalog.unwrap());
+        assert_eq!(image.title.as_deref(), Some("Painting detail"));
         assert_eq!(image.source_url.as_deref(), Some(metadata));
         assert_eq!(image.levels.len(), 18);
         let full = grid(image.levels.last().unwrap());
@@ -246,6 +249,7 @@ mod tests {
                 &[(&page, html.as_bytes()), (metadata, json)],
             );
             let image = ready_image(catalog.unwrap());
+            assert_eq!(image.title.as_deref(), Some("Shared painting"));
             assert_eq!(image.source_url.as_deref(), Some(page.as_str()));
             assert_eq!(
                 grid_tile_uri(grid(image.levels.last().unwrap()), 3),
