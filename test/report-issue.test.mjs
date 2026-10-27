@@ -23,11 +23,22 @@ test("issue draft keeps evidence and bounds the encoded URL", () => {
   const r = report();
   for (let i = 0; i < 100; i++) r.context[`extra${i}`] = "界 ".repeat(1000);
   const url = new URL(diagnosticIssueUrl(r));
-  assert.ok(url.href.length < 7100);
+  assert.ok(Buffer.byteLength(url.href) <= 4096);
   const body = url.searchParams.get("body");
   assert.match(body, /tile-failed/);
   assert.match(body, /challenge/);
   assert.ok(body.includes(r.context.input));
+  assert.match(body, /Truncated; copy or save the complete diagnostics/);
+  const login = new URL("https://github.com/login");
+  login.searchParams.set("return_to", url.pathname + url.search);
+  assert.ok(Buffer.byteLength(login.href) < 8191);
+});
+test("issue draft bounds oversized source text in the fallback body", () => {
+  const r = report();
+  r.context.input = `https://host/${"界".repeat(1000)}`;
+  const url = new URL(diagnosticIssueUrl(r));
+  assert.ok(Buffer.byteLength(url.href) <= 4096);
+  assert.ok(url.searchParams.get("body").startsWith("https://host/"));
 });
 test("issue draft identifies the source and product and explains structured failures", () => {
   for (const product of ["website", "extension", "desktop"]) {
