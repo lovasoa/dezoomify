@@ -159,7 +159,7 @@ test("webapp discovers, downloads, assembles, and saves a real DZI pyramid", asy
   const report = await page.locator("#dz-job-diagnostics").textContent();
   assert.match(report, /^Outcome: .*completed/);
   assert.ok(report.includes(`canonical: ${url}`));
-  assert.match(report, /first_tile: url=.*pyramid_files/);
+  assert.match(report, /first_tile: source.kind=resource source.uri=.*pyramid_files/);
   await page.locator(".dz-details > summary").click();
   const layout = await page.locator("#dz-job-diagnostics").evaluate((element) => ({
     whiteSpace: getComputedStyle(element).whiteSpace,

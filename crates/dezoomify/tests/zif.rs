@@ -124,9 +124,14 @@ fn direct_ranges_preserve_queries_redirects_and_every_tile() {
     for (level, grid) in levels.iter().rev().enumerate() {
         for tile in grid.tiles_row_major() {
             let tile = tile.unwrap();
-            assert_eq!(tile.request.uri, image.source_url.as_deref().unwrap());
+            assert_eq!(
+                tile.source.resource().unwrap().uri.clone(),
+                image.source_url.as_deref().unwrap()
+            );
             let range = tile
-                .request
+                .source
+                .resource()
+                .unwrap()
                 .header("range")
                 .unwrap()
                 .strip_prefix("bytes=")

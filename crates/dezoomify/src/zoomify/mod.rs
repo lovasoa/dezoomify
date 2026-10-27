@@ -455,7 +455,15 @@ mod tests {
         let TileSource::Grid(plan) = &image.levels[0].source else {
             panic!("Zoomify levels must be grids")
         };
-        plan.tiles_row_major().next().unwrap().unwrap().request.uri
+        plan.tiles_row_major()
+            .next()
+            .unwrap()
+            .unwrap()
+            .source
+            .resource()
+            .unwrap()
+            .uri
+            .clone()
     }
 
     #[test]
@@ -710,7 +718,7 @@ mod tests {
             };
             let first_tile = plan.tiles_row_major().next().unwrap().unwrap();
             assert_eq!(
-                first_tile.request.uri,
+                first_tile.source.resource().unwrap().uri.clone(),
                 format!("{base}{title}/TileGroup0/0-0-0.jpg"),
                 "{name}"
             );
@@ -795,7 +803,7 @@ mod tests {
             .tiles_row_major()
             .take(2)
             .map(Result::unwrap)
-            .map(|tile| tile.request.uri)
+            .map(|tile| tile.source.resource().unwrap().uri.clone())
             .collect();
         assert_eq!(
             urls.join(","),
@@ -828,7 +836,7 @@ mod tests {
         let urls: Vec<_> = plan
             .tiles_row_major()
             .map(Result::unwrap)
-            .map(|tile| tile.request.uri)
+            .map(|tile| tile.source.resource().unwrap().uri.clone())
             .collect();
         assert!(urls.iter().all(|url| url.contains("/TileGroup0/")));
         assert!(urls.iter().any(|url| url.ends_with("/6-16-6.jpg")));

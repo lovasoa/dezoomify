@@ -103,8 +103,11 @@ fn full_output_uses_lazy_geometry_and_honest_disposition() {
     );
     assert!(
         host.acquired.borrow()[3]
-            .request
+            .source
+            .resource()
+            .unwrap()
             .uri
+            .clone()
             .ends_with("/image_files/9/1_1.jpg")
     );
 }

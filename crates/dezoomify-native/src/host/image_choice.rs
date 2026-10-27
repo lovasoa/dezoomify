@@ -1,4 +1,4 @@
-use super::{ImageSelection, NativeHost};
+use super::{ImageSelection, NativeHost, ResourceTile};
 use base64::Engine as _;
 use dezoomify::model::{Catalog, CatalogEntry, DiagnosticLevel, Error, Gate, Tile};
 
@@ -49,7 +49,7 @@ impl NativeHost<'_> {
                     self.diagnostics.record(
                         DiagnosticLevel::Debug,
                         "image-preview-failed",
-                        serde_json::json!({"request": tile.request.uri, "error": error}),
+                        serde_json::json!({"source": tile.source, "error": error}),
                     );
                 }
             }
@@ -63,7 +63,7 @@ impl NativeHost<'_> {
         if size.width == 0 || size.height == 0 || size.width > 1024 || size.height > 1024 {
             return Ok(None);
         }
-        let pixels = self.tile(tile).await?;
+        let pixels = self.tile(&ResourceTile::try_from(tile.clone())?).await?;
         let image = &pixels.decoded.image;
         if image.width() < size.width || image.height() < size.height {
             return Ok(None);
@@ -100,11 +100,12 @@ mod tests {
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/tiles/0-0.png");
         let tile = Tile {
             index: 0,
-            request: ResourceRequest {
+            source: ResourceRequest {
                 uri: url::Url::from_file_path(&path).unwrap().into(),
                 headers: vec![],
                 purpose: RequestPurpose::Tile,
-            },
+            }
+            .into(),
             placement: TilePlacement {
                 position: Point { x: 0, y: 0 },
                 canvas: Some(Size {

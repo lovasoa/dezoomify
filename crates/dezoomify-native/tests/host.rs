@@ -75,11 +75,12 @@ fn concurrent_optional_acquisitions_share_approval_and_keep_user_pause() {
     let request = |index| TileAcquisition {
         tile: Tile {
             index,
-            request: ResourceRequest {
+            source: ResourceRequest {
                 uri: source.to_string_lossy().into(),
                 headers: Vec::new(),
                 purpose: RequestPurpose::Tile,
-            },
+            }
+            .into(),
             placement: TilePlacement {
                 position: Point {
                     x: index * 16,
@@ -743,10 +744,11 @@ fn http_failures_retain_the_request_context_and_transport() {
             .acquire_tile(
                 Tile {
                     index: 0,
-                    request: ResourceRequest {
+                    source: ResourceRequest {
                         purpose: RequestPurpose::Tile,
                         ..request
-                    },
+                    }
+                    .into(),
                     placement: TilePlacement {
                         position: Point { x: 0, y: 0 },
                         expected_size: None,
@@ -817,11 +819,12 @@ fn malformed_encrypted_tile_retains_processing_failure_without_publication() {
     };
     let tile = |index, name: &str| Tile {
         index,
-        request: ResourceRequest {
+        source: ResourceRequest {
             uri: work.join(name).to_string_lossy().into_owned(),
             headers: Vec::new(),
             purpose: RequestPurpose::Tile,
-        },
+        }
+        .into(),
         placement: TilePlacement {
             position: Point {
                 x: index * 256,

@@ -88,7 +88,11 @@ test("image timeout settles once even when clearing src fires an error", async (
     },
   });
   timeout();
-  await assert.rejects(pending, /timed out/);
+  await assert.rejects(pending, {
+    kind: "timeout",
+    transport: "display-only",
+    request: "https://a.test/slow.jpg",
+  });
   assert.equal(completions, 1);
 });
 
@@ -125,6 +129,6 @@ test("loadTileImage resolves on load and rejects on error", async () => {
       clearTimeoutFn: () => {},
       hooks: h,
     }),
-    /failed to load/,
+    { kind: "network-failure", transport: "display-only", request: "https://a.test/2.png" },
   );
 });

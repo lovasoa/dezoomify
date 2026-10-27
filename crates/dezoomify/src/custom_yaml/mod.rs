@@ -96,7 +96,8 @@ impl crate::core::tile_plan::PositionedGenerator for CustomTiles {
             request: Request {
                 uri: entry.uri,
                 headers: self.headers.clone(),
-            },
+            }
+            .into(),
             destination: entry.position,
             processing: ProcessingRecipe::None,
         })
@@ -169,8 +170,14 @@ y_template: y
         let last = &tiles[3];
         assert_eq!(first.ordinal, 0);
         assert_eq!(first.role, TileRole::output());
-        assert_eq!(first.request.uri, "https://example.test/0/0");
-        assert_eq!(last.request.uri, "https://example.test/1/1");
+        assert_eq!(
+            first.source.resource().unwrap().uri.clone(),
+            "https://example.test/0/0"
+        );
+        assert_eq!(
+            last.source.resource().unwrap().uri.clone(),
+            "https://example.test/1/1"
+        );
         assert_eq!(first, &plan.tiles().next().unwrap().unwrap());
     }
 

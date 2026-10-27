@@ -1,4 +1,10 @@
-import type { ResourceRead, ResourceRequest, Tile } from "@dezoomify/wasm-bindings";
+import type {
+  ResourceRead,
+  ResourceRequest,
+  Size,
+  Tile,
+  ViewerTileRequest,
+} from "@dezoomify/wasm-bindings";
 import { canvasToPngBlob } from "./canvas-save.ts";
 import type { TileDecoder } from "./tile-decode.ts";
 
@@ -8,6 +14,11 @@ export async function imageThumbnail(
   signal: AbortSignal,
   deps: {
     fetch(request: ResourceRequest, signal: AbortSignal): Promise<ResourceRead>;
+    loadViewerTile?(
+      request: ViewerTileRequest,
+      extent: Size,
+      signal: AbortSignal,
+    ): Promise<ArrayBuffer>;
     process(recipe: Tile["placement"]["processing"], bytes: ArrayBuffer): ArrayBuffer;
     decoder: TileDecoder;
     canvas(): HTMLCanvasElement;
@@ -15,10 +26,16 @@ export async function imageThumbnail(
 ): Promise<Blob | undefined> {
   const size = tile.placement.canvas;
   if (!size || size.width > 1024 || size.height > 1024) return;
-  const result = await deps.fetch(tile.request, signal);
+  let bytes: ArrayBuffer;
+  if (tile.source.kind === "viewer") {
+    if (!deps.loadViewerTile || !tile.placement.expected_size) return;
+    bytes = await deps.loadViewerTile(tile.source, tile.placement.expected_size, signal);
+  } else {
+    const result = await deps.fetch(tile.source, signal);
+    if (result.kind !== "response") return;
+    bytes = new Uint8Array(result.response.bytes).buffer;
+  }
   signal.throwIfAborted();
-  if (result.kind !== "response") return;
-  const bytes = new Uint8Array(result.response.bytes).buffer;
   const bitmap = await deps.decoder.decode(deps.process(tile.placement.processing, bytes), signal);
   try {
     signal.throwIfAborted();

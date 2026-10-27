@@ -3,7 +3,9 @@ import test from "node:test";
 import { chooseCatalogImage } from "../src/image-choice.ts";
 
 const tick = () => new Promise((resolve) => setImmediate(resolve));
-const tile = { request: { uri: "https://images.test/preview", headers: [], purpose: "tile" } };
+const tile = {
+  source: { kind: "resource", uri: "https://images.test/preview", headers: [], purpose: "tile" },
+};
 const image = { kind: "image", title: "Same title", levels: [], preview: tile };
 
 test("the picker presents distinct slots, tolerates preview failure, and releases previews after choice", async () => {

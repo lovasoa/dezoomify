@@ -183,12 +183,13 @@ struct GenericRequests {
 }
 
 impl GridRequests for GenericRequests {
-    fn request(&self, tile: GridTile) -> Request {
+    fn request(&self, tile: GridTile) -> crate::model::TileSource {
         Request::new(render_template(
             &self.template,
             tile.coord.column,
             tile.coord.row,
         ))
+        .into()
     }
 
     fn use_first_tile_as_referer(&self) -> bool {
@@ -231,7 +232,7 @@ impl GenericSearch {
             .ok_or(TileSourceError::ArithmeticOverflow)?;
         Ok(TileSpec {
             ordinal,
-            request: Request::new(render_template(&self.source.template, point.x, point.y)),
+            source: Request::new(render_template(&self.source.template, point.x, point.y)).into(),
             destination,
             expected_size: None,
             processing: super::model::ProcessingRecipe::None,
@@ -445,7 +446,7 @@ mod tests {
         let mut search = GenericSearch::new(DiscoverableGrid::new("{{X}},{{y}}".into()));
         for _ in 0..20 {
             let tile = search.tile().unwrap();
-            let observed = if existing.contains(&tile.request.uri.as_str()) {
+            let observed = if existing.contains(&tile.source.resource().unwrap().uri.as_str()) {
                 ObservationResult::Available {
                     size: Vec2d { x: 4, y: 5 },
                 }

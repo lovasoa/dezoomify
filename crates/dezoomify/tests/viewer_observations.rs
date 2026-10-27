@@ -2,13 +2,16 @@ mod support;
 
 use dezoomify::core::default_registry;
 use dezoomify::core::discovery::{DiscoveryInput, DiscoveryLimits};
-use dezoomify::model::{DiscoveryInputKind, Size, ViewerLevel, ViewerObservation, ViewerPyramid};
+use dezoomify::model::{
+    DiscoveryInputKind, Size, TileSource, ViewerLevel, ViewerObservation, ViewerPyramid,
+    ViewerTileRequest,
+};
 
 fn observation() -> ViewerObservation {
     ViewerObservation {
         dezoomify_viewer: ViewerPyramid {
             source_url: "https://museum.test/art".into(),
-            resource_base: "https://museum.test/art#dezoomify-viewer-tile/123/image".into(),
+            handle: "123".into(),
             levels: vec![ViewerLevel {
                 level: 7,
                 size: Size {
@@ -54,11 +57,27 @@ fn discover(
 fn live_grids_share_edge_geometry_and_keep_the_viewer_canonical() {
     let image = support::ready_image(discover(observation()).unwrap());
     assert_eq!(image.source_url.as_deref(), Some("https://museum.test/art"));
-    let urls = support::tile_urls(&image.levels[0]).unwrap();
-    assert_eq!(urls.len(), 9);
+    let dezoomify::core::TileSource::Grid(grid) = &image.levels[0].source else {
+        panic!("viewer grid")
+    };
+    let tiles = grid
+        .tiles_row_major()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert_eq!(tiles.len(), 9);
     assert_eq!(
-        urls[8],
-        "https://museum.test/art#dezoomify-viewer-tile/123/image/7/2/2/1/1.png"
+        tiles[8].source,
+        TileSource::Viewer(ViewerTileRequest {
+            handle: "123".into(),
+            source_url: "https://museum.test/art".into(),
+            level: 7,
+            column: 2,
+            row: 2,
+        })
+    );
+    assert_eq!(
+        tiles[8].expected_size,
+        Some(dezoomify::Vec2d { x: 1, y: 1 })
     );
 }
 
@@ -78,12 +97,8 @@ fn inconsistent_or_unbounded_observations_are_rejected() {
             "grid" => pyramid.levels[0].grid_size.width = 2,
             "size" => pyramid.levels[0].tile_size.height = 0,
             "duplicates" => pyramid.levels.push(pyramid.levels[0].clone()),
-            "foreign" => {
-                pyramid.resource_base = "https://other.test/#dezoomify-viewer-tile/123/image".into()
-            }
-            "capability" => {
-                pyramid.resource_base = "https://museum.test/art#dezoomify-viewer-tile/".into()
-            }
+            "foreign" => pyramid.source_url = "file:///private".into(),
+            "capability" => pyramid.handle = "https://museum.test/art".into(),
             _ => pyramid.levels = vec![pyramid.levels[0].clone(); 65],
         }
         assert!(discover(observation).is_err(), "{invalid}");

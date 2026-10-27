@@ -75,7 +75,15 @@ mod tests {
         };
         assert_eq!(grid.image_size(), Vec2d::square(256));
         assert_eq!(
-            grid.tiles_row_major().next().unwrap().unwrap().request.uri,
+            grid.tiles_row_major()
+                .next()
+                .unwrap()
+                .unwrap()
+                .source
+                .resource()
+                .unwrap()
+                .uri
+                .clone(),
             "https://example.test/wmts/tiles/default-style/selected/0/1/1.png"
         );
     }
@@ -93,7 +101,15 @@ mod tests {
         assert_eq!(grid.image_size(), Vec2d { x: 256, y: 768 });
         assert_eq!(grid.count(), 6);
         assert_eq!(
-            grid.tiles_row_major().last().unwrap().unwrap().request.uri,
+            grid.tiles_row_major()
+                .last()
+                .unwrap()
+                .unwrap()
+                .source
+                .resource()
+                .unwrap()
+                .uri
+                .clone(),
             "https://example.test/wmts/tiles/set/level/2/1.jpg"
         );
     }
@@ -109,7 +125,15 @@ mod tests {
             panic!("expected a known grid")
         };
         assert_eq!(
-            grid.tiles_row_major().next().unwrap().unwrap().request.uri,
+            grid.tiles_row_major()
+                .next()
+                .unwrap()
+                .unwrap()
+                .source
+                .resource()
+                .unwrap()
+                .uri
+                .clone(),
             "https://example.test/wmts/tiles/night/0/0/0.jpg"
         );
     }

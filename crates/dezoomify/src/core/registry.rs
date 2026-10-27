@@ -158,7 +158,15 @@ mod tests {
         };
         assert_eq!(grid.count(), 2);
         assert_eq!(
-            grid.tiles_row_major().last().unwrap().unwrap().request.uri,
+            grid.tiles_row_major()
+                .last()
+                .unwrap()
+                .unwrap()
+                .source
+                .resource()
+                .unwrap()
+                .uri
+                .clone(),
             "memory://tile/1/0"
         );
     }

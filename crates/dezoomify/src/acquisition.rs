@@ -32,7 +32,9 @@ async fn acquire(
     let mut attempt = 0;
     let mut previous_failure = None;
     loop {
-        let ticket = scheduler.admit(host, &tile.request.uri, tile.index).await?;
+        let ticket = scheduler
+            .admit(host, tile.source.pacing_url(), tile.index)
+            .await?;
         let request = TileAcquisition {
             tile: tile.clone(),
             attempt,

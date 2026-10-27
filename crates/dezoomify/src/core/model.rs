@@ -44,6 +44,16 @@ impl Request {
     }
 }
 
+impl From<Request> for crate::model::TileSource {
+    fn from(request: Request) -> Self {
+        Self::Resource(crate::model::ResourceRequest {
+            uri: request.uri,
+            headers: request.headers,
+            purpose: crate::model::RequestPurpose::Tile,
+        })
+    }
+}
+
 pub use crate::model::{ProcessingRecipe, TileRole};
 
 /// A logical tile.
@@ -51,7 +61,7 @@ pub use crate::model::{ProcessingRecipe, TileRole};
 pub struct TileSpec {
     /// Zero-based position within the selected level's immutable tile plan.
     pub ordinal: u32,
-    pub request: Request,
+    pub source: crate::model::TileSource,
     /// Top-left output position. The extent is deliberately optional because
     /// probe and custom-layout tiles may only reveal it after decoding.
     pub destination: Vec2d,
@@ -61,19 +71,18 @@ pub struct TileSpec {
 }
 
 impl TileSpec {
-    pub(crate) fn into_tile(self, canvas: Option<Size>) -> crate::model::Tile {
-        use crate::model::{Point, RequestPurpose, ResourceRequest, Tile, TilePlacement};
+    pub(crate) fn into_tile(mut self, canvas: Option<Size>) -> crate::model::Tile {
+        use crate::model::{Point, RequestPurpose, Tile, TilePlacement, TileSource};
+        if let TileSource::Resource(request) = &mut self.source {
+            request.purpose = if self.role.probe {
+                RequestPurpose::Probe
+            } else {
+                RequestPurpose::Tile
+            };
+        }
         Tile {
             index: self.ordinal,
-            request: ResourceRequest {
-                uri: self.request.uri,
-                headers: self.request.headers,
-                purpose: if self.role.probe {
-                    RequestPurpose::Probe
-                } else {
-                    RequestPurpose::Tile
-                },
-            },
+            source: self.source,
             placement: TilePlacement {
                 position: Point {
                     x: self.destination.x,
@@ -468,8 +477,8 @@ mod tests {
     struct TestSource;
 
     impl GridRequests for TestSource {
-        fn request(&self, tile: GridTile) -> Request {
-            Request::new(format!("memory://{}/{}", tile.coord.column, tile.coord.row))
+        fn request(&self, tile: GridTile) -> crate::model::TileSource {
+            Request::new(format!("memory://{}/{}", tile.coord.column, tile.coord.row)).into()
         }
     }
 
@@ -563,7 +572,10 @@ mod tests {
         };
         let public = Image::from(&image);
         let preview = public.preview.unwrap();
-        assert_eq!(preview.request.uri, "memory://level/256");
+        assert_eq!(
+            preview.source.resource().unwrap().uri.clone(),
+            "memory://level/256"
+        );
         assert_eq!(preview.placement.canvas.unwrap().width, 256);
         assert_eq!(public.size.unwrap().width, 512);
         assert_eq!(public.source_url.as_deref(), Some("memory://catalog"));
@@ -572,7 +584,13 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            image_preview(&smaller).unwrap().request.uri,
+            image_preview(&smaller)
+                .unwrap()
+                .source
+                .resource()
+                .unwrap()
+                .uri
+                .clone(),
             "memory://level/128"
         );
         let unavailable = ResolvedImage {

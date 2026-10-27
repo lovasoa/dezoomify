@@ -90,6 +90,62 @@ pub struct ResourceRequest {
     pub purpose: RequestPurpose,
 }
 
+impl ResourceRequest {
+    pub fn header(&self, name: &str) -> Option<&str> {
+        self.headers
+            .iter()
+            .find(|header| header.name.eq_ignore_ascii_case(name))
+            .map(|header| header.value.as_str())
+    }
+}
+
+/// A tile is either a readable resource or a call into a job-owned live viewer.
+/// Only resource variants may enter URL transports or ordinary-image fallback.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub enum TileSource {
+    Resource(ResourceRequest),
+    Viewer(ViewerTileRequest),
+}
+
+/// Call a loader retained by the Host for this job and exact source document.
+/// `handle` is opaque, never a URL. The source document URL supplies provenance
+/// and a pacing group; it need not be the origin of the viewer's network traffic.
+/// Pixel dimensions and crops come from the tile's placement.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub struct ViewerTileRequest {
+    pub handle: String,
+    pub source_url: String,
+    pub level: u32,
+    pub column: u32,
+    pub row: u32,
+}
+
+impl TileSource {
+    pub fn resource(&self) -> Option<&ResourceRequest> {
+        match self {
+            Self::Resource(request) => Some(request),
+            Self::Viewer(_) => None,
+        }
+    }
+
+    /// Real resource or source-document URL used to group tile admission.
+    pub(crate) fn pacing_url(&self) -> &str {
+        match self {
+            Self::Resource(request) => &request.uri,
+            Self::Viewer(request) => &request.source_url,
+        }
+    }
+}
+
+impl From<ResourceRequest> for TileSource {
+    fn from(request: ResourceRequest) -> Self {
+        Self::Resource(request)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Ord, PartialOrd, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub struct Header {
@@ -367,8 +423,8 @@ pub fn output_extensions() -> String {
 /// How an acquired tile participates in probing and final output. `probe`
 /// marks adaptive-probe acquisitions (a miss is an observation, never an
 /// output failure); `output` marks acquisitions joining the final canvas.
-/// Every planned tile sets at least one flag; `RequestPurpose` on a tile
-/// request derives from `probe` and never disagrees with it.
+/// Every planned tile sets at least one flag; resource request purposes derive
+/// from `probe` and never disagree with it.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub struct TileRole {
@@ -528,7 +584,7 @@ pub struct JobInput {
 pub type JobInputs = Vec<JobInput>;
 
 /// Complete, finite pixel grids observed in a live viewer. Serialize as supplied
-/// `observed-metadata`; the Host resolves `resource_base` for this job only.
+/// `observed-metadata`; the Host resolves `handle` for this job only.
 /// These are source images, independent of viewport rotation, pan or overlays.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
@@ -536,13 +592,13 @@ pub struct ViewerObservation {
     pub dezoomify_viewer: ViewerPyramid,
 }
 
-/// The reusable source is the viewer page. Resource addresses name an owned
-/// loader capability, not a public metadata endpoint or an HTTP fallback.
+/// The reusable source is the viewer page. The opaque handle names an owned
+/// loader capability scoped to that exact document and job.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub struct ViewerPyramid {
     pub source_url: String,
-    pub resource_base: String,
+    pub handle: String,
     pub levels: Vec<ViewerLevel>,
 }
 
@@ -1396,14 +1452,14 @@ pub enum ProgressPhase {
     Output,
 }
 
-/// One request with placement and an index scoped to its probe sequence or final
+/// One tile source with placement and an index scoped to its probe sequence or final
 /// plan. Probe indices need not match final indices; `FinishRequest.reused_tiles`
 /// maps retained output by position. The index is not a source zoom identifier.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub struct Tile {
     pub index: u32,
-    pub request: ResourceRequest,
+    pub source: TileSource,
     pub placement: TilePlacement,
 }
 

@@ -1,10 +1,10 @@
 // Tile painting shared by browser products.
 // Readable bytes come first so CORS-granting sites keep the clean save.
-// After the readable retries are exhausted, an unprocessed tile falls back
-// to a plain <img> (no CORS needed): the user sees the picture, but scripts
-// can no longer read or save the canvas. Processed tiles rethrow:
-// decrypt/re-encode needs readable bytes. The host image constructor and
-// timers are injected so node tests drive the fallback with fakes.
+// Within an acquisition attempt, unprocessed resource tiles may fall back to
+// a plain <img> (no CORS needed). Drawing it makes the canvas display-only.
+// Rust owns retries. Processed tiles and live viewer calls need readable bytes.
+import type { Error as JobError } from "@dezoomify/wasm-bindings";
+import { CancelledError, InternalError, NetworkError, TimeoutError } from "./errors.ts";
 import type { TileBitmap } from "./tile-decode.ts";
 
 export interface TileImageLike {
@@ -84,6 +84,8 @@ export function drawPlacedTile(
  * needed; drawing the result taints the canvas. The caller must treat a
  * tainted canvas as display-only: no pixel reads, no toBlob/toDataURL, no
  * programmatic save.
+ * Browser load/error/timeout events become typed transport outcomes; unexpected
+ * exceptions remain available to the caller as internal failures.
  */
 export function loadTileImage(
   url: string,
@@ -96,7 +98,7 @@ export function loadTileImage(
     hooks?: TileDrawHooks;
   } = {},
 ): Promise<TileImageElementLike> {
-  deps.signal?.throwIfAborted();
+  if (deps.signal?.aborted) return Promise.reject(new CancelledError());
   const ms = deps.ms ?? 30000;
   const hooks = deps.hooks;
   const reqId = hooks ? hooks.onRequestStart() : -1;
@@ -111,7 +113,7 @@ export function loadTileImage(
         hooks.onRequestEnd(reqId, false);
         hooks.onUpdate();
       }
-      reject(new Error("tile image unavailable without an image host"));
+      reject(new InternalError("Ordinary image loading requires a browser Image constructor"));
       return;
     }
     const setTimer = deps.setTimeoutFn ?? ((cb: () => void, t: number) => setTimeout(cb, t));
@@ -120,7 +122,7 @@ export function loadTileImage(
     const img = Ctor ? new Ctor() : new Image();
     let timer: unknown = null;
     let settled = false;
-    const done = (ok: boolean, value: TileImageElementLike | Error) => {
+    const done = (ok: boolean, value: TileImageElementLike | JobError) => {
       if (settled) return;
       settled = true;
       deps.signal?.removeEventListener("abort", abort);
@@ -134,7 +136,7 @@ export function loadTileImage(
       else reject(value);
     };
     const abort = () => {
-      done(false, new DOMException("Image load cancelled", "AbortError"));
+      done(false, new CancelledError());
       img.src = "";
     };
     deps.signal?.addEventListener("abort", abort, { once: true });
@@ -143,11 +145,28 @@ export function loadTileImage(
       return;
     }
     img.addEventListener("load", () => done(true, img), { once: true });
-    img.addEventListener("error", () => done(false, new Error("tile image failed to load")), {
-      once: true,
-    });
+    img.addEventListener(
+      "error",
+      () =>
+        done(
+          false,
+          new NetworkError("Tile image failed to load", {
+            transport: "display-only",
+            request: url.slice(0, 2048),
+          }),
+        ),
+      {
+        once: true,
+      },
+    );
     timer = setTimer(() => {
-      done(false, new Error(`tile image timed out after ${ms / 1000}s`));
+      done(
+        false,
+        new TimeoutError(`Tile image timed out after ${ms / 1000}s`, {
+          transport: "display-only",
+          request: url.slice(0, 2048),
+        }),
+      );
       try {
         img.src = "";
       } catch {

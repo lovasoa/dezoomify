@@ -301,7 +301,7 @@ fn historical_inputs_preserve_geometry_and_addressed_tiles() {
         let tiles: Vec<_> = grid(level)
             .unwrap()
             .tiles_row_major()
-            .map(|tile| tile.unwrap().request.uri)
+            .map(|tile| tile.unwrap().source.resource().unwrap().uri.clone())
             .collect();
         assert_eq!(tiles.len(), count, "{input}");
         let normalize = |uri: &str| uri.replace("http://127.0.0.1:PORT", &origin);

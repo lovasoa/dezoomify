@@ -17,12 +17,24 @@ import type {
   Progress,
   ResourceRead,
   ResourceRequest,
+  Size,
   Tile,
   TileAcquisition,
+  ViewerTileRequest,
 } from "@dezoomify/wasm-bindings";
 import type { DiagnosticRecorder } from "../../shared-ui/src/diagnostics.ts";
 import { causeOf, isJobError, unknownDetail } from "../../shared-ui/src/failure.ts";
 import type { CanvasAssembly } from "./assembly.ts";
+import {
+  CancelledError,
+  DezoomifyError,
+  errorFromPayload,
+  InternalError,
+  InvalidInputError,
+  NetworkError,
+  PolicyDeniedError,
+  ResourceError,
+} from "./errors.ts";
 import { originOfUrl } from "./fetch-primitives.ts";
 import type { SelectionLimits } from "./limits.ts";
 import { canvasTooLargeFailure } from "./plan-gates.ts";
@@ -42,6 +54,14 @@ export interface BrowserHostDependencies {
     interaction: Interaction,
   ): Promise<ResourceRead>;
   loadDisplayImage?(url: string, signal: AbortSignal): Promise<TileImageLike>;
+  /** Return owned encoded bytes for one attempt using a handle retained until
+   * job settlement. Honor cancellation without clearing the viewer's queue.
+   * Preserve typed load failures; never route handles through URL transports. */
+  loadViewerTile?(
+    request: ViewerTileRequest,
+    extent: Size,
+    signal: AbortSignal,
+  ): Promise<ArrayBuffer>;
   onProgress(progress: Progress): void;
   chooseImage(catalog: Catalog, signal: AbortSignal): Promise<number>;
   approveRetry(request: TileAcquisition, signal: AbortSignal): Promise<void>;
@@ -65,10 +85,10 @@ export class BrowserHost implements Host {
     if (
       Object.values(deps.selectionLimits).some((limit) => !Number.isFinite(limit) || limit <= 0)
     ) {
-      throw {
+      throw new DezoomifyError({
         kind: "invalid-options",
         detail: "canvas limits must be positive",
-      } satisfies JobError;
+      });
     }
     this.deps = deps;
     this.signal = AbortSignal.any([deps.signal, this.resources.signal]);
@@ -90,23 +110,26 @@ export class BrowserHost implements Host {
     request?: ResourceRequest,
     domain: "fetch" | "host" = "host",
   ): JobError {
-    if (this.signal.aborted) return { kind: "cancelled" };
+    if (this.signal.aborted) return new CancelledError();
     const typed: JobError = isJobError(error)
-      ? error
+      ? errorFromPayload(error)
       : domain === "fetch"
-        ? {
-            kind: "network-failure",
-            transport: this.deps.transport?.() ?? "direct",
-            detail: unknownDetail(error),
-          }
-        : { kind: "internal", detail: unknownDetail(error) };
+        ? new NetworkError(
+            unknownDetail(error),
+            { transport: this.deps.transport?.() ?? "direct" },
+            { cause: error },
+          )
+        : new InternalError(unknownDetail(error), { cause: error });
     if (!request || typed.kind === "resource" || typed.kind === "cancelled") return typed;
-    return {
-      kind: "resource",
+    return new ResourceError({
       request: request.uri,
       resource_kind: request.purpose,
       source: typed,
-    };
+    });
+  }
+
+  private tileFailure(error: unknown, tile: Tile): JobError {
+    return this.failure(error, tile.source.kind === "resource" ? tile.source : undefined);
   }
 
   fetch(request: ResourceRequest, interaction: Interaction): Promise<ResourceRead> {
@@ -166,12 +189,11 @@ export class BrowserHost implements Host {
   private async readable(request: ResourceRequest): Promise<ArrayBuffer> {
     const result = await this.fetch(request, "allowed");
     if (result.kind === "needs-access")
-      throw {
-        kind: "policy-denied",
+      throw new PolicyDeniedError({
         blocked_reason: "access-required",
         transport: this.deps.transport?.() ?? "browser-session",
         detail: `access to ${result.origin} is required`,
-      } satisfies JobError;
+      });
     return new Uint8Array(result.response.bytes).buffer;
   }
 
@@ -200,7 +222,7 @@ export class BrowserHost implements Host {
         }
         this.signal.throwIfAborted();
       } catch (error) {
-        const failure = this.failure(error, tile.request);
+        const failure = this.tileFailure(error, tile);
         const cause = causeOf(failure);
         if (cause.kind === "cancelled" || cause.kind === "policy-denied") throw failure;
         return { status: "missing" };
@@ -212,7 +234,7 @@ export class BrowserHost implements Host {
       }
       return { status: "available", width, height };
     } catch (error) {
-      throw this.failure(error, tile.request);
+      throw this.tileFailure(error, tile);
     }
   }
 
@@ -256,8 +278,7 @@ export class BrowserHost implements Host {
       if (tile.index === 0)
         this.deps.diagnostics?.context({
           first_tile: {
-            url: tile.request.uri,
-            purpose: tile.request.purpose,
+            source: tile.source,
             placement: tile.placement,
           },
         });
@@ -265,11 +286,12 @@ export class BrowserHost implements Host {
       const resource = await this.loadTile(tile);
       await this.paintLoaded(tile, resource);
     } catch (error) {
-      const failure = this.failure(error, tile.request);
+      const failure = this.tileFailure(error, tile);
       if (!this.signal.aborted)
         this.deps.diagnostics?.record("warn", "acquisition-failed", {
           ...failure,
           tile: tile.index,
+          tile_source: tile.source,
           placement: tile.placement,
         });
       throw failure;
@@ -286,28 +308,68 @@ export class BrowserHost implements Host {
     }
   }
 
-  /** Rust bounds concurrent attempts. Never queue an origin behind its first
-   * tile; remember only a successfully established display-only fallback. */
+  /** Dispatch once: viewer calls cannot enter resource transports or fallback. */
   private async loadTile(tile: Tile): Promise<ArrayBuffer | TileImageLike> {
-    const origin = originOfUrl(tile.request.uri);
+    const source = tile.source;
+    if (source.kind === "viewer") {
+      const load = this.deps.loadViewerTile;
+      const extent = tile.placement.expected_size;
+      if (!load)
+        throw new InvalidInputError("Live viewer tiles require their browser extension session");
+      if (!extent) throw new InternalError("Viewer tile plan has no expected pixel dimensions");
+      try {
+        return await load(source, extent, this.signal);
+      } catch (error) {
+        if (isJobError(error)) throw errorFromPayload(error);
+        throw new InternalError(
+          `Unexpected exception while loading viewer tile (level ${source.level}, column ${source.column}, row ${source.row}): ${unknownDetail(error, 1024)}`,
+          { cause: error },
+        );
+      }
+    }
+    return this.loadResourceTile(source, tile.placement.processing === "none");
+  }
+
+  /** Rust owns retries and concurrency; remember only successful display fallback.
+   * If fallback fails, retain the readable cause for the core's recovery policy. */
+  private async loadResourceTile(
+    request: ResourceRequest,
+    unprocessed: boolean,
+  ): Promise<ArrayBuffer | TileImageLike> {
+    const origin = originOfUrl(request.uri);
     const ordinary =
-      tile.placement.processing === "none" &&
+      unprocessed &&
       this.deps.loadDisplayImage !== undefined &&
-      !(tile.request.headers ?? []).some(({ name }) => name.toLowerCase() === "range");
+      !(request.headers ?? []).some(({ name }) => name.toLowerCase() === "range");
     this.signal.throwIfAborted();
-    if (ordinary && this.displayOrigins.has(origin)) return await this.display(tile.request);
+    if (ordinary && this.displayOrigins.has(origin)) return await this.display(request);
     try {
-      return await this.readable(tile.request);
+      return await this.readable(request);
     } catch (error) {
-      const failure = this.failure(error, tile.request);
+      const failure = this.failure(error, request);
       const cause = causeOf(failure);
       if (
         ordinary &&
         (cause.kind === "network-failure" || cause.kind === "timeout") &&
         !this.signal.aborted
       )
-        return await this.display(tile.request);
+        return this.displayFallback(request, failure);
       throw failure;
+    }
+  }
+
+  private async displayFallback(
+    request: ResourceRequest,
+    original: JobError,
+  ): Promise<TileImageLike> {
+    try {
+      return await this.display(request);
+    } catch (error) {
+      // Expected image-load failures must not erase the readable cause.
+      // Unexpected exceptions and more specific typed failures remain authoritative.
+      if (isJobError(error) && ["network-failure", "timeout"].includes(causeOf(error).kind))
+        throw original;
+      throw error;
     }
   }
 
@@ -331,7 +393,7 @@ export class BrowserHost implements Host {
 
   async chooseImage(catalog: Catalog): Promise<number> {
     await this.checkpoint("cancellation");
-    if (!catalog.entries.length) throw { kind: "plan-empty" } satisfies JobError;
+    if (!catalog.entries.length) throw new DezoomifyError({ kind: "plan-empty" });
     if (catalog.entries.length === 1) return 0;
     return this.own(() => this.deps.chooseImage(catalog, this.signal));
   }

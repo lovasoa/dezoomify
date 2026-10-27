@@ -79,6 +79,12 @@ async function loadFixture(mode) {
     };
   } else if (mode === "failure")
     source.downloadTileStart = (job) => job.fail("original tile failure");
+  else if (mode === "exception")
+    source.downloadTileStart = () => {
+      throw new TypeError("broken adapter");
+    };
+  else if (mode === "encoding-failure")
+    source.downloadTileStart = (job) => job.finish({ width: 1, height: 1 }, null, "broken");
   else if (mode === "oversized")
     source.downloadTileStart = (job) =>
       job.finish(new Blob([new Uint8Array(9 * 1024 * 1024)]), null, "rasterBlob");
@@ -91,10 +97,12 @@ async function loadFixture(mode) {
   const addedGlobals = Reflect.ownKeys(window)
     .filter((key) => !globalKeys.has(key))
     .map(String);
-  const base = JSON.parse(metadata.input.contents).dezoomify_viewer.resource_base;
-  const result = await TileSession.readViewerTile(`${base}/8/0/0/256/256.png`, base);
-  TileSession.releaseViewerTiles([base]);
-  const retired = await TileSession.readViewerTile(`${base}/8/0/0/256/256.png`, base);
+  const handle = JSON.parse(metadata.input.contents).dezoomify_viewer.handle;
+  const request = { handle, source_url: location.href, level: 8, column: 0, row: 0 };
+  const extent = { width: 256, height: 256 };
+  const result = await TileSession.readViewerTile(request, extent);
+  TileSession.releaseViewerTiles([handle]);
+  const retired = await TileSession.readViewerTile(request, extent);
   if (retired.ok) throw new Error("retired source still loads tiles");
   if (!result.ok) return result.error;
   const bytes = Uint8Array.fromBase64(result.data);
@@ -129,6 +137,19 @@ for (const [name, engine] of [
         if (request.isNavigationRequest())
           return route.fulfill({ contentType: "text/html", body: "<body></body>" });
         requests.push(request);
+        if (
+          request.method() !== "OPTIONS" &&
+          new URL(request.url()).searchParams.get("mode") === "http-failure"
+        )
+          return route.fulfill({
+            status: 503,
+            body: "Temporary refusal",
+            headers: {
+              "Access-Control-Allow-Origin": "*",
+              "Access-Control-Expose-Headers": "Retry-After",
+              "Retry-After": "2",
+            },
+          });
         return route.fulfill({
           contentType: "image/png",
           body: tile,
@@ -166,6 +187,21 @@ for (const [name, engine] of [
       const error = await page.evaluate(loadFixture, "failure");
       assert.equal(error.kind, "network-failure");
       assert.match(error.detail, /original tile failure/);
+      const http = await page.evaluate(loadFixture, "http-failure");
+      assert.equal(http.kind, "http-error");
+      assert.equal(http.status, 503);
+      assert.equal(http.retry_after_ms, 2000);
+      assert.match(http.request, /mode=http-failure/);
+      for (const [mode, operation] of [
+        ["exception", "loading"],
+        ["encoding-failure", "encoding"],
+      ]) {
+        const internal = await page.evaluate(loadFixture, mode);
+        assert.equal(internal.kind, "internal");
+        assert.ok(
+          internal.detail.includes(`while ${operation} viewer tile (level 8, column 0, row 0)`),
+        );
+      }
       assert.equal((await page.evaluate(loadFixture, "oversized")).kind, "size-limit");
       assert.equal(await page.evaluate(() => window.__dezoomifyOpenSeadragon), "page-owned");
     } finally {

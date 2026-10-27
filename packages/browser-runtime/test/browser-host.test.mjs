@@ -3,13 +3,14 @@ import test from "node:test";
 import { createDiagnosticRecorder } from "../../shared-ui/src/diagnostics.ts";
 import { createCanvasAssembly } from "../src/assembly.ts";
 import { BrowserHost } from "../src/browser-host.ts";
+import { errorPayload, NetworkError } from "../src/errors.ts";
 import { MAXIMUM_SELECTION_LIMITS } from "../src/limits.ts";
 import { createTileDecoder } from "../src/tile-decode.ts";
 
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 const tile = {
   index: 0,
-  request: { uri: "https://tiles.test/0.jpg", headers: [], purpose: "tile" },
+  source: { kind: "resource", uri: "https://tiles.test/0.jpg", headers: [], purpose: "tile" },
   placement: {
     position: { x: 0, y: 0 },
     processing: "none",
@@ -82,9 +83,9 @@ test("untyped errors become network failures only at the readable-fetch boundary
       throw original;
     },
   });
-  await assert.rejects(h.host.fetch(tile.request, "forbidden"), {
+  await assert.rejects(h.host.fetch(tile.source, "forbidden"), {
     kind: "resource",
-    request: tile.request.uri,
+    request: tile.source.uri,
     resource_kind: "tile",
     source: {
       kind: "network-failure",
@@ -137,7 +138,7 @@ test("HTTP failures retain status, retry hints and preview without ordinary-imag
     });
     await assert.rejects(h.host.acquireTile(acquisition(tile)), {
       kind: "resource",
-      request: tile.request.uri,
+      request: tile.source.uri,
       resource_kind: "tile",
       source: {
         kind: "http-error",
@@ -152,8 +153,33 @@ test("HTTP failures retain status, retry hints and preview without ordinary-imag
     assert.equal(displays, 0);
     const failure = h.diagnostics.report().failures[0].first.fields;
     assert.equal(failure["source.status"], http);
-    assert.equal(failure.request, tile.request.uri);
+    assert.equal(failure.request, tile.source.uri);
   }
+});
+
+test("a failed ordinary-image fallback preserves the readable transport failure", async () => {
+  const original = new NetworkError("Original connection failure", { transport: "direct" });
+  const h = setup({
+    fetchResource: async () => {
+      throw original;
+    },
+    loadDisplayImage: async () => {
+      throw new NetworkError("image fallback failed", { transport: "display-only" });
+    },
+  });
+  await assert.rejects(h.host.acquireTile(acquisition(tile)), {
+    kind: "resource",
+    request: tile.source.uri,
+    resource_kind: "tile",
+    source: errorPayload(original),
+  });
+  assert.deepEqual(h.painted, []);
+  h.deps.loadDisplayImage = async () => {
+    throw new TypeError("broken fallback");
+  };
+  await assert.rejects(h.host.acquireTile(acquisition(tile)), {
+    source: { kind: "internal", detail: "TypeError: broken fallback" },
+  });
 });
 
 test("a slow first tile cannot hold back another tile from the same origin", async () => {
@@ -163,7 +189,7 @@ test("a slow first tile cannot hold back another tile from the same origin", asy
   });
   const h = setup({
     async fetchResource(request) {
-      if (request.uri === tile.request.uri) await blocked;
+      if (request.uri === tile.source.uri) await blocked;
       return { kind: "response", response: { bytes: [1] } };
     },
     loadDisplayImage: async () => assert.fail("readable bytes need no display fallback"),
@@ -173,7 +199,7 @@ test("a slow first tile cannot hold back another tile from the same origin", asy
     acquisition({
       ...tile,
       index: 1,
-      request: { ...tile.request, uri: "https://tiles.test/1.jpg" },
+      source: { ...tile.source, uri: "https://tiles.test/1.jpg" },
     }),
   );
   await tick();
@@ -228,15 +254,15 @@ test("ranged tiles require readable bytes even on a display-only origin", async 
     const beforeDisplays = displays;
     const ranged = {
       ...tile,
-      request: {
-        ...tile.request,
+      source: {
+        ...tile.source,
         uri: "https://tiles.test/image.zif",
         headers: [{ name: "rAnGe", value: "bytes=10-13" }],
       },
     };
     await assert.rejects(h.host.acquireTile(acquisition(ranged)), {
       kind: "resource",
-      request: ranged.request.uri,
+      request: ranged.source.uri,
       resource_kind: "tile",
       source: failure,
     });
@@ -274,7 +300,7 @@ test("processed tiles, policy and resource limits never use ordinary images", as
     const expected =
       failure.kind === "cancelled"
         ? failure
-        : { kind: "resource", request: tile.request.uri, resource_kind: "tile", source: failure };
+        : { kind: "resource", request: tile.source.uri, resource_kind: "tile", source: failure };
     await assert.rejects(
       h.host.acquireTile(acquisition({ ...tile, placement: { ...tile.placement, processing } })),
       expected,
@@ -432,9 +458,9 @@ async function checkAcquisitionFailure(stage, typed) {
   const expectedKind = stage === "painting" ? "internal" : `${stage}-failed`;
   const rejects = (error) => {
     assert.equal(error.kind, "resource");
-    assert.equal(error.request, tile.request.uri);
+    assert.equal(error.request, tile.source.uri);
     assert.equal(error.resource_kind, "tile");
-    if (typed) assert.equal(error.source, original);
+    if (typed) assert.deepEqual(error.source, original);
     else {
       assert.equal(error.source.kind, expectedKind);
       assert.equal(error.source.detail, String(original));
@@ -481,7 +507,7 @@ test("surface and output failures retain their typed kind", async () => {
   };
   await assert.rejects(h.host.acquireTile(acquisition(tile)), {
     kind: "resource",
-    request: tile.request.uri,
+    request: tile.source.uri,
     resource_kind: "tile",
     source: { kind: "output-unavailable", detail: "No canvas" },
   });
@@ -492,7 +518,7 @@ test("surface and output failures retain their typed kind", async () => {
     }),
     {
       kind: "resource",
-      request: tile.request.uri,
+      request: tile.source.uri,
       resource_kind: "tile",
       source: { kind: "output-unavailable", detail: "No canvas" },
     },
@@ -531,7 +557,7 @@ test("canonical failures retain their precise request and affected resource", as
   });
   await assert.rejects(h.host.acquireTile(acquisition(tile)), {
     kind: "resource",
-    request: tile.request.uri,
+    request: tile.source.uri,
     resource_kind: "tile",
     source: {
       kind: "http-error",
@@ -546,7 +572,7 @@ test("canonical failures retain their precise request and affected resource", as
   };
   await assert.rejects(h.host.acquireTile(acquisition(tile)), {
     kind: "resource",
-    request: tile.request.uri,
+    request: tile.source.uri,
     resource_kind: "tile",
     source: { kind: "output-unavailable", detail: "the output cannot be allocated" },
   });
@@ -631,7 +657,7 @@ test("settlement aborts and joins a dropped sibling fetch before returning", asy
       });
     },
   });
-  const sibling = assert.rejects(h.host.fetch(tile.request, "forbidden"), {
+  const sibling = assert.rejects(h.host.fetch(tile.source, "forbidden"), {
     kind: "cancelled",
   });
   let settled = false;

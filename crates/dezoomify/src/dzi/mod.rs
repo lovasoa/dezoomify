@@ -337,7 +337,7 @@ mod tests {
             .tiles_row_major()
             .take(2)
             .map(Result::unwrap)
-            .map(|tile| tile.request.uri)
+            .map(|tile| tile.source.resource().unwrap().uri.clone())
             .collect();
         assert_eq!(
             urls.join(","),
@@ -365,7 +365,15 @@ mod tests {
             unreachable!()
         };
         assert_eq!(
-            plan.tiles_row_major().next().unwrap().unwrap().request.uri,
+            plan.tiles_row_major()
+                .next()
+                .unwrap()
+                .unwrap()
+                .source
+                .resource()
+                .unwrap()
+                .uri
+                .clone(),
             "http://test.com/example-images/highsmith/highsmith_files/14/0_0.jpg"
         );
     }

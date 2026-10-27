@@ -83,6 +83,12 @@ export interface ImageRequest {
 }
 
 /**
+ * A tile is either a readable resource or a call into a job-owned live viewer.
+ * Only resource variants may enter URL transports or ordinary-image fallback.
+ */
+export type TileSource = ({ kind: "resource" } & ResourceRequest) | ({ kind: "viewer" } & ViewerTileRequest);
+
+/**
  * Adaptive tile-request starts per HTTP origin, shared across a job's levels.
  * Rates must be finite and positive, with `start_rps <= max_rps`. Successful
  * requests gradually increase the rate; throttling lowers it and may establish
@@ -101,6 +107,20 @@ export interface RequestPacing {
 export interface HtmlQuery {
     source: string;
     selectors: string[];
+}
+
+/**
+ * Call a loader retained by the Host for this job and exact source document.
+ * `handle` is opaque, never a URL. The source document URL supplies provenance
+ * and a pacing group; it need not be the origin of the viewer's network traffic.
+ * Pixel dimensions and crops come from the tile's placement.
+ */
+export interface ViewerTileRequest {
+    handle: string;
+    source_url: string;
+    level: number;
+    column: number;
+    row: number;
 }
 
 /**
@@ -126,7 +146,7 @@ export interface OutputGrid {
 
 /**
  * Complete, finite pixel grids observed in a live viewer. Serialize as supplied
- * `observed-metadata`; the Host resolves `resource_base` for this job only.
+ * `observed-metadata`; the Host resolves `handle` for this job only.
  * These are source images, independent of viewport rotation, pan or overlays.
  */
 export interface ViewerObservation {
@@ -255,8 +275,8 @@ export interface TilePlacement {
  * How an acquired tile participates in probing and final output. `probe`
  * marks adaptive-probe acquisitions (a miss is an observation, never an
  * output failure); `output` marks acquisitions joining the final canvas.
- * Every planned tile sets at least one flag; `RequestPurpose` on a tile
- * request derives from `probe` and never disagrees with it.
+ * Every planned tile sets at least one flag; resource request purposes derive
+ * from `probe` and never disagree with it.
  */
 export interface TileRole {
     probe: boolean;
@@ -355,13 +375,13 @@ export interface ViewerLevel {
 }
 
 /**
- * One request with placement and an index scoped to its probe sequence or final
+ * One tile source with placement and an index scoped to its probe sequence or final
  * plan. Probe indices need not match final indices; `FinishRequest.reused_tiles`
  * maps retained output by position. The index is not a source zoom identifier.
  */
 export interface Tile {
     index: number;
-    request: ResourceRequest;
+    source: TileSource;
     placement: TilePlacement;
 }
 
@@ -462,6 +482,9 @@ export interface Host {
      * Success means the tile has joined output; retain resources as needed
      * until finish/settlement. Calls for different tiles can overlap;
      * retries of the same tile are sequential and must not duplicate output.
+     * Dispatch by `TileSource`: viewer handles never enter URL transports.
+     * Preserve typed transport failures; unexpected adapter/encoding
+     * exceptions are internal errors with operation context.
      */
     acquireTile(request: TileAcquisition,): Promise<void>;
     /**
@@ -567,12 +590,12 @@ export interface LimitContext {
 export type OutputControl = { kind: "quality"; minimum: number; warning_below: number } | { kind: "effort" } | { kind: "none" };
 
 /**
- * The reusable source is the viewer page. Resource addresses name an owned
- * loader capability, not a public metadata endpoint or an HTTP fallback.
+ * The reusable source is the viewer page. The opaque handle names an owned
+ * loader capability scoped to that exact document and job.
  */
 export interface ViewerPyramid {
     source_url: string;
-    resource_base: string;
+    handle: string;
     levels: ViewerLevel[];
 }
 

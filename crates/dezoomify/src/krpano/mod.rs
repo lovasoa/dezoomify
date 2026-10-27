@@ -524,7 +524,7 @@ impl fmt::Debug for KrpanoLevel {
 }
 
 impl GridRequests for KrpanoLevel {
-    fn request(&self, tile: GridTile) -> Request {
+    fn request(&self, tile: GridTile) -> crate::model::TileSource {
         let cell: Vec2d = tile.coord.into();
         let relative = self.template.render(|variable| {
             self.base_index
@@ -533,7 +533,7 @@ impl GridRequests for KrpanoLevel {
                     XY::Y => cell.y,
                 }
         });
-        Request::new(resolve_relative(&self.base_url, &relative))
+        Request::new(resolve_relative(&self.base_url, &relative)).into()
     }
 }
 
@@ -551,7 +551,12 @@ mod tests {
         plan.tiles_row_major()
             .take(count)
             .map(Result::unwrap)
-            .map(|tile| (tile.request.uri, tile.destination))
+            .map(|tile| {
+                (
+                    tile.source.resource().unwrap().uri.clone(),
+                    tile.destination,
+                )
+            })
             .collect()
     }
 
@@ -704,7 +709,7 @@ mod tests {
         assert_eq!(plan.count(), 5859);
         let first = plan.tiles_row_major().next().unwrap().unwrap();
         assert_eq!(
-            first.request.header("Referer"),
+            first.source.resource().unwrap().header("Referer"),
             Some(
                 "https://pba.lille.fr/gigapixels/Gigapixelweb/gigapixels_1515_bellegambe/gigapixels.tiles/l8/001/l8_001_001.jpg"
             )

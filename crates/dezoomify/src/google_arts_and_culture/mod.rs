@@ -189,12 +189,12 @@ mod tests {
         let first = &tiles[0];
         assert_eq!(first.destination, Vec2d::default());
         assert_eq!(first.expected_size, Some(Vec2d { x: 512, y: 512 }));
-        assert!(first.request.uri.contains("=x0-y0-z4-t"));
+        assert!(first.source.resource().unwrap().uri.contains("=x0-y0-z4-t"));
         assert_eq!(first.processing, ProcessingRecipe::GoogleArtsDecrypt);
         let last = &tiles[87];
         assert_eq!(last.destination, Vec2d { x: 5120, y: 3584 });
         assert_eq!(last.expected_size, Some(Vec2d { x: 316, y: 496 }));
-        assert!(last.request.uri.contains("=x10-y7-z4-t"));
+        assert!(last.source.resource().unwrap().uri.contains("=x10-y7-z4-t"));
     }
 
     #[test]

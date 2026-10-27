@@ -6,6 +6,7 @@ export * from "./browser-host.ts";
 export * from "./byte-range.ts";
 export * from "./canvas-save.ts";
 export * from "./diagnostics.ts";
+export * from "./errors.ts";
 export * from "./failure.ts";
 export * from "./fetch-primitives.ts";
 export * from "./job-activity.ts";

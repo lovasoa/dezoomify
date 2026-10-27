@@ -5,22 +5,16 @@ use std::collections::HashSet;
 
 use crate::Vec2d;
 use crate::core::discovery::Metadata;
-use crate::core::{
-    DiscoveryError, DiscoveryResource, ImagePlan, ParsedResource, Request, ResolvedLevel,
-};
-use crate::model::{ViewerLevel, ViewerObservation};
+use crate::core::{DiscoveryError, DiscoveryResource, ImagePlan, ParsedResource, ResolvedLevel};
+use crate::model::{TileSource, ViewerLevel, ViewerObservation, ViewerTileRequest};
 
 impl Metadata for ViewerObservation {
     fn decode(self, _: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
         let pyramid = self.dezoomify_viewer;
-        let base = url::Url::parse(&pyramid.resource_base).map_err(invalid)?;
         let source = url::Url::parse(&pyramid.source_url).map_err(invalid)?;
-        let mut document = base.clone();
-        document.set_fragment(source.fragment());
         if !matches!(source.scheme(), "http" | "https")
-            || document != source
-            || pyramid.resource_base.len() > 2048
-            || !base.fragment().is_some_and(valid_capability)
+            || pyramid.source_url.len() > 2048
+            || !valid_handle(&pyramid.handle)
             || pyramid.levels.is_empty()
             || pyramid.levels.len() > 64
         {
@@ -34,7 +28,7 @@ impl Metadata for ViewerObservation {
                 if !ids.insert(level.level) {
                     return Err(invalid("duplicate viewer level"));
                 }
-                grid(&pyramid.resource_base, level)
+                grid(&pyramid.handle, &pyramid.source_url, level)
             })
             .collect::<Result<Vec<_>, _>>()?;
         Ok(ParsedResource::CanonicalSource {
@@ -44,25 +38,25 @@ impl Metadata for ViewerObservation {
     }
 }
 
-fn valid_capability(fragment: &str) -> bool {
-    let mut parts = fragment.split('/');
-    parts.next() == Some("dezoomify-viewer-tile")
-        && parts.next().is_some_and(|token| {
-            !token.is_empty()
-                && token
-                    .bytes()
-                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
-        })
-        && parts.next() == Some("image")
-        && parts.next().is_none()
+fn valid_handle(handle: &str) -> bool {
+    !handle.is_empty()
+        && handle.len() <= 128
+        && handle
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
 }
 
 fn invalid(detail: impl std::fmt::Display) -> DiscoveryError {
     DiscoveryError::InvalidMetadata(detail.to_string())
 }
 
-fn grid(base: &str, level: ViewerLevel) -> Result<ResolvedLevel, DiscoveryError> {
-    let base = base.to_owned();
+fn grid(
+    handle: &str,
+    source_url: &str,
+    level: ViewerLevel,
+) -> Result<ResolvedLevel, DiscoveryError> {
+    let handle = handle.to_owned();
+    let source_url = source_url.to_owned();
     let id = level.level;
     let source = crate::core::Grid::with_requests(
         Vec2d {
@@ -78,10 +72,13 @@ fn grid(base: &str, level: ViewerLevel) -> Result<ResolvedLevel, DiscoveryError>
             y: level.overlap.height,
         },
         move |tile| {
-            Request::new(format!(
-                "{base}/{id}/{}/{}/{}/{}.png",
-                tile.coord.column, tile.coord.row, tile.expected_size.x, tile.expected_size.y,
-            ))
+            TileSource::Viewer(ViewerTileRequest {
+                handle: handle.clone(),
+                source_url: source_url.clone(),
+                level: id,
+                column: tile.coord.column,
+                row: tile.coord.row,
+            })
         },
     )
     .map_err(invalid)?;

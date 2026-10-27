@@ -404,7 +404,7 @@ fn manifest_previews_use_declared_capabilities_and_image_dimensions() {
     let preview =
         manifest_preview("https://images.test/manifest.json", &service, Some(&size)).unwrap();
     assert_eq!(
-        preview.request.uri,
+        preview.source.resource().unwrap().uri.clone(),
         "https://images.test/page/full/77,167/0/default.jpg"
     );
     assert_eq!(
@@ -563,7 +563,7 @@ impl IIIFLevel {
 }
 
 impl GridRequests for IIIFLevel {
-    fn request(&self, tile: GridTile) -> Request {
+    fn request(&self, tile: GridTile) -> crate::model::TileSource {
         let col_and_row_pos: Vec2d = tile.coord.into();
         let scaled_tile_size = tile
             .cell_size
@@ -596,7 +596,7 @@ impl GridRequests for IIIFLevel {
             quality = self.quality,
             format = self.format,
         );
-        Request::new(append_tile_path(base, &path))
+        Request::new(append_tile_path(base, &path)).into()
     }
 }
 
@@ -931,7 +931,10 @@ fn discovery_requests_metadata_then_returns_normalized_replayable_levels() {
     };
     let first = plan.tiles_row_major().next().unwrap().unwrap();
     assert_eq!(
-        (first.ordinal, first.request.header("Referer")),
+        (
+            first.ordinal,
+            first.source.resource().unwrap().header("Referer")
+        ),
         (
             0,
             Some("https://images.example/item/0,0,512,512/512,512/0/default.jpg")
