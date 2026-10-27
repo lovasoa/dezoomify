@@ -1,3 +1,5 @@
+#[cfg(test)]
+use crate::test_support::{grid_tile, resource_uri};
 use std::sync::Arc;
 
 use regex::bytes::Regex as BytesRegex;
@@ -404,7 +406,7 @@ fn manifest_previews_use_declared_capabilities_and_image_dimensions() {
     let preview =
         manifest_preview("https://images.test/manifest.json", &service, Some(&size)).unwrap();
     assert_eq!(
-        preview.source.resource().unwrap().uri.clone(),
+        resource_uri(&preview.source),
         "https://images.test/page/full/77,167/0/default.jpg"
     );
     assert_eq!(
@@ -900,7 +902,7 @@ fn level_with_scale(levels: &[ResolvedLevel], scale_factor: u32) -> &ResolvedLev
 
 #[cfg(test)]
 fn tile_urls(level: &ResolvedLevel) -> Vec<String> {
-    crate::test_support::tile_urls(level).expect("IIIF levels have declared grids")
+    crate::test_support::tile_urls(level)
 }
 
 #[test]
@@ -929,7 +931,7 @@ fn discovery_requests_metadata_then_returns_normalized_replayable_levels() {
     let TileSource::Grid(plan) = &level.source else {
         panic!("ordinary IIIF geometry must not require probing");
     };
-    let first = plan.tiles_row_major().next().unwrap().unwrap();
+    let first = grid_tile(plan, 0);
     assert_eq!(
         (
             first.ordinal,

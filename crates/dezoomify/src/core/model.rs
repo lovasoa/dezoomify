@@ -472,6 +472,7 @@ pub(crate) fn image_preview(image: &ResolvedImage) -> Option<crate::model::Tile>
 mod tests {
     use super::*;
     use crate::core::{Grid, GridRequests, GridTile};
+    use crate::test_support::resource_uri;
 
     #[derive(Debug)]
     struct TestSource;
@@ -572,10 +573,7 @@ mod tests {
         };
         let public = Image::from(&image);
         let preview = public.preview.unwrap();
-        assert_eq!(
-            preview.source.resource().unwrap().uri.clone(),
-            "memory://level/256"
-        );
+        assert_eq!(resource_uri(&preview.source), "memory://level/256");
         assert_eq!(preview.placement.canvas.unwrap().width, 256);
         assert_eq!(public.size.unwrap().width, 512);
         assert_eq!(public.source_url.as_deref(), Some("memory://catalog"));

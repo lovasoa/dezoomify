@@ -1,7 +1,7 @@
 use super::*;
 use crate::Vec2d;
 use crate::core::{DiscoveredEntry, DiscoveryCatalog, ImagePlan, ParsedResource};
-use crate::test_support::{grid, tile_urls};
+use crate::test_support::{grid, grid_tile, grid_tile_uri, resource_uri, tile_urls};
 
 const VIEWER: &str = "https://images.test/views/book.html";
 const INDEX: &str = r#"<item title="Book &amp; title" total="29" ldata="128,96"><item resource="1499_02/02_001" ext="fzp" label="1/29"/><item resource="1499_02/02_002" ext="fzp" page="2/29"/></item>"#;
@@ -60,79 +60,83 @@ fn discover(
     )
 }
 
+struct GeometryCase {
+    version: &'static str,
+    size: Vec2d,
+    tile: u32,
+    max_level: u32,
+    full_edge: &'static str,
+    reduced_edge: &'static str,
+    reduced_size: Vec2d,
+}
+
 #[test]
-fn verified_geometry_and_original_coordinate_edge_filenames() {
-    for (version, width, height, tile, max, full_edge, reduced_edge, reduced_size) in [
-        (
-            "1.1",
-            15122,
-            14507,
-            512,
-            6,
-            "14848143360027400171.jpg",
-            "14336143360078600171.jpg",
-            Vec2d { x: 393, y: 85 },
-        ),
-        (
-            "1.3",
-            4912,
-            3687,
-            256,
-            5,
-            "04864035840004800103.jpg",
-            "04608035840030400103.jpg",
-            Vec2d { x: 152, y: 52 },
-        ),
-        (
-            "1.1",
-            92479,
-            3233,
-            256,
-            9,
-            "92416030720006300161.jpg",
-            "92160030720031900161.jpg",
-            Vec2d { x: 159, y: 80 },
-        ),
-    ] {
-        let image = image(&xml(version, width, height, tile, max));
-        assert_eq!(image.title.as_deref(), Some("Image & title"));
-        assert_eq!(image.levels.len(), max as usize + 1);
-        let full = grid(&image.levels[0]).unwrap();
-        let first = full.tiles_row_major().next().unwrap().unwrap();
-        assert_eq!(first.expected_size, Some(Vec2d::square(tile)));
-        assert!(
-            first
-                .source
-                .resource()
-                .unwrap()
-                .uri
-                .clone()
-                .ends_with(&format!("0/0000000000{tile:05}{tile:05}.jpg"))
-        );
-        assert!(
-            tile_urls(&image.levels[0])
-                .unwrap()
-                .last()
-                .unwrap()
-                .ends_with(full_edge)
-        );
-        let reduced = grid(&image.levels[1])
-            .unwrap()
-            .tiles_row_major()
-            .last()
-            .unwrap()
-            .unwrap();
-        assert!(
-            reduced
-                .source
-                .resource()
-                .unwrap()
-                .uri
-                .ends_with(reduced_edge)
-        );
-        assert_eq!(reduced.expected_size, Some(reduced_size));
-        assert_eq!(reduced.processing, crate::core::ProcessingRecipe::None);
-    }
+fn v11_partial_edges_use_original_coordinates() {
+    assert_geometry(GeometryCase {
+        version: "1.1",
+        size: Vec2d { x: 15122, y: 14507 },
+        tile: 512,
+        max_level: 6,
+        full_edge: "14848143360027400171.jpg",
+        reduced_edge: "14336143360078600171.jpg",
+        reduced_size: Vec2d { x: 393, y: 85 },
+    });
+}
+
+#[test]
+fn v13_partial_edges_use_original_coordinates() {
+    assert_geometry(GeometryCase {
+        version: "1.3",
+        size: Vec2d { x: 4912, y: 3687 },
+        tile: 256,
+        max_level: 5,
+        full_edge: "04864035840004800103.jpg",
+        reduced_edge: "04608035840030400103.jpg",
+        reduced_size: Vec2d { x: 152, y: 52 },
+    });
+}
+
+#[test]
+fn wide_v11_image_keeps_coordinate_field_widths() {
+    assert_geometry(GeometryCase {
+        version: "1.1",
+        size: Vec2d { x: 92479, y: 3233 },
+        tile: 256,
+        max_level: 9,
+        full_edge: "92416030720006300161.jpg",
+        reduced_edge: "92160030720031900161.jpg",
+        reduced_size: Vec2d { x: 159, y: 80 },
+    });
+}
+
+#[track_caller]
+fn assert_geometry(case: GeometryCase) {
+    let GeometryCase {
+        version,
+        size,
+        tile,
+        max_level,
+        full_edge,
+        reduced_edge,
+        reduced_size,
+    } = case;
+    let image = image(&xml(version, size.x, size.y, tile, max_level));
+    assert_eq!(image.title.as_deref(), Some("Image & title"));
+    assert_eq!(image.levels.len(), max_level as usize + 1);
+    let full = grid(&image.levels[0]);
+    let first = grid_tile(full, 0);
+    assert_eq!(first.expected_size, Some(Vec2d::square(tile)));
+    assert!(
+        resource_uri(&first.source)
+            .to_owned()
+            .ends_with(&format!("0/0000000000{tile:05}{tile:05}.jpg"))
+    );
+    assert!(grid_tile_uri(full, full.count() - 1).ends_with(full_edge));
+    let reduced_grid = grid(&image.levels[1]);
+    let reduced = grid_tile(reduced_grid, reduced_grid.count() - 1);
+    assert!(resource_uri(&reduced.source).ends_with(reduced_edge));
+    assert_eq!(reduced.expected_size, Some(reduced_size));
+    assert_eq!(reduced.processing, crate::core::ProcessingRecipe::None);
 }
 
 #[test]
@@ -146,7 +150,6 @@ fn version_rounding_preserves_partial_edges_and_coordinate_fields() {
     assert_eq!(floor.levels[1].source.count(), Some(4)); // Fractional strip adds no tile.
     assert!(
         tile_urls(&floor.levels[1])
-            .unwrap()
             .last()
             .unwrap()
             .ends_with("1/00004000040000400003.jpg")
@@ -160,7 +163,7 @@ fn version_rounding_preserves_partial_edges_and_coordinate_fields() {
     // The field widths constrain rectangles, not the original dimension alone.
     let wide = image(&xml("1.1", 199998, 2, 99999, 0));
     assert_eq!(wide.levels[0].source.count(), Some(2));
-    assert!(tile_urls(&wide.levels[0]).unwrap()[1].ends_with("99999000009999900002.jpg"));
+    assert!(tile_urls(&wide.levels[0])[1].ends_with("99999000009999900002.jpg"));
 }
 
 #[test]
@@ -234,7 +237,7 @@ fn direct_metadata_and_ordered_deferred_index() {
     ));
     assert_eq!(legacy.title.as_deref(), Some("四ッ谷見附橋（12562-001）"));
     assert_eq!(
-        tile_urls(&legacy.levels[1]).unwrap().last().unwrap(),
+        tile_urls(&legacy.levels[1]).last().unwrap(),
         "https://images.test/views/1/11264071680101900686.jpg"
     );
     let text = xml("1.1", 9, 7, 2, 2);
@@ -248,8 +251,7 @@ fn direct_metadata_and_ordered_deferred_index() {
     );
     let image = crate::test_support::ready_image(catalog);
     assert!(
-        tile_urls(image.levels.last().unwrap()).unwrap()[0]
-            .starts_with("https://cdn.test/redirected/0/")
+        tile_urls(image.levels.last().unwrap())[0].starts_with("https://cdn.test/redirected/0/")
     );
     let index_uri = "https://images.test/collection/xmls/book.xml";
     let (catalog, reads) = discover(index_uri, &[(index_uri, INDEX, None)]);
@@ -455,133 +457,175 @@ fn failed_auxiliary_scripts_preserve_required_fetch_errors() {
     }
 }
 
-type WrapperCase = (
-    &'static str,
-    &'static str,
-    &'static str,
-    &'static str,
-    &'static str,
-);
+struct WrapperCase {
+    script_path: &'static str,
+    call: &'static str,
+    config: &'static str,
+    target: &'static str,
+    first: &'static str,
+}
 
-fn deployed_wrapper_cases() -> [WrapperCase; 10] {
-    const NARA: &str = r#"(function(window,document){window.lime=function(src,type,param){
-        if(typeof param['path']==='undefined') param['path']='../resources/';
-        window.jQuery(document).ready(function(){
-            Lime.Viewer.loadIn('view',{path:param['path'],name:src,type:type});
-        });};})(window,document);"#;
-    const NIHON: &str = r#"window.lime=function(src,type){window.jQuery(document).ready(function(){
-        Lime.Viewer.init('view',{preview:{resourcepath:'../resources/',indexpath:'../xmls/'}});
-        Lime.Viewer.loadIn('view',{name:src,type:type});});};"#;
-    [
-        (
-            "../limescripts/lime.js",
-            "lime('book');",
-            "var lime_depth=limeGetScriptDepth(); function lime(name){lime2_common(name,'xml',{});} jime_vars.ResourcePath=lime_depth['dir']+'resources/'; jime_vars.IndexPath=lime_depth['dir']+'xmls/';",
-            "../xmls/book.xml",
-            "../resources/1499_02/02_001/root.xml",
-        ),
-        (
-            "limescripts/lime.js",
-            "lime('image','fzp');",
-            "var lime_depth=limeGetScriptDepth(); jime_vars.ResourcePath=lime_depth['dir']+'resources/';",
-            "resources/image/root.xml",
-            "resources/image/root.xml",
-        ),
-        (
-            "/common/lime.js?x&y",
-            "lime('book','xml',{indexpath:'../xmls/',path:'../custom/'});",
-            NIHON,
-            "../xmls/book.xml",
-            "../custom/1499_02/02_001/root.xml",
-        ),
-        (
-            "../limescripts/lime.js?x&y",
-            "lime('book','xml');",
-            r#"var lime_depth=limeGetScriptDepth();
+const NARA: &str = r#"(function(window,document){window.lime=function(src,type,param){
+    if(typeof param['path']==='undefined') param['path']='../resources/';
+    window.jQuery(document).ready(function(){
+        Lime.Viewer.loadIn('view',{path:param['path'],name:src,type:type});
+    });};})(window,document);"#;
+const NIHON: &str = r#"window.lime=function(src,type){window.jQuery(document).ready(function(){
+    Lime.Viewer.init('view',{preview:{resourcepath:'../resources/',indexpath:'../xmls/'}});
+    Lime.Viewer.loadIn('view',{name:src,type:type});});};"#;
+
+#[test]
+fn legacy_wrapper_uses_script_depth() {
+    assert_wrapper(WrapperCase {
+        script_path: "../limescripts/lime.js",
+        call: "lime('book');",
+        config: "var lime_depth=limeGetScriptDepth(); function lime(name){lime2_common(name,'xml',{});} jime_vars.ResourcePath=lime_depth['dir']+'resources/'; jime_vars.IndexPath=lime_depth['dir']+'xmls/';",
+        target: "../xmls/book.xml",
+        first: "../resources/1499_02/02_001/root.xml",
+    });
+}
+
+#[test]
+fn direct_wrapper_uses_script_depth() {
+    assert_wrapper(WrapperCase {
+        script_path: "limescripts/lime.js",
+        call: "lime('image','fzp');",
+        config: "var lime_depth=limeGetScriptDepth(); jime_vars.ResourcePath=lime_depth['dir']+'resources/';",
+        target: "resources/image/root.xml",
+        first: "resources/image/root.xml",
+    });
+}
+
+#[test]
+fn explicit_index_and_resource_paths() {
+    assert_wrapper(WrapperCase {
+        script_path: "/common/lime.js?x&y",
+        call: "lime('book','xml',{indexpath:'../xmls/',path:'../custom/'});",
+        config: NIHON,
+        target: "../xmls/book.xml",
+        first: "../custom/1499_02/02_001/root.xml",
+    });
+}
+
+#[test]
+fn nested_wrapper_uses_script_depth() {
+    assert_wrapper(WrapperCase {
+        script_path: "../limescripts/lime.js?x&y",
+        call: "lime('book','xml');",
+        config: r#"var lime_depth=limeGetScriptDepth();
             function lime(src,type){lime2_common(src,type,{});}
             function lime2_common(src,type,param){
                 jime_vars.ResourcePath=lime_depth['dir']+'resources/';
                 jime_vars.IndexPath=lime_depth['dir']+'xmls/';}"#,
-            "../xmls/book.xml",
-            "../resources/1499_02/02_001/root.xml",
-        ),
-        (
-            "/common/lime.js?x&y",
-            "lime('book','xml');",
-            NIHON,
-            "../xmls/book.xml",
-            "../resources/1499_02/02_001/root.xml",
-        ),
-        (
-            "/common/lime.js?x&y",
-            "lime('image','fzp',{loc:512,ini:'87000,1600'});",
-            NARA,
-            "../resources/image/root.xml",
-            "../resources/image/root.xml",
-        ),
-        (
-            "/common/lime.js?x&y",
-            "lime('image','fzp',{path:'../custom/'});",
-            NARA,
-            "../custom/image/root.xml",
-            "../custom/image/root.xml",
-        ),
-        (
-            "/common/lime.js?x&y",
-            "lime_future('image','fzp');",
-            "function lime_other(src,type){Lime.Viewer.loadIn('view',{path:'../wrong/',name:src,type:type});} function lime_future(src,type){Lime.Viewer.loadIn('view',{path:'../pictures/',name:src,type:type});}",
-            "../pictures/image/root.xml",
-            "../pictures/image/root.xml",
-        ),
-        (
-            "/common/lime.js?x&y",
-            "lime('book','xml');",
-            "jime_vars.ResourcePath='../tiles/'; jime_vars.IndexPath='../indexes/';",
-            "../indexes/book.xml",
-            "../tiles/1499_02/02_001/root.xml",
-        ),
-        (
-            "/common/lime.js?x&y",
-            "lime('image','fzp');",
-            "<!--\njime_vars.ResourcePath='../resources/';\n//-->",
-            "../resources/image/root.xml",
-            "../resources/image/root.xml",
-        ),
-    ]
+        target: "../xmls/book.xml",
+        first: "../resources/1499_02/02_001/root.xml",
+    });
 }
 
 #[test]
-fn deployed_wrappers_share_document_relative_discovery() {
+fn nihon_wrapper_defaults() {
+    assert_wrapper(WrapperCase {
+        script_path: "/common/lime.js?x&y",
+        call: "lime('book','xml');",
+        config: NIHON,
+        target: "../xmls/book.xml",
+        first: "../resources/1499_02/02_001/root.xml",
+    });
+}
+
+#[test]
+fn nara_wrapper_defaults() {
+    assert_wrapper(WrapperCase {
+        script_path: "/common/lime.js?x&y",
+        call: "lime('image','fzp',{loc:512,ini:'87000,1600'});",
+        config: NARA,
+        target: "../resources/image/root.xml",
+        first: "../resources/image/root.xml",
+    });
+}
+
+#[test]
+fn nara_wrapper_overrides_resource_path() {
+    assert_wrapper(WrapperCase {
+        script_path: "/common/lime.js?x&y",
+        call: "lime('image','fzp',{path:'../custom/'});",
+        config: NARA,
+        target: "../custom/image/root.xml",
+        first: "../custom/image/root.xml",
+    });
+}
+
+#[test]
+fn only_called_wrapper_supplies_paths() {
+    assert_wrapper(WrapperCase {
+        script_path: "/common/lime.js?x&y",
+        call: "lime_future('image','fzp');",
+        config: "function lime_other(src,type){Lime.Viewer.loadIn('view',{path:'../wrong/',name:src,type:type});} function lime_future(src,type){Lime.Viewer.loadIn('view',{path:'../pictures/',name:src,type:type});}",
+        target: "../pictures/image/root.xml",
+        first: "../pictures/image/root.xml",
+    });
+}
+
+#[test]
+fn explicit_global_paths() {
+    assert_wrapper(WrapperCase {
+        script_path: "/common/lime.js?x&y",
+        call: "lime('book','xml');",
+        config: "jime_vars.ResourcePath='../tiles/'; jime_vars.IndexPath='../indexes/';",
+        target: "../indexes/book.xml",
+        first: "../tiles/1499_02/02_001/root.xml",
+    });
+}
+
+#[test]
+fn html_commented_configuration() {
+    assert_wrapper(WrapperCase {
+        script_path: "/common/lime.js?x&y",
+        call: "lime('image','fzp');",
+        config: "<!--\njime_vars.ResourcePath='../resources/';\n//-->",
+        target: "../resources/image/root.xml",
+        first: "../resources/image/root.xml",
+    });
+}
+
+#[track_caller]
+fn assert_wrapper(case: WrapperCase) {
+    let WrapperCase {
+        script_path,
+        call,
+        config,
+        target,
+        first,
+    } = case;
     let metadata = xml("1.1", 9, 7, 2, 2);
     let viewer = "https://images.test/collection/views/book.html?l=1&amp;n=6";
-    for (script_path, call, config, target, first) in deployed_wrapper_cases() {
-        // Shared scripts can be hosted elsewhere; configuration stays document-relative.
-        let page = format!(
-            "<script src='{}'></script><body onclick=\"lime('unused','fzp')\" onload=\"{call}\">",
-            script_path.replace('&', "&amp;")
-        );
-        let script_uri = crate::core::resolve_relative(viewer, script_path);
-        let target = crate::core::resolve_relative(viewer, target);
-        let payload = if target.ends_with("/root.xml") {
-            metadata.as_str()
-        } else {
-            INDEX
-        };
-        let (catalog, reads) = discover(
-            viewer,
-            &[
-                (viewer, &page, None),
-                (&script_uri, config, None),
-                (&target, payload, None),
-            ],
-        );
-        assert_eq!(reads.len(), 3);
-        assert_eq!(reads[2], target);
-        let entry = &catalog.entries()[0];
-        if let DiscoveredEntry::Deferred(entry) = entry {
-            assert_eq!(entry.uri, crate::core::resolve_relative(viewer, first));
-        } else {
-            assert_eq!(catalog.len(), 1);
-        }
+    // Shared scripts can be hosted elsewhere; configuration stays document-relative.
+    let page = format!(
+        "<script src='{}'></script><body onclick=\"lime('unused','fzp')\" onload=\"{call}\">",
+        script_path.replace('&', "&amp;")
+    );
+    let script_uri = crate::core::resolve_relative(viewer, script_path);
+    let target = crate::core::resolve_relative(viewer, target);
+    let payload = if target.ends_with("/root.xml") {
+        metadata.as_str()
+    } else {
+        INDEX
+    };
+    let (catalog, reads) = discover(
+        viewer,
+        &[
+            (viewer, &page, None),
+            (&script_uri, config, None),
+            (&target, payload, None),
+        ],
+    );
+    assert_eq!(reads.len(), 3);
+    assert_eq!(reads[2], target);
+    if let DiscoveredEntry::Deferred(entry) = &catalog.entries()[0] {
+        assert_eq!(catalog.len(), 2);
+        assert_eq!(entry.uri, crate::core::resolve_relative(viewer, first));
+    } else {
+        let image = crate::test_support::ready_image(catalog);
+        assert_eq!(image.source_url.as_deref(), Some(target.as_str()));
     }
 }

@@ -157,12 +157,10 @@ mod tests {
         };
         assert_eq!((low_plan.count(), plan.count()), (1, 4));
         assert_eq!(
-            crate::test_support::tile_urls(&image.levels[0])
-                .expect("grid")
-                .join(","),
+            crate::test_support::tile_urls(&image.levels[0]).join(","),
             "http://test.com/&JTL=0,0"
         );
-        let urls = crate::test_support::tile_urls(&image.levels[1]).expect("grid");
+        let urls = crate::test_support::tile_urls(&image.levels[1]);
         assert_eq!(urls[0], "http://test.com/&JTL=1,0");
         assert_eq!(urls[2], "http://test.com/&JTL=1,2");
     }

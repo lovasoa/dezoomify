@@ -430,6 +430,7 @@ impl Dichotomy2d {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::resource_uri;
 
     #[test]
     fn generic_template_preserves_syntax_and_padding() {
@@ -446,7 +447,7 @@ mod tests {
         let mut search = GenericSearch::new(DiscoverableGrid::new("{{X}},{{y}}".into()));
         for _ in 0..20 {
             let tile = search.tile().unwrap();
-            let observed = if existing.contains(&tile.source.resource().unwrap().uri.as_str()) {
+            let observed = if existing.contains(&resource_uri(&tile.source)) {
                 ObservationResult::Available {
                     size: Vec2d { x: 4, y: 5 },
                 }

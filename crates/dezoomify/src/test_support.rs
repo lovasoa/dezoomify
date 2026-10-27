@@ -95,6 +95,23 @@ pub fn discover_with(
     .0
 }
 
+/// Fixed responses keyed by URI. Unexpected reads fail immediately; use
+/// `discover_with_responses` when missing resources are part of the scenario.
+#[track_caller]
+pub fn discover_resources(
+    registry: Registry,
+    input: &str,
+    responses: &[(&str, &[u8])],
+) -> (Result<DiscoveryCatalog, DiscoveryError>, Vec<Request>) {
+    discover_with_responses(registry, input, |uri| {
+        let (_, bytes) = responses
+            .iter()
+            .find(|(expected, _)| *expected == uri)
+            .unwrap_or_else(|| panic!("unexpected resource read: {uri}"));
+        Some(Ok((bytes.to_vec(), None)))
+    })
+}
+
 /// Discovery with positional replies (by request order) and final URIs.
 pub fn discover(
     spec: FormatSpec,
@@ -113,39 +130,63 @@ pub fn discover(
     })
 }
 
-/// The catalog's single ready image; deferred or empty is a stub-level bug.
+/// The catalog must contain exactly one ready image.
+#[track_caller]
 pub fn ready_image(catalog: DiscoveryCatalog) -> ResolvedImage {
-    match catalog.into_entries().into_iter().next() {
-        Some(DiscoveredEntry::Ready(image)) => image,
-        Some(DiscoveredEntry::Deferred(image)) => {
+    let mut entries = catalog.into_entries();
+    assert_eq!(entries.len(), 1, "expected exactly one image: {entries:?}");
+    match entries.pop().expect("one entry") {
+        DiscoveredEntry::Ready(image) => image,
+        DiscoveredEntry::Deferred(image) => {
             panic!("expected a ready image, got deferred URI {}", image.uri)
         }
-        None => panic!("expected one image"),
     }
 }
 
 /// The level's grid, or an adaptive source's declared grid.
-pub fn grid(level: &ResolvedLevel) -> Result<&Grid, String> {
+#[track_caller]
+pub fn grid(level: &ResolvedLevel) -> &Grid {
     match &level.source {
-        TileSource::Grid(grid) => Ok(grid),
+        TileSource::Grid(grid) => grid,
         TileSource::Adaptive(source) => source
             .declared_grid()
-            .ok_or_else(|| "adaptive source has no declared grid".to_string()),
-        source => Err(format!("expected a grid source, got {source:?}")),
+            .expect("adaptive source must have a declared grid"),
+        source => panic!("expected a grid source, got {source:?}"),
     }
 }
 
+/// Require a resource source, retaining unexpected variants in the failure.
+#[track_caller]
+pub fn resource_uri(source: &super::model::TileSource) -> &str {
+    &source
+        .resource()
+        .unwrap_or_else(|| panic!("expected a resource source, got {source:?}"))
+        .uri
+}
+
+/// One tile in row-major order; only the selected tile's request is inspected.
+#[track_caller]
+pub fn grid_tile(grid: &Grid, ordinal: u64) -> super::core::TileSpec {
+    grid.tiles_row_major()
+        .nth(usize::try_from(ordinal).expect("tile ordinal must fit usize"))
+        .unwrap_or_else(|| panic!("tile {ordinal} outside grid of {} tiles", grid.count()))
+        .unwrap_or_else(|error| panic!("tile {ordinal}: {error}"))
+}
+
+#[track_caller]
+pub fn grid_tile_uri(grid: &Grid, ordinal: u64) -> String {
+    resource_uri(&grid_tile(grid, ordinal).source).to_owned()
+}
+
 /// Every planned tile URI of the level's grid, row-major.
-pub fn tile_urls(level: &ResolvedLevel) -> Result<Vec<String>, String> {
-    Ok(grid(level)?
+#[track_caller]
+pub fn tile_urls(level: &ResolvedLevel) -> Vec<String> {
+    grid(level)
         .tiles_row_major()
-        .map(|tile| {
-            tile.expect("grid tile")
-                .source
-                .resource()
-                .unwrap()
-                .uri
-                .clone()
+        .enumerate()
+        .map(|(ordinal, tile)| {
+            let tile = tile.unwrap_or_else(|error| panic!("tile {ordinal}: {error}"));
+            resource_uri(&tile.source).to_owned()
         })
-        .collect())
+        .collect()
 }

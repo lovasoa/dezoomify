@@ -77,7 +77,7 @@ fn emuseum_viewers_supply_geometry_without_info_json() {
             level.source.image_size(),
             Some(dezoomify::Vec2d { x: 1819, y: 2500 })
         );
-        let tiles = support::tile_urls(level).unwrap();
+        let tiles = support::tile_urls(level);
         assert_eq!(tiles.len(), 80);
         assert_eq!(
             tiles[0],
@@ -87,7 +87,7 @@ fn emuseum_viewers_supply_geometry_without_info_json() {
             tiles[79],
             format!("{service}/1792,2304,27,196/27,/0/default.jpg")
         );
-        let half = support::tile_urls(&image.levels[2]).unwrap();
+        let half = support::tile_urls(&image.levels[2]);
         assert_eq!(
             half[3],
             format!("{service}/1536,0,283,512/142,/0/default.jpg")
@@ -154,7 +154,7 @@ fn gallica_viewers_resolve_the_selected_page_without_fetching_html() {
                 Some(dezoomify::Vec2d { x: 7894, y: 6094 })
             );
             assert_eq!(
-                support::tile_urls(level).unwrap()[0],
+                support::tile_urls(level)[0],
                 format!("{service}/0,0,512,512/512,512/0/native.jpg")
             );
             assert_eq!(requests.len(), 1);

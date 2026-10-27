@@ -108,6 +108,7 @@ impl crate::core::tile_plan::PositionedGenerator for CustomTiles {
 mod tests {
     use super::*;
     use crate::core::{DiscoveredEntry, TileRole, TileSource};
+    use crate::test_support::resource_uri;
 
     const BUNDLED: &[u8] =
         include_bytes!("../../../../testdata/scenarios/rs-core/formats/payloads/tiles.yaml");
@@ -170,14 +171,8 @@ y_template: y
         let last = &tiles[3];
         assert_eq!(first.ordinal, 0);
         assert_eq!(first.role, TileRole::output());
-        assert_eq!(
-            first.source.resource().unwrap().uri.clone(),
-            "https://example.test/0/0"
-        );
-        assert_eq!(
-            last.source.resource().unwrap().uri.clone(),
-            "https://example.test/1/1"
-        );
+        assert_eq!(resource_uri(&first.source), "https://example.test/0/0");
+        assert_eq!(resource_uri(&last.source), "https://example.test/1/1");
         assert_eq!(first, &plan.tiles().next().unwrap().unwrap());
     }
 

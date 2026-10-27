@@ -1,0 +1,24 @@
+<Capabilities>
+  <Contents>
+    <Layer>
+      <Identifier>styled</Identifier>
+      <Style isDefault="false">
+        <Identifier>night</Identifier>
+      </Style>
+      <ResourceURL resourceType="tile" template="tiles/{Style}/{TileMatrix}/{TileRow}/{TileCol}.jpg" />
+    </Layer>
+    <TileMatrixSet>
+      <Identifier>set</Identifier>
+      <SupportedCRS>EPSG:3857</SupportedCRS>
+      <TileMatrix>
+        <Identifier>0</Identifier>
+        <ScaleDenominator>1</ScaleDenominator>
+        <TopLeftCorner>0 0</TopLeftCorner>
+        <TileWidth>256</TileWidth>
+        <TileHeight>256</TileHeight>
+        <MatrixWidth>1</MatrixWidth>
+        <MatrixHeight>1</MatrixHeight>
+      </TileMatrix>
+    </TileMatrixSet>
+  </Contents>
+</Capabilities>

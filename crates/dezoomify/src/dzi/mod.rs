@@ -313,6 +313,7 @@ mod tests {
     use super::*;
     use crate::core::{DiscoveredEntry, TileSource};
     use crate::test_support::ready_image;
+    use crate::test_support::{grid_tile_uri, resource_uri};
 
     #[test]
     fn panorama_preserves_urls_overlap_and_normalized_level_order() {
@@ -337,7 +338,7 @@ mod tests {
             .tiles_row_major()
             .take(2)
             .map(Result::unwrap)
-            .map(|tile| tile.source.resource().unwrap().uri.clone())
+            .map(|tile| resource_uri(&tile.source).to_owned())
             .collect();
         assert_eq!(
             urls.join(","),
@@ -365,15 +366,7 @@ mod tests {
             unreachable!()
         };
         assert_eq!(
-            plan.tiles_row_major()
-                .next()
-                .unwrap()
-                .unwrap()
-                .source
-                .resource()
-                .unwrap()
-                .uri
-                .clone(),
+            grid_tile_uri(plan, 0),
             "http://test.com/example-images/highsmith/highsmith_files/14/0_0.jpg"
         );
     }

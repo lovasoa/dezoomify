@@ -437,6 +437,7 @@ fn plan_from_levels(
 mod tests {
     use super::*;
     use crate::core::{DiscoveredEntry, ResolvedImage, TileSource};
+    use crate::test_support::{grid_tile, grid_tile_uri, resource_uri};
 
     const XML: &[u8] = br#"<IMAGE_PROPERTIES WIDTH="512" HEIGHT="256" NUMTILES="2" NUMIMAGES="1" VERSION="1.8" TILESIZE="256"/>"#;
 
@@ -455,15 +456,7 @@ mod tests {
         let TileSource::Grid(plan) = &image.levels[0].source else {
             panic!("Zoomify levels must be grids")
         };
-        plan.tiles_row_major()
-            .next()
-            .unwrap()
-            .unwrap()
-            .source
-            .resource()
-            .unwrap()
-            .uri
-            .clone()
+        grid_tile_uri(plan, 0)
     }
 
     #[test]
@@ -716,9 +709,9 @@ mod tests {
             let TileSource::Grid(plan) = &image.levels[0].source else {
                 panic!("inline Zoomify levels must be grids");
             };
-            let first_tile = plan.tiles_row_major().next().unwrap().unwrap();
+            let first_tile = grid_tile(plan, 0);
             assert_eq!(
-                first_tile.source.resource().unwrap().uri.clone(),
+                resource_uri(&first_tile.source),
                 format!("{base}{title}/TileGroup0/0-0-0.jpg"),
                 "{name}"
             );
@@ -803,7 +796,7 @@ mod tests {
             .tiles_row_major()
             .take(2)
             .map(Result::unwrap)
-            .map(|tile| tile.source.resource().unwrap().uri.clone())
+            .map(|tile| resource_uri(&tile.source).to_owned())
             .collect();
         assert_eq!(
             urls.join(","),
@@ -836,7 +829,7 @@ mod tests {
         let urls: Vec<_> = plan
             .tiles_row_major()
             .map(Result::unwrap)
-            .map(|tile| tile.source.resource().unwrap().uri.clone())
+            .map(|tile| resource_uri(&tile.source).to_owned())
             .collect();
         assert!(urls.iter().all(|url| url.contains("/TileGroup0/")));
         assert!(urls.iter().any(|url| url.ends_with("/6-16-6.jpg")));
