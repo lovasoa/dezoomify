@@ -205,10 +205,7 @@ test("desktop handoff keeps the discovered source through completion and resets 
     for (const frame of frames.splice(0)) frame(0);
   });
   assert.equal(h.root.querySelector("#dz-job-source-line").title, discovered);
-  assert.equal(
-    h.root.querySelector("#dz-job-source-url").textContent,
-    "image.test/selected/info.json?signature=exact%2Bvalue",
-  );
+  assert.equal(h.root.querySelector("#dz-job-source-url").textContent, discovered);
   act(() => {
     h.calls[0].resolve(output);
   });

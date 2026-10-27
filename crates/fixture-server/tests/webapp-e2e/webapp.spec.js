@@ -44,7 +44,7 @@ test("source URL clips in the middle, copies natively, and leaves timing visible
   await page.addScriptTag({ content: outputFiles[0].text });
   const source = page.locator("#dz-job-source-url");
   const longUrl = `https://collections.chateauversailles.fr/cc/${"imageproxy/".repeat(30)}imageproxy.aspx?&filename=objectimages/MV%208181_014.dzi`;
-  for (const [url, width] of [[longUrl, 1280], [longUrl, 600], [longUrl, 375], ["https://museum.test/a.dzi", 1280]]) {
+  for (const [url, width] of [[longUrl, 1280], [longUrl, 603], [longUrl, 599], [longUrl, 375], ["https://museum.test/a.dzi", 1280]]) {
     await page.setViewportSize({ width, height: 720 });
     await page.evaluate((url) => {
       const { renderView, presentProgress } = window.sourceTest;
@@ -58,32 +58,40 @@ test("source URL clips in the middle, copies natively, and leaves timing visible
       const [start, end] = element.children;
       const time = document.querySelector("#dz-job-time");
       const row = element.parentElement.getBoundingClientRect();
+      const urlBox = element.getBoundingClientRect(), timeBox = time.getBoundingClientRect();
       const startBox = start.getBoundingClientRect(), endBox = end.getBoundingClientRect();
       const first = document.createRange(), last = document.createRange();
-      first.setStart(start.firstChild, 0);
-      first.setEnd(start.firstChild, 1);
+      first.setStart(start.lastChild, 0);
+      first.setEnd(start.lastChild, 1);
       const tail = end.firstChild.firstChild;
       last.setStart(tail, tail.length - 1);
       last.setEnd(tail, tail.length);
+      const characters = Array.from({ length: tail.length }, (_, index) => {
+        const range = document.createRange();
+        range.setStart(tail, index);
+        range.setEnd(tail, index + 1);
+        return range.getBoundingClientRect();
+      });
       return {
-        clipped: start.scrollWidth > start.clientWidth && end.scrollWidth > end.clientWidth,
+        clipped: [start.scrollWidth > start.clientWidth, end.scrollWidth > end.clientWidth],
         firstVisible: first.getBoundingClientRect().left >= startBox.left - 1,
         lastVisible: last.getBoundingClientRect().right <= endBox.right + 1,
         timeFits: time.scrollWidth <= time.clientWidth && time.getBoundingClientRect().right <= row.right + 1,
         urlFits: endBox.right <= time.getBoundingClientRect().left,
+        schemeHidden: start.firstChild.getBoundingClientRect().width === 0,
+        wholeCharacters: characters.every((box) => box.right <= endBox.left + 0.1 || box.left >= endBox.left - 0.1),
+        aligned: Math.abs((urlBox.top + urlBox.bottom) - (timeBox.top + timeBox.bottom)) < 1,
       };
     });
     assert.deepEqual(layout, {
-      clipped: url === longUrl, firstVisible: true, lastVisible: true, timeFits: true, urlFits: true,
+      clipped: [url === longUrl, url === longUrl], firstVisible: true, lastVisible: true, timeFits: true, urlFits: true,
+      schemeHidden: true, wholeCharacters: true, aligned: true,
     });
-    const box = await source.boundingBox();
-    await page.mouse.move(box.x, box.y + box.height / 2);
-    await page.mouse.down();
-    await page.mouse.move(box.x + box.width, box.y + box.height / 2, { steps: 10 });
-    await page.mouse.up();
+    await page.locator("textarea").fill("");
+    await source.click();
     assert.equal(await page.evaluate(() => getSelection().toString()), url);
     await page.keyboard.press("ControlOrMeta+c");
-    await page.locator("textarea").fill("");
+    await page.locator("textarea").focus();
     await page.keyboard.press("ControlOrMeta+v");
     await expect(page.locator("textarea")).toHaveValue(url);
   }

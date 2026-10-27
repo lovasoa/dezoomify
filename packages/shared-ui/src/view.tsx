@@ -367,18 +367,23 @@ function progressValueText(d: JobDerived, presentation: Presentation): string {
 }
 
 function SourceUrl({ url }: { url: string }) {
-  const midpoint = Math.ceil(url.length / 2);
+  const scheme = url.match(/^https?:\/\//i)?.[0] ?? "";
+  const visible = url.slice(scheme.length);
+  const midpoint = Math.ceil(visible.length / 2);
   return (
     <span
       className="dz-source-url"
       id="dz-job-source-url"
       style={
-        { "--dz-source-midpoint": `${(midpoint / (url.length || 1)) * 100}%` } as CSSProperties
+        { "--dz-source-midpoint": `${(midpoint / (visible.length || 1)) * 100}%` } as CSSProperties
       }
     >
-      <span className="dz-source-url-start">{url.slice(0, midpoint)}</span>
+      <span className="dz-source-url-start">
+        <span className="dz-source-url-scheme">{scheme}</span>
+        {visible.slice(0, midpoint)}
+      </span>
       <span className="dz-source-url-end">
-        <bdi dir="ltr">{url.slice(midpoint)}</bdi>
+        <bdi dir="ltr">{visible.slice(midpoint)}</bdi>
       </span>
     </span>
   );
