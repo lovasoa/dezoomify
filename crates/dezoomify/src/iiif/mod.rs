@@ -27,6 +27,7 @@ mod emuseum;
 mod gallica;
 pub mod manifest_types;
 mod micrio;
+mod mirador;
 mod national_gallery;
 mod onb;
 mod philadelphia;
@@ -63,6 +64,7 @@ const ROUTES: &[DiscoveryRoute] = &[
     viewer(url_matches(has_manifest_parameter))
         .resolve_metadata(manifest_parameter)
         .then_decode(decode),
+    mirador::ROUTE.then_decode(decode),
     gallica::ROUTE.then_decode(decode),
     onb::ROUTE.then_decode(decode),
     contentdm::RECORD_ROUTE.then_decode(contentdm::follow_info),
@@ -73,6 +75,7 @@ const ROUTES: &[DiscoveryRoute] = &[
     philadelphia::ROUTE.then_decode(decode),
     emuseum::ROUTE,
     metadata(url_suffix("/info.json")).decode(decode),
+    metadata(url_matches(has_iiif_info_query)).decode(decode),
     metadata(url_suffix("/manifest.json")).decode(decode),
     json_metadata::<Document>(),
     metadata(any()).try_decode(embedded_metadata),
@@ -190,6 +193,13 @@ impl From<IIIFError> for DiscoveryError {
 
 fn has_manifest_parameter(uri: &str) -> bool {
     manifest_parameter_value(uri).is_some()
+}
+
+fn has_iiif_info_query(uri: &str) -> bool {
+    Url::parse(uri).is_ok_and(|url| {
+        url.query_pairs()
+            .any(|(name, value)| name.eq_ignore_ascii_case("IIIF") && value.ends_with("/info.json"))
+    })
 }
 
 fn manifest_parameter(uri: &str) -> Result<Request, DiscoveryError> {

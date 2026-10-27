@@ -1,9 +1,7 @@
-import type { JobInput } from "@dezoomify/wasm-bindings";
-
-export type ObservedMetadata = JobInput & { kind: "observed-metadata"; contents: string };
+import type { ObservedInput } from "@dezoomify/wasm-bindings";
 
 export interface ViewerEvidence {
-  input: ObservedMetadata;
+  input: ObservedInput;
   handle?: string;
 }
 
@@ -80,7 +78,7 @@ export interface ScanDiagnostics {
 export interface ScanResult {
   ok: true;
   documentUrl: string;
-  inputs: ObservedMetadata[];
+  inputs: ObservedInput[];
   handles: string[];
   diagnostics: ScanDiagnostics;
 }

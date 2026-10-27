@@ -561,6 +561,9 @@ pub enum DiscoveryInputKind {
     ObservedResource,
     /// Complete metadata reconstructed from a loaded viewer; never fetched.
     ObservedMetadata,
+    /// Finite grids backed by a live page loader, used after supported metadata.
+    /// Supplied contents are required and never follow links.
+    ObservedViewer,
 }
 
 /// One discovery input. An omitted kind is a user-supplied source for
@@ -572,7 +575,8 @@ pub struct JobInput {
     /// Source address and base for relative references; native hosts may accept paths.
     pub url: String,
     /// Supplied UTF-8 document instead of fetching `url`. Initial inputs must be
-    /// nonempty and within `Options.max_bytes`; observed metadata never follows links.
+    /// nonempty and within `Options.max_bytes`; observed metadata and viewer grids
+    /// never follow links.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub contents: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -583,8 +587,43 @@ pub struct JobInput {
 /// sources are available under the requested interaction policy.
 pub type JobInputs = Vec<JobInput>;
 
+/// A complete snapshot supplied by an identified live viewer. Contents are
+/// required: discovery decodes these bytes without fetching or following links.
+/// Its wire representation is also accepted wherever a [`JobInput`] is expected.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub struct ObservedInput {
+    pub url: String,
+    pub contents: String,
+    pub kind: ObservedInputKind,
+}
+
+/// Supported format metadata can be used directly; viewer grids require a
+/// loader retained by the Host for this exact source document and job.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub enum ObservedInputKind {
+    #[serde(rename = "observed-metadata")]
+    Metadata,
+    #[serde(rename = "observed-viewer")]
+    Viewer,
+}
+
+impl From<ObservedInput> for JobInput {
+    fn from(input: ObservedInput) -> Self {
+        Self {
+            url: input.url,
+            contents: Some(input.contents),
+            kind: Some(match input.kind {
+                ObservedInputKind::Metadata => DiscoveryInputKind::ObservedMetadata,
+                ObservedInputKind::Viewer => DiscoveryInputKind::ObservedViewer,
+            }),
+        }
+    }
+}
+
 /// Complete, finite pixel grids observed in a live viewer. Serialize as supplied
-/// `observed-metadata`; the Host resolves `handle` for this job only.
+/// `observed-viewer`; the Host resolves `handle` for this job only.
 /// These are source images, independent of viewport rotation, pan or overlays.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
@@ -1733,6 +1772,31 @@ pub fn has_secret_params(url: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn complete_observations_use_the_job_input_wire_format() {
+        for kind in [ObservedInputKind::Metadata, ObservedInputKind::Viewer] {
+            let observed = ObservedInput {
+                url: "https://museum.test/image".into(),
+                contents: "snapshot".into(),
+                kind,
+            };
+            let wire = serde_json::to_value(&observed).unwrap();
+            let input: JobInput = serde_json::from_value(wire.clone()).unwrap();
+            assert_eq!(input, observed.into());
+            for missing in ["contents", "kind"] {
+                let mut incomplete = wire.clone();
+                incomplete.as_object_mut().unwrap().remove(missing);
+                assert!(serde_json::from_value::<ObservedInput>(incomplete).is_err());
+            }
+        }
+        assert!(
+            serde_json::from_value::<ObservedInput>(serde_json::json!({
+                "url": "https://museum.test/image", "contents": "snapshot", "kind": "source"
+            }))
+            .is_err()
+        );
+    }
 
     #[test]
     fn compression_estimates_follow_encoder_mapping_and_output_layout() {

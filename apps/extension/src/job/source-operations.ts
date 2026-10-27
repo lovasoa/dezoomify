@@ -91,16 +91,18 @@ export function inspectSourceDocument(includeFrames = false) {
   }
 }
 
-/**
- * Take one bounded snapshot of the rendered document and retained resource
- * URLs. The job page owns frame traversal and permission checks.
- */
-export function collectCandidates(): {
+export interface SourceSnapshot {
   ok: true;
   documentUrl: string;
   inputs: JobInput[];
   overflow: number;
-} {
+}
+
+/**
+ * Take one bounded snapshot of the rendered document and retained resource
+ * URLs. The job page owns frame traversal and permission checks.
+ */
+export function collectCandidates(): SourceSnapshot {
   const MAX_URL_LENGTH = 2048;
   const MAX_CANDIDATES = 100;
   const MAX_DOM_BYTES = 8 * 1024 * 1024;

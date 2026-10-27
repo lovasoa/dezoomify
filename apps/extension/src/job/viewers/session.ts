@@ -63,7 +63,7 @@ export function registerViewer(
   return {
     handle: id,
     input: {
-      kind: "observed-metadata",
+      kind: "observed-viewer",
       url: identity.href,
       contents,
     },

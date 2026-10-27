@@ -114,6 +114,7 @@ for (const [name, engine] of [
               1,
               `${fixture.name}: ${JSON.stringify(result.diagnostics)}`,
             );
+            assert.equal(result.inputs[0].kind, "observed-viewer");
             const observed = JSON.parse(result.inputs[0].contents).dezoomify_viewer;
             const largest = observed.levels.at(-1);
             assert.deepEqual(largest.size, { width: fixture.width, height: fixture.height });

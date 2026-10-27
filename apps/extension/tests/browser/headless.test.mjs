@@ -983,9 +983,9 @@ for (const [browser, runJob] of [
           await runJob(fixtureServer.base, caseWork, { scenario: `memory-openlayers-${type}` }),
         );
         const events = newFixtureEvents(fixtureServer.logFile, offset);
-        assert.equal(
-          events.filter((e) => /info\.json|ImageProperties\.xml/.test(e.path)).length,
-          0,
+        assert.ok(
+          events.some((e) => /info\.json|ImageProperties\.xml/.test(e.path) && e.status === 404),
+          "unavailable supported metadata falls back to the custom page loader",
         );
         assert.ok(
           events.some((e) => e.query?.includes("via=viewer-loader")),

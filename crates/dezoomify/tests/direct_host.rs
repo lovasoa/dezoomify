@@ -15,7 +15,7 @@ fn supplied_viewer_metadata_preserves_all_images_without_fetching() {
     let larger = DZI.replace("512", "1024");
     let catalog = futures::executor::block_on(default_registry().discover(
         vec![
-            DiscoveryInput::with_contents("https://page.test", DZI),
+            DiscoveryInput::with_contents("https://page.test", "<html></html>"),
             DiscoveryInput::with_contents("https://page.test#openseadragon-0", DZI)
                 .with_kind(DiscoveryInputKind::ObservedMetadata),
             DiscoveryInput::with_contents("https://page.test#openseadragon-1", larger)
@@ -31,18 +31,20 @@ fn supplied_viewer_metadata_preserves_all_images_without_fetching() {
 }
 
 #[test]
-fn unreadable_viewer_metadata_falls_back_without_following_links() {
-    let host = MemoryHost::default();
-    let loaded = JobInput {
-        url: "https://page.test#openseadragon".into(),
-        contents: Some(r#"<a href="https://must-not-fetch.test/info.json">image</a>"#.into()),
-        kind: Some(DiscoveryInputKind::ObservedMetadata),
-    };
-    let result =
-        futures::executor::block_on(dezoomify(vec![input().remove(0), loaded], options(), &host))
-            .unwrap();
-    assert_eq!(result.canvas.unwrap().width, 512);
-    assert!(host.fetched.borrow().is_empty());
+fn supplied_observations_never_follow_links() {
+    for kind in [
+        DiscoveryInputKind::ObservedMetadata,
+        DiscoveryInputKind::ObservedViewer,
+    ] {
+        let host = MemoryHost::default();
+        let loaded = JobInput {
+            url: "https://page.test#openseadragon".into(),
+            contents: Some(r#"<a href="https://must-not-fetch.test/info.json">image</a>"#.into()),
+            kind: Some(kind),
+        };
+        assert!(futures::executor::block_on(dezoomify(vec![loaded], options(), &host)).is_err());
+        assert!(host.fetched.borrow().is_empty());
+    }
 }
 fn input() -> Vec<JobInput> {
     vec![JobInput {

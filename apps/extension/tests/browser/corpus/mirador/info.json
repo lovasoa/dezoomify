@@ -1,0 +1,43 @@
+{
+  "@context": "http://iiif.io/api/image/2/context.json",
+  "protocol": "http://iiif.io/api/image",
+  "width": 24428,
+  "height": 8189,
+  "sizes": [
+    { "width": 190, "height": 63 },
+    { "width": 381, "height": 127 },
+    { "width": 763, "height": 255 },
+    { "width": 1526, "height": 511 },
+    { "width": 3053, "height": 1023 },
+    { "width": 6107, "height": 2047 }
+  ],
+  "tiles": [{ "width": 256, "height": 256, "scaleFactors": [1, 2, 4, 8, 16, 32, 64, 128] }],
+  "@id": "https://iiif.nichibun.ac.jp/iipsrv?IIIF=/YSD/002463024/002463024_o.tif",
+  "profile": [
+    "http://iiif.io/api/image/2/level2.json",
+    {
+      "formats": ["jpg", "png", "webp"],
+      "qualities": ["native", "color", "gray", "bitonal"],
+      "supports": [
+        "regionByPct",
+        "regionSquare",
+        "sizeByForcedWh",
+        "sizeByWh",
+        "sizeAboveFull",
+        "sizeUpscaling",
+        "rotationBy90s",
+        "mirroring"
+      ],
+      "maxWidth": 8000,
+      "maxHeight": 8000
+    }
+  ],
+  "service": [
+    {
+      "@context": "http://iiif.io/api/annex/services/physdim/1/context.json",
+      "profile": "http://iiif.io/api/annex/services/physdim",
+      "physicalScale": 0.00166667,
+      "physicalUnits": "in"
+    }
+  ]
+}
