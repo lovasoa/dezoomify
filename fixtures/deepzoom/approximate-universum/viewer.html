@@ -1,1 +1,19 @@
-../../viewer.html
+<!doctype html>
+<meta charset="utf-8">
+<title>UDDragonView repository fixture</title>
+<script>
+  const repositories = {
+    collection: {
+      meta: "meta/[FILEID].json",
+      dz: "tiles/[FILENAME]/[LEVEL]/[X]_[Y].jpg",
+    },
+  };
+  const selection = new URLSearchParams(location.hash.split("/")[1]);
+  const repository = repositories[selection.get("rep1") || "collection"];
+  fetch(repository.meta.replace("[FILEID]", selection.get("id1") || "image"))
+    .then(async response => {
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      await response.arrayBuffer();
+      document.documentElement.dataset.viewerReady = "true";
+    });
+</script>
