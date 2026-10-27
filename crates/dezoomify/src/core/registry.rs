@@ -115,6 +115,7 @@ mod tests {
     use crate::Vec2d;
     use crate::core::discovery::{ParsedResource, css, metadata};
     use crate::core::{DiscoveredEntry, ImagePlan, Request, ResolvedLevel, TileSource};
+    use crate::test_support::grid_tile_uri;
 
     #[test]
     fn a_regular_format_needs_only_a_decoder_and_tile_address() {
@@ -158,18 +159,7 @@ mod tests {
             panic!("toy level must be a grid")
         };
         assert_eq!(grid.count(), 2);
-        assert_eq!(
-            grid.tiles_row_major()
-                .last()
-                .unwrap()
-                .unwrap()
-                .source
-                .resource()
-                .unwrap()
-                .uri
-                .clone(),
-            "memory://tile/1/0"
-        );
+        assert_eq!(grid_tile_uri(grid, 1), "memory://tile/1/0");
     }
 
     #[test]

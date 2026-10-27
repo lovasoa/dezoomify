@@ -481,6 +481,7 @@ impl From<DiscoverableGrid> for TileSource {
 mod tests {
     use super::super::Request;
     use super::*;
+    use crate::test_support::resource_uri;
 
     #[derive(Debug)]
     struct Requests;
@@ -507,17 +508,18 @@ mod tests {
         assert_eq!(grid.shape(), Vec2d { x: 2, y: 2 });
         assert_eq!(grid.count(), 4);
         let tiles: Vec<_> = grid.tiles_row_major().collect::<Result<_, _>>().unwrap();
+        let urls: Vec<_> = tiles
+            .iter()
+            .map(|tile| resource_uri(&tile.source))
+            .collect();
         assert_eq!(
-            tiles[0].source.resource().unwrap().uri.clone(),
-            "memory://0/0"
-        );
-        assert_eq!(
-            tiles[1].source.resource().unwrap().uri.clone(),
-            "memory://1/0"
-        );
-        assert_eq!(
-            tiles[2].source.resource().unwrap().uri.clone(),
-            "memory://0/1"
+            urls,
+            [
+                "memory://0/0",
+                "memory://1/0",
+                "memory://0/1",
+                "memory://1/1"
+            ]
         );
         assert_eq!(tiles[3].expected_size, Some(Vec2d { x: 2, y: 2 }));
     }

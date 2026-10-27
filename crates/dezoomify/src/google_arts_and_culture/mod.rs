@@ -115,6 +115,7 @@ fn decode(page: &Arc<PageInfo>, bytes: &[u8]) -> Result<ImagePlan, DiscoveryErro
 mod tests {
     use super::*;
     use crate::core::{DiscoveredEntry, DiscoveryCatalog, TileSource};
+    use crate::test_support::resource_uri;
 
     const PAGE: &[u8] = include_bytes!(
         "../../../../testdata/scenarios/rs-core/formats/payloads/google_arts_and_culture/page_source.html"
@@ -189,12 +190,12 @@ mod tests {
         let first = &tiles[0];
         assert_eq!(first.destination, Vec2d::default());
         assert_eq!(first.expected_size, Some(Vec2d { x: 512, y: 512 }));
-        assert!(first.source.resource().unwrap().uri.contains("=x0-y0-z4-t"));
+        assert!(resource_uri(&first.source).contains("=x0-y0-z4-t"));
         assert_eq!(first.processing, ProcessingRecipe::GoogleArtsDecrypt);
         let last = &tiles[87];
         assert_eq!(last.destination, Vec2d { x: 5120, y: 3584 });
         assert_eq!(last.expected_size, Some(Vec2d { x: 316, y: 496 }));
-        assert!(last.source.resource().unwrap().uri.contains("=x10-y7-z4-t"));
+        assert!(resource_uri(&last.source).contains("=x10-y7-z4-t"));
     }
 
     #[test]

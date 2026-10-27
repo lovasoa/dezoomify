@@ -39,6 +39,17 @@ and credentials. UI/product tests cover accessibility, permissions, navigation,
 and recovery. These tests exercise failures a successful save cannot reveal.
 Normal Biome and Clippy checks enforce dependency boundaries.
 
+Keep setup and assertions about one behavior together. Use the core's shared
+test helpers for successful discovery and tile inspection; inspect errors
+directly when rejection is the behavior. Prefer named cases over positional
+tables when the fields are hard to distinguish. Before duplicating a successful
+save, check whether the product fixture matrix already covers it.
+
+Control time and pending work explicitly: use injected clocks and response
+barriers instead of delays to observe intermediate states. Register cleanup
+before assertions, and give each UI scenario fresh application state and storage.
+The shared DOM harness restores globals and unmounts views after each test.
+
 Historical reproductions under [`testdata/scenarios/`](../testdata/scenarios/README.md)
 remain available to focused tests; that README owns their provenance and replay
 rules. Git records content changes.

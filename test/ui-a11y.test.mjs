@@ -366,37 +366,3 @@ test("static accessibility contract: extension guidance renders a labelled React
   assertButtonsNamed(backdrop, "extension guidance");
   assert.match(backdrop.textContent, /Chrome Web Store/);
 });
-
-function luminance(hex) {
-  const c = hex.replace("#", "");
-  const channel = (i) => {
-    const v = parseInt(c.slice(i, i + 2), 16) / 255;
-    return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
-  };
-  return 0.2126 * channel(0) + 0.7152 * channel(2) + 0.0722 * channel(4);
-}
-
-function contrast(fg, bg) {
-  const a = luminance(fg);
-  const b = luminance(bg);
-  return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
-}
-
-test("static accessibility contract: text and link contrast meets AA in both color schemes", () => {
-  const pairs = [
-    ["#1c1917", "#fcfeff", "light body text"],
-    ["#44403c", "#fcfeff", "light secondary text"],
-    ["#1d4ed8", "#fcfeff", "light links"],
-    ["#991b1b", "#fcfeff", "light errors"],
-    ["#166534", "#fcfeff", "light completion"],
-    ["#ece5dd", "#181615", "dark body text"],
-    ["#b8ada2", "#181615", "dark secondary text"],
-    ["#acaf50", "#181615", "dark links"],
-  ];
-  for (const [fg, bg, label] of pairs) {
-    assert.ok(
-      contrast(fg, bg) >= 4.5,
-      `${label} contrast ${contrast(fg, bg).toFixed(2)} below AA 4.5`,
-    );
-  }
-});

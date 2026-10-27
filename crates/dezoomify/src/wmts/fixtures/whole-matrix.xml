@@ -1,0 +1,22 @@
+<Capabilities>
+  <Contents>
+    <Layer>
+      <Identifier>whole-matrix</Identifier>
+      <Format>image/jpeg</Format>
+      <ResourceURL resourceType="tile" format="image/jpeg" template="tiles/{TileMatrixSet}/{TileMatrix}/{TileRow}/{TileCol}.jpg" />
+    </Layer>
+    <TileMatrixSet>
+      <Identifier>set</Identifier>
+      <SupportedCRS>EPSG:3857</SupportedCRS>
+      <TileMatrix>
+        <Identifier>level</Identifier>
+        <ScaleDenominator>1</ScaleDenominator>
+        <TopLeftCorner>0 0</TopLeftCorner>
+        <TileWidth>128</TileWidth>
+        <TileHeight>256</TileHeight>
+        <MatrixWidth>2</MatrixWidth>
+        <MatrixHeight>3</MatrixHeight>
+      </TileMatrix>
+    </TileMatrixSet>
+  </Contents>
+</Capabilities>

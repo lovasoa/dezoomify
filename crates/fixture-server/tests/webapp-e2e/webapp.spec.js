@@ -25,6 +25,36 @@ const {
   startPublicFixtureSource,
 } = require("../../../../test/support/public-relay.mjs");
 
+for (const colorScheme of ["light", "dark"]) {
+  test(`page text and navigation links have AA contrast in ${colorScheme} mode`, async ({ page }) => {
+    await page.emulateMedia({ colorScheme });
+    await page.goto(`${ADDR}/`);
+    const pairs = await page.locator("body").evaluate((body) => {
+      const page = getComputedStyle(body);
+      const nav = getComputedStyle(body.querySelector(".dz-nav"));
+      const link = getComputedStyle(body.querySelector(".help-link"));
+      const navBackgrounds = nav.backgroundImage.match(/rgba?\([^)]+\)/g) ?? [nav.backgroundColor];
+      return [
+        ["text", page.color, page.backgroundColor],
+        ...navBackgrounds.map((background) => ["link", link.color, background]),
+      ];
+    });
+    const luminance = (color) => {
+      const [r, g, b] = color.match(/[\d.]+/g).slice(0, 3).map((channel) => {
+        const value = Number(channel) / 255;
+        return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+      });
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    };
+    for (const [role, color, surface] of pairs) {
+      const foreground = luminance(color), background = luminance(surface);
+      const contrast = (Math.max(foreground, background) + 0.05) /
+        (Math.min(foreground, background) + 0.05);
+      expect(contrast, `${role}: ${color} on ${surface}`).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+}
+
 test("website saves a no-CORS ZIF URL through real public-data relay policies", async () => {
   const source = await startPublicFixtureSource();
   const resource = "/fixtures/zif/approximate-direct/image.zif";
@@ -111,85 +141,65 @@ for (const fixture of formats) {
   });
 }
 
-test("webapp discovers, downloads, assembles, and saves a real DZI pyramid", async ({ page }) => {
-  // Hold tile responses long enough to observe the acquisition state: the
-  // canvas is the live output surface, visible before those responses complete.
-  await page.route((url) => url.href.includes("pyramid_files"), async (route) => {
-    await new Promise((resolve) => setTimeout(resolve, 500));
+test("direct acquisition shows its preview while tile responses are held", async ({ page }) => {
+  const tiles = (url) => url.href.includes("pyramid_files");
+  const releaseTiles = Promise.withResolvers();
+  await page.route(tiles, async (route) => {
+    await releaseTiles.promise;
     await route.continue();
   });
-  // website/direct-success: metadata goes direct, the proxy stays unused;
-  // the save proves the canvas is origin-clean (tainted cannot export).
-  const golden = JSON.parse(
-    fs.readFileSync(
-      path.resolve(__dirname, "../../../../testdata/scenarios/website/direct-success/expected/result.json"),
-      "utf8",
-    ),
-  );
-  const attempts = [];
-  let proxyRequests = 0;
-  await page.route("**/api/proxy", (route) => {
-    if (route.request().method() === "POST") proxyRequests += 1;
-    route.continue();
-  });
-  await page.goto(ADDR + "/", { waitUntil: "networkidle" });
-  const input = page.locator("#dz-url-input");
-  await expect(input).toBeVisible();
-  const url = `${ADDR}/fetch?url=https://fixtures.test/cli/pyramid.dzi`;
-  await page.route((requestUrl) => requestUrl.href === url, (route) => {
-    attempts.push("direct");
-    route.continue();
-  });
-  await input.fill(url);
+  try {
+    const attempts = [];
+    let proxyRequests = 0;
+    await page.route("**/api/proxy", (route) => {
+      if (route.request().method() === "POST") proxyRequests += 1;
+      route.continue();
+    });
+    await page.goto(ADDR + "/", { waitUntil: "networkidle" });
+    const input = page.locator("#dz-url-input");
+    await expect(input).toBeVisible();
+    const url = `${ADDR}/fetch?url=https://fixtures.test/cli/pyramid.dzi`;
+    await page.route((requestUrl) => requestUrl.href === url, (route) => {
+      attempts.push("direct");
+      route.continue();
+    });
+    await input.fill(url);
 
-  await page.getByRole("button", { name: /find image/i }).click();
+    const requestedTile = page.waitForRequest((request) => tiles(new URL(request.url())));
+    await page.getByRole("button", { name: /find image/i }).click();
+    await requestedTile;
 
-  const canvas = page.locator("#rendering-canvas");
-  await expect(canvas).toBeVisible({ timeout: 30000 });
-  await expect(page.locator(".dz-completed-section")).toHaveCount(0);
-  assert.deepEqual(
-    await canvas.evaluate((el) => ({ width: el.width, height: el.height })),
-    { width: 512, height: 512 },
-    "the declared preview surface is present while tiles are still in flight",
-  );
+    const canvas = page.locator("#rendering-canvas");
+    await expect(canvas).toBeVisible({ timeout: 30000 });
+    await expect(page.locator(".dz-completed-section")).toHaveCount(0);
+    assert.deepEqual(
+      await canvas.evaluate((el) => ({ width: el.width, height: el.height })),
+      { width: 512, height: 512 },
+      "the declared preview surface is present while tiles are still in flight",
+    );
 
-  // The pipeline must reach the completed state with real dimensions.
-  await expect(page.locator(".dz-completed-section")).toBeVisible({ timeout: 60000 });
-  await expect(page.locator(".dz-completed-section")).toContainText(/512/);
-  const report = await page.locator("#dz-job-diagnostics").textContent();
-  assert.match(report, /^Outcome: .*completed/);
-  assert.ok(report.includes(`canonical: ${url}`));
-  assert.match(report, /first_tile: source.kind=resource source.uri=.*pyramid_files/);
-  await page.locator(".dz-details > summary").click();
-  const layout = await page.locator("#dz-job-diagnostics").evaluate((element) => ({
-    whiteSpace: getComputedStyle(element).whiteSpace,
-    horizontallyScrollable: element.scrollWidth > element.clientWidth,
-  }));
-  assert.equal(layout.whiteSpace, "pre");
-  assert.ok(layout.horizontallyScrollable, "wide diagnostics scroll without wrapping");
-  await page.locator(".dz-details > summary").click();
-  // Tiles paint live during acquisition, so the assembled
-  // picture stays visible next to the save button on the clean path too.
-  await expect(canvas).toBeVisible();
-  assert.deepEqual(
-    await canvas.evaluate((el) => ({ width: el.width, height: el.height })),
-    { width: 512, height: 512 },
-  );
-
-  const downloadPromise = page.waitForEvent("download", { timeout: 30000 });
-  await page.getByRole("button", { name: "Save image" }).click();
-  const download = await downloadPromise;
-  const tmp = path.join(__dirname, "downloads");
-  fs.mkdirSync(tmp, { recursive: true });
-  const target = path.join(tmp, `saved-${Date.now()}.png`);
-  await download.saveAs(target);
-  const bytes = fs.readFileSync(target);
-  assertSavedPyramid(bytes);
-
-  // website/direct-success: one direct metadata attempt, zero proxy requests.
-  assert.deepEqual(attempts, golden.attempts, "website/direct-success attempts");
-  assert.equal(proxyRequests, golden.proxyRequests, "website/direct-success proxyRequests");
-  assert.equal(golden.originClean, true, "website/direct-success originClean (save exported bytes)");
+    releaseTiles.resolve();
+    // Completion must follow the held responses, independently of machine speed.
+    await expect(page.locator(".dz-completed-section")).toBeVisible({ timeout: 60000 });
+    await expect(page.locator(".dz-completed-section")).toContainText(/512/);
+    const report = await page.locator("#dz-job-diagnostics").textContent();
+    assert.match(report, /^Outcome: .*completed/);
+    assert.ok(report.includes(`canonical: ${url}`));
+    assert.match(report, /first_tile: source.kind=resource source.uri=.*pyramid_files/);
+    await page.locator(".dz-details > summary").click();
+    const layout = await page.locator("#dz-job-diagnostics").evaluate((element) => ({
+      whiteSpace: getComputedStyle(element).whiteSpace,
+      horizontallyScrollable: element.scrollWidth > element.clientWidth,
+    }));
+    assert.equal(layout.whiteSpace, "pre");
+    assert.ok(layout.horizontallyScrollable, "wide diagnostics scroll without wrapping");
+    await page.locator(".dz-details > summary").click();
+    assert.deepEqual(attempts, ["direct"]);
+    assert.equal(proxyRequests, 0);
+  } finally {
+    releaseTiles.resolve();
+    await page.unrouteAll({ behavior: "wait" });
+  }
 });
 
 test("webapp fails honestly on a page without a zoomable signal", async ({ page }) => {

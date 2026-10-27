@@ -1,7 +1,7 @@
 import "../../../test/tsx-loader.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
-import { act, click, makeContainer } from "../../../test/react-dom.mjs";
+import { act, click, makeContainer, onCleanup } from "../../../test/react-dom.mjs";
 
 const { createBrowserApplication } = await import("../src/application.ts");
 
@@ -62,6 +62,7 @@ function harness(
       },
     });
   });
+  onCleanup(() => app.dispose());
   return { app, calls, contexts, store, root };
 }
 
@@ -97,7 +98,6 @@ test("a replacement invocation ignores late progress, output and history from it
     JSON.parse(h.store.get("history")).map((item) => item.url),
     ["https://second.test/image", "https://first.test/image"],
   );
-  await act(() => h.app.dispose());
 });
 
 test("catalog choices render metadata and resume with the selected image index", async () => {
@@ -126,7 +126,6 @@ test("catalog choices render metadata and resume with the selected image index",
   assert.equal(h.root.querySelector(".dz-image-picker"), null);
   act(() => h.calls[0].resolve(output));
   await act(() => run);
-  await act(() => h.app.dispose());
 });
 
 test("discovery recovery belongs to the invocation and replacement waits for its cleanup", async () => {
@@ -163,7 +162,6 @@ test("discovery recovery belongs to the invocation and replacement waits for its
   assert.equal(h.app.presentation().phase, "job");
   act(() => h.calls[1].resolve(output));
   await act(() => Promise.all([first, second]));
-  await act(() => h.app.dispose());
 });
 
 test("recovery can complete discovery but never replaces an acquisition failure", async () => {
@@ -185,11 +183,12 @@ test("recovery can complete discovery but never replaces an acquisition failure"
     await act(() => run);
     assert.equal(recoveries, phase === "discovery" ? 1 : 0);
     assert.equal(h.app.presentation().phase, phase === "discovery" ? "completed" : "failed");
-    await act(() => h.app.dispose());
   }
 });
 
 test("desktop handoff keeps the discovered source through completion and resets for a new job", async () => {
+  const frames = [];
+  globalThis.requestAnimationFrame = (frame) => frames.push(frame);
   const h = harness();
   act(() => h.app.submit("https://museum.test/page"));
   await tick();
@@ -202,7 +201,9 @@ test("desktop handoff keeps the discovered source through completion and resets 
       maximum: { width: 512, height: 512 },
     });
   });
-  await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+  act(() => {
+    for (const frame of frames.splice(0)) frame(0);
+  });
   assert.equal(h.root.querySelector("#dz-job-source-line").title, discovered);
   assert.equal(
     h.root.querySelector("#dz-job-source-url").textContent,
@@ -226,7 +227,6 @@ test("desktop handoff keeps the discovered source through completion and resets 
   click(h.root.querySelector("#dz-btn-download-desktop"));
   assert.equal(document.querySelector('[role="dialog"] input').value, "https://museum.test/next");
   click(document.querySelector(".dz-modal-close"));
-  await act(() => h.app.dispose());
 });
 
 test("a replacement renders immediately and waits for prior resources before starting work", async () => {
@@ -272,7 +272,6 @@ test("a replacement renders immediately and waits for prior resources before sta
   });
   await act(() => Promise.all([first, second]));
   assert.equal(h.app.presentation().phase, "completed");
-  await act(() => h.app.dispose());
 });
 
 test("cancel removes a pending permission prompt", async () => {
@@ -292,7 +291,6 @@ test("cancel removes a pending permission prompt", async () => {
   await tick();
   assert.equal(h.calls.length, 1);
   assert.equal(JSON.parse(h.store.get("history"))[0].status, "cancelled");
-  await act(() => h.app.dispose());
 });
 
 test("cancel remains visible when its invocation resolves output late", async () => {
@@ -308,7 +306,6 @@ test("cancel remains visible when its invocation resolves output late", async ()
   await act(() => run);
   assert.equal(h.app.presentation().phase, "cancelled");
   assert.equal(JSON.parse(h.store.get("history"))[0].status, "cancelled");
-  await act(() => h.app.dispose());
 });
 
 test("retry approval pauses the job, resumes acquisition, and disappears on completion", async () => {
@@ -348,7 +345,6 @@ test("retry approval pauses the job, resumes acquisition, and disappears on comp
   assert.equal(h.root.querySelector("[data-dz-retry-actions]"), null);
   assert.deepEqual(h.app.presentation().output, output);
   assert.equal(JSON.parse(h.store.get("history"))[0].status, "completed");
-  await act(() => h.app.dispose());
 });
 
 test("website persists a started URL and metadata before failure, then allows prefill and removal", async () => {
@@ -370,5 +366,4 @@ test("website persists a started URL and metadata before failure, then allows pr
   click(h.root.querySelector(".dz-history-remove"));
   assert.deepEqual(JSON.parse(h.store.get("history")), []);
   assert.equal(h.root.querySelector("tbody tr"), null);
-  await act(() => h.app.dispose());
 });

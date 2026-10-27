@@ -543,6 +543,7 @@ mod tests {
     use crate::core::discovery::{DiscoveryError, RejectionKind};
     use crate::core::{DiscoveredEntry, TileSource};
     use crate::test_support::ready_image as image;
+    use crate::test_support::{grid_tile, resource_uri};
 
     fn tile_requests(level: &ResolvedLevel, count: usize) -> Vec<(String, Vec2d)> {
         let TileSource::Grid(plan) = &level.source else {
@@ -551,12 +552,7 @@ mod tests {
         plan.tiles_row_major()
             .take(count)
             .map(Result::unwrap)
-            .map(|tile| {
-                (
-                    tile.source.resource().unwrap().uri.clone(),
-                    tile.destination,
-                )
-            })
+            .map(|tile| (resource_uri(&tile.source).to_owned(), tile.destination))
             .collect()
     }
 
@@ -707,7 +703,7 @@ mod tests {
             unreachable!()
         };
         assert_eq!(plan.count(), 5859);
-        let first = plan.tiles_row_major().next().unwrap().unwrap();
+        let first = grid_tile(plan, 0);
         assert_eq!(
             first.source.resource().unwrap().header("Referer"),
             Some(

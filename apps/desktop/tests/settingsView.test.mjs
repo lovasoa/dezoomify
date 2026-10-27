@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createElement, useState } from "react";
-import { act, click, input, makeContainer } from "../../../test/react-dom.mjs";
+import { act, click, input, makeContainer, onCleanup } from "../../../test/react-dom.mjs";
 import { defaultSettings, loadSettings, saveSettings } from "../src/settings.ts";
 
 // linkedom documents lack `oninput`, which keeps React's text-input change
@@ -33,6 +33,7 @@ function renderSettings({ error = null, settings = {} } = {}) {
   }
   const container = makeContainer();
   const root = createRoot(container);
+  onCleanup(() => root.unmount());
   act(() => root.render(createElement(SettingsHarness)));
   return { container, root, current: () => currentSettings };
 }

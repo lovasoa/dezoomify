@@ -83,7 +83,6 @@ fn full_output_uses_lazy_geometry_and_honest_disposition() {
     let host = MemoryHost::default();
     host.yield_tiles.set(true);
     let output = invoke(&host, options()).unwrap();
-    assert!(output.disposition == OutputDisposition::BrowserSaveReady);
     assert_eq!(
         output.canvas,
         Some(Size {
@@ -104,12 +103,7 @@ fn full_output_uses_lazy_geometry_and_honest_disposition() {
         Point { x: 256, y: 256 }
     );
     assert!(
-        host.acquired.borrow()[3]
-            .source
-            .resource()
-            .unwrap()
-            .uri
-            .clone()
+        support::resource_uri(&host.acquired.borrow()[3].source)
             .ends_with("/image_files/9/1_1.jpg")
     );
 }
@@ -241,7 +235,7 @@ fn accepted_catalog_warns_once_for_malformed_siblings_and_keeps_valid_images() {
         &host,
     ))
     .unwrap();
-    assert!(output.disposition == OutputDisposition::BrowserSaveReady);
+    assert_eq!(output.disposition, OutputDisposition::BrowserSaveReady);
     assert_eq!(host.acquired.borrow().len(), 1);
     assert_eq!(host.outputs.borrow()[0].title.as_deref(), Some("good"));
     assert_eq!(

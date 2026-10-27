@@ -1,0 +1,55 @@
+<w:Capabilities xmlns:w="http://www.opengis.net/wmts/1.0" xmlns:o="http://www.opengis.net/ows/1.1">
+  <w:Contents>
+    <w:Layer>
+      <o:Identifier>linked-layer</o:Identifier>
+      <o:WGS84BoundingBox>
+        <o:LowerCorner>-10 -10</o:LowerCorner>
+        <o:UpperCorner>10 10</o:UpperCorner>
+      </o:WGS84BoundingBox>
+      <w:Format>image/png</w:Format>
+      <w:Style isDefault="true">
+        <o:Identifier>default-style</o:Identifier>
+      </w:Style>
+      <w:TileMatrixSetLink>
+        <w:TileMatrixSet>selected</w:TileMatrixSet>
+        <w:TileMatrixSetLimits>
+          <w:TileMatrixLimits>
+            <o:TileMatrix>0</o:TileMatrix>
+            <w:MinTileRow>1</w:MinTileRow>
+            <w:MaxTileRow>1</w:MaxTileRow>
+            <w:MinTileCol>1</w:MinTileCol>
+            <w:MaxTileCol>1</w:MaxTileCol>
+          </w:TileMatrixLimits>
+        </w:TileMatrixSetLimits>
+      </w:TileMatrixSetLink>
+      <w:ResourceURL format="text/xml" resourceType="FeatureInfo" template="/feature/{TileRow}" />
+      <w:ResourceURL format="image/png" resourceType="tile" template="tiles/{Style}/{TileMatrixSet}/{TileMatrix}/{TileRow}/{TileCol}.png" />
+    </w:Layer>
+    <w:TileMatrixSet>
+      <o:Identifier>wrong</o:Identifier>
+      <o:SupportedCRS>urn:ogc:def:crs:EPSG::3857</o:SupportedCRS>
+      <w:TileMatrix>
+        <o:Identifier>wrong-matrix</o:Identifier>
+        <w:ScaleDenominator>279541132.0143589</w:ScaleDenominator>
+        <w:TopLeftCorner>-20037508.342789248 20037508.342789248</w:TopLeftCorner>
+        <w:TileWidth>256</w:TileWidth>
+        <w:TileHeight>256</w:TileHeight>
+        <w:MatrixWidth>1</w:MatrixWidth>
+        <w:MatrixHeight>1</w:MatrixHeight>
+      </w:TileMatrix>
+    </w:TileMatrixSet>
+    <w:TileMatrixSet>
+      <o:Identifier>selected</o:Identifier>
+      <o:SupportedCRS>urn:ogc:def:crs:EPSG::3857</o:SupportedCRS>
+      <w:TileMatrix>
+        <o:Identifier>0</o:Identifier>
+        <w:ScaleDenominator>279541132.0143589</w:ScaleDenominator>
+        <w:TopLeftCorner>-20037508.342789248 20037508.342789248</w:TopLeftCorner>
+        <w:TileWidth>256</w:TileWidth>
+        <w:TileHeight>256</w:TileHeight>
+        <w:MatrixWidth>4</w:MatrixWidth>
+        <w:MatrixHeight>4</w:MatrixHeight>
+      </w:TileMatrix>
+    </w:TileMatrixSet>
+  </w:Contents>
+</w:Capabilities>

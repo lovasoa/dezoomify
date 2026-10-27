@@ -1,0 +1,25 @@
+<Capabilities>
+  <Contents>
+    <Layer>
+      <Identifier>unknown-crs</Identifier>
+      <BoundingBox crs="EPSG:3413">
+        <LowerCorner>0 0</LowerCorner>
+        <UpperCorner>1 1</UpperCorner>
+      </BoundingBox>
+      <ResourceURL resourceType="tile" template="tiles/{TileMatrix}/{TileRow}/{TileCol}.jpg" />
+    </Layer>
+    <TileMatrixSet>
+      <Identifier>set</Identifier>
+      <SupportedCRS>EPSG:3857</SupportedCRS>
+      <TileMatrix>
+        <Identifier>0</Identifier>
+        <ScaleDenominator>1</ScaleDenominator>
+        <TopLeftCorner>0 0</TopLeftCorner>
+        <TileWidth>256</TileWidth>
+        <TileHeight>256</TileHeight>
+        <MatrixWidth>1</MatrixWidth>
+        <MatrixHeight>1</MatrixHeight>
+      </TileMatrix>
+    </TileMatrixSet>
+  </Contents>
+</Capabilities>

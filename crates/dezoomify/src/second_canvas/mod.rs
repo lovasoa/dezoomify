@@ -296,6 +296,7 @@ where
 mod tests {
     use super::*;
     use crate::core::{DiscoveredEntry, TileSource};
+    use crate::test_support::resource_uri;
 
     const LEGACY: &[u8] = include_bytes!(
         "../../../../testdata/scenarios/rs-core/formats/payloads/second_canvas/legacy.json"
@@ -329,7 +330,7 @@ mod tests {
         };
         let first = tiles.tiles().next().unwrap().unwrap();
         assert_eq!(
-            first.source.resource().unwrap().uri.clone(),
+            resource_uri(&first.source),
             "https://sc.example.test/gigapixel/modern/normal_3_0_0.jpg"
         );
         assert_eq!(tiles.image_size(), Some(Vec2d { x: 1300, y: 900 }));
