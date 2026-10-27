@@ -28,6 +28,9 @@ pub struct DziFile {
     pub size: Size,
     #[serde(rename = "@Url", alias = "Url")]
     pub base_url: Option<String>,
+    // Adapters can supply a title; the DZI wire format has none.
+    #[serde(skip)]
+    pub title: Option<String>,
 }
 
 impl DziFile {
@@ -147,6 +150,7 @@ fn test_base_url_without_extension_ignores_host_dots() {
             height: 5550,
         },
         base_url: None,
+        title: None,
     };
 
     assert_eq!(
@@ -166,6 +170,7 @@ fn test_base_url_strips_only_last_path_segment_extension() {
             height: 1,
         },
         base_url: None,
+        title: None,
     };
 
     assert_eq!(
@@ -185,6 +190,7 @@ fn test_base_url_drops_query_and_fragment() {
             height: 1,
         },
         base_url: None,
+        title: None,
     };
 
     assert_eq!(

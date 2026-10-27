@@ -16,6 +16,7 @@ use crate::core::{
 use crate::json_utils::all_json;
 
 mod dzi_file;
+mod universum;
 
 static TILE_URL: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new("_files/\\d+/\\d+_\\d+\\.(jpe?g|png)$").expect("constant DZI tile pattern")
@@ -29,6 +30,8 @@ static SEADRAGON_EMBED: LazyLock<BytesRegex> = LazyLock::new(|| {
 static WDL_MARKER_RE: LazyLock<BytesRegex> =
     LazyLock::new(|| BytesRegex::new("dziUrlTemplate").expect("constant WDL marker pattern"));
 const ROUTES: &[DiscoveryRoute] = &[
+    universum::VIEWER_ROUTE,
+    universum::METADATA_ROUTE,
     image_url(is_tile_url)
         .resolve_metadata(tile_metadata)
         .then_decode(decode_catalog),
@@ -290,11 +293,16 @@ fn catalog_from_dzi(
         })
         .collect::<Result<Vec<_>, DiscoveryError>>()?;
         levels.reverse();
-        let title = base_url
-            .trim_end_matches('/')
-            .rsplit('/')
-            .next()
-            .map(|s| s.trim_end_matches("_files").to_owned());
+        let title = image
+            .title
+            .filter(|title| !title.trim().is_empty())
+            .or_else(|| {
+                base_url
+                    .trim_end_matches('/')
+                    .rsplit('/')
+                    .next()
+                    .map(|s| s.trim_end_matches("_files").to_owned())
+            });
         plans.push(ImagePlan::new(title, levels));
     }
     Ok(CatalogPlan::images(plans))
