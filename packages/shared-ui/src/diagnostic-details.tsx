@@ -5,6 +5,11 @@ import { plainMessageFor } from "./failure.ts";
 import { t } from "./i18n.ts";
 import type { ViewCallbacks } from "./view-types.ts";
 
+const ISSUE_URL_PREFIX = "https://github.com/lovasoa/dezoomify/issues/new?";
+// Leave room for GitHub to re-encode the draft URL in its sign-in redirect.
+// Reported server limit: https://github.com/github/docs/issues/5136.
+const ISSUE_URL_MAX_LENGTH = 4096;
+
 function attemptDescription(report: DiagnosticReport, product: string): string {
   const version = report.context.version ? ` (${report.context.version})` : "";
   return report.outcome?.event === "completed"
@@ -74,7 +79,7 @@ export function diagnosticIssueUrl(report: DiagnosticReport, error?: JobError): 
     body: "",
   });
   fitIssueBody(params, intro, details, fence, input);
-  return `https://github.com/lovasoa/dezoomify/issues/new?${params}`;
+  return `${ISSUE_URL_PREFIX}${params}`;
 }
 
 function issueLabels(facts: Record<string, unknown>, product: string): Set<string> {
@@ -128,6 +133,8 @@ function fitIssueBody(
   fence: string,
   input: string,
 ): void {
+  // URLSearchParams emits ASCII, so encoded length is also the byte length.
+  const fits = () => ISSUE_URL_PREFIX.length + params.toString().length <= ISSUE_URL_MAX_LENGTH;
   const bodyFor = (length: number) =>
     `${intro}${fence}text\n${details.slice(0, length)}${length < details.length ? "\n[Truncated; copy or save the complete diagnostics from Dezoomify.]" : ""}\n${fence}\n`;
   let low = 0;
@@ -135,18 +142,18 @@ function fitIssueBody(
   while (low < high) {
     const middle = Math.ceil((low + high) / 2);
     params.set("body", bodyFor(middle));
-    if (params.toString().length <= 7000) low = middle;
+    if (fits()) low = middle;
     else high = middle - 1;
   }
   params.set("body", bodyFor(low));
   // Pathological input/error text must also respect the encoded draft budget.
-  if (params.toString().length > 7000) {
+  if (!fits()) {
     params.set("body", "");
     const fallback = `${input}\n\nReport exceeds the GitHub link limit. Please copy or save the complete diagnostics from Dezoomify.`;
     for (const character of fallback) {
       const body = params.get("body") ?? "";
       params.set("body", body + character);
-      if (params.toString().length > 7000) {
+      if (!fits()) {
         params.set("body", body);
         break;
       }
