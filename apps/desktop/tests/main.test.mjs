@@ -1,143 +1,19 @@
-import "../../../test/tsx-loader.mjs";
 import assert from "node:assert/strict";
-import { registerHooks } from "node:module";
 import test from "node:test";
-import { getLocale, setLocale, t } from "../../../packages/shared-ui/src/i18n.ts";
-import { act, click, makeContainer } from "../../../test/react-dom.mjs";
+import { getLocale, t } from "../../../packages/shared-ui/src/i18n.ts";
+import { act, click } from "../../../test/react-dom.mjs";
 import { loadSettings } from "../src/settings.ts";
+import { flush, mountDesktop, output, progress, typeInto } from "./support/application.mjs";
 
-// linkedom documents lack `oninput`, which keeps React's text-input change
-// detection disabled. Arm it before react-dom loads (through main.ts) so
-// edits fire onChange.
-document.oninput = null;
-
-/** Type into a controlled field the way the settings view tests do. */
-function typeInto(element, value) {
-  act(() => {
-    Object.defineProperty(element, "value", { configurable: true, writable: true, value });
-    element.dispatchEvent(new window.Event("change", { bubbles: true }));
-  });
-}
-
-const invocations = [];
-const output = {
-  canvas: { width: 512, height: 512 },
-  format: "png",
-  disposition: "native-publication",
-};
-const progress = { phase: "acquisition", completed: 3, total: 4 };
-const tick = () => act(() => new Promise((resolve) => setImmediate(resolve)));
-
-globalThis.desktopTestNative = {
-  async invokeNative(request, callbacks) {
-    let resolve, reject;
-    const finished = new Promise((yes, no) => {
-      resolve = yes;
-      reject = no;
-    });
-    const answers = [];
-    const invocation = {
-      request,
-      callbacks,
-      resolve(output, saved_output) {
-        resolve({ output, saved_output });
-      },
-      reject,
-      answers,
-      id: `job:test-${invocations.length}`,
-      finished,
-      async pause() {},
-      async resume() {},
-      async cancel() {},
-      async dispose() {},
-      async openOutput() {},
-      answer(question, choice) {
-        return new Promise((resolve, reject) =>
-          answers.push({ question, choice, resolve, reject }),
-        );
-      },
-      answerImage(question, index) {
-        return new Promise((resolve, reject) => answers.push({ question, index, resolve, reject }));
-      },
-    };
-    invocations.push(invocation);
-    callbacks.progress(progress);
-    return invocation;
-  },
-};
-registerHooks({
-  load(url, context, nextLoad) {
-    if (url.endsWith("/apps/desktop/src/native.ts"))
-      return {
-        format: "module",
-        shortCircuit: true,
-        source: `
-          export const invokeNative = (...args) => globalThis.desktopTestNative.invokeNative(...args);
-          export const inspectSavedOutput = async (saved) => await globalThis.desktopTestNative.inspectSavedOutput?.(saved) ?? "available";
-          export const openHistoryOutput = async (saved) => { await globalThis.desktopTestNative.openHistoryOutput?.(saved); };
-          export const forgetSavedOutput = async () => {};
-          export const openExternalLink = async () => {};
-          export const readNativeDiagnostics = async () => { throw new Error("No native report"); };
-          export const validateSettings = async (settings) => { await globalThis.desktopTestNative.validateSettings?.(settings); };
-        `,
-      };
-    return nextLoad(url, context);
-  },
+test("desktop chooses the first supported system language", () => {
+  const { root } = mountDesktop({ languages: ["es-ES", "de-AT", "fr"] });
+  assert.equal(getLocale(), "de");
+  assert.equal(document.documentElement.lang, "de");
+  assert.equal(root.querySelector("#dz-url-input").placeholder, t("view.input.placeholder"));
 });
-
-const root = makeContainer();
-root.id = "root";
-const historyStore = new Map();
-globalThis.localStorage = {
-  getItem: (key) => historyStore.get(key) ?? null,
-  setItem: (key, value) => historyStore.set(key, value),
-  removeItem: (key) => historyStore.delete(key),
-};
-const originalNavigator = Object.getOwnPropertyDescriptor(globalThis, "navigator");
-Object.defineProperty(globalThis, "navigator", {
-  configurable: true,
-  value: { languages: ["es-ES", "de-AT", "fr"], language: "fr", userAgent: "test" },
-});
-await act(async () => {
-  await import("../src/main.ts");
-});
-assert.equal(getLocale(), "de");
-assert.equal(document.documentElement.lang, "de");
-assert.equal(root.querySelector("#dz-url-input").placeholder, t("view.input.placeholder"));
-if (originalNavigator) Object.defineProperty(globalThis, "navigator", originalNavigator);
-else delete globalThis.navigator;
-setLocale("en");
-await act(async () => {
-  const { update } = await import("../src/main.ts");
-  update();
-});
-
-async function start() {
-  act(() => {
-    root.querySelector("#dz-url-input").value = "https://museum.test/image";
-    root
-      .querySelector("form")
-      .dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
-  });
-  await tick();
-  return invocations.at(-1);
-}
-
-async function reset() {
-  const invocation = invocations.at(-1);
-  if (!root.querySelector(".dz-error-section")) {
-    await act(async () => invocation?.resolve(output));
-    await tick();
-  }
-  click(
-    root.querySelector(
-      "#dz-btn-start-over, #dz-btn-another, #dz-btn-reset, .dz-error-section .dz-actions-row button:last-child",
-    ),
-  );
-  await tick();
-}
 
 test("desktop failure preserves canonical refusal facts and diagnostic context", async () => {
+  const { root, invocations, historyStore, start, reset } = mountDesktop();
   const invocation = await start();
   const recent = () => JSON.parse(historyStore.get("dezoomify.desktop.history.v2"))[0];
   assert.equal(recent().status, "started");
@@ -169,7 +45,7 @@ test("desktop failure preserves canonical refusal facts and diagnostic context",
       },
     }),
   );
-  await tick();
+  await flush();
   assert.match(root.textContent, /refused to share/);
   assert.equal(root.querySelector("#dz-btn-try-again"), null);
   assert.equal(
@@ -195,11 +71,12 @@ test("desktop failure preserves canonical refusal facts and diagnostic context",
 });
 
 test("saved history renders during slow disk checks, opens the file after retirement, and detects deletion at click time", async () => {
+  const { root, native, invocations, start, reset } = mountDesktop();
   const invocation = await start();
   const saved = { id: "saved:test", filename: "A painting.png" };
   await act(async () => invocation.resolve(output, saved));
   const check = Promise.withResolvers();
-  globalThis.desktopTestNative.inspectSavedOutput = () => check.promise;
+  native.inspectSavedOutput = () => check.promise;
   await reset();
   assert.ok(
     root.querySelector("#dz-url-input"),
@@ -213,15 +90,15 @@ test("saved history renders during slow disk checks, opens the file after retire
   assert.match(root.querySelector("tbody tr").textContent, /Checking file/);
   root.querySelector("#dz-url-input").value = "https://other.test/image";
   await act(async () => check.resolve("available"));
-  await tick();
+  await flush();
   assert.equal(root.querySelector("#dz-url-input").value, "https://other.test/image");
   const count = invocations.length;
-  globalThis.desktopTestNative.openHistoryOutput = async (reference) => {
+  native.openHistoryOutput = async (reference) => {
     assert.deepEqual(reference, saved);
     throw { kind: "output-not-found" };
   };
   click(root.querySelector(".dz-history-output"));
-  await tick();
+  await flush();
   assert.equal(root.querySelector("#dz-url-input").value, "https://other.test/image");
   assert.equal(invocations.length, count);
   assert.match(root.querySelector("tbody tr").textContent, /Deleted/);
@@ -229,29 +106,28 @@ test("saved history renders during slow disk checks, opens the file after retire
   click(root.querySelector(".dz-history-main"));
   assert.equal(root.querySelector("#dz-url-input").value, invocation.request.inputUrl);
   assert.equal(invocations.length, count, "a deleted result still allows selecting its source");
-  globalThis.desktopTestNative.inspectSavedOutput = async () => "available";
+  native.inspectSavedOutput = async () => "available";
   act(() => window.dispatchEvent(new window.Event("focus")));
-  await tick();
+  await flush();
   assert.equal(
     root.querySelector(".dz-history-output").disabled,
     false,
     "a restored file becomes available again",
   );
   let opened = 0;
-  globalThis.desktopTestNative.openHistoryOutput = async () => {
+  native.openHistoryOutput = async () => {
     opened++;
   };
   click(root.querySelector(".dz-history-output"));
-  await tick();
+  await flush();
   assert.equal(opened, 1);
   click(root.querySelector(".dz-history-remove"));
-  await tick();
+  await flush();
   assert.equal(opened, 1, "removing a row never opens the image");
-  delete globalThis.desktopTestNative.openHistoryOutput;
-  delete globalThis.desktopTestNative.inspectSavedOutput;
 });
 
 test("desktop catalog choice keeps newer questions and ignores stale previews and answers", async () => {
+  const { root, start } = mountDesktop();
   const invocation = await start();
   const catalog = {
     entries: [
@@ -282,10 +158,10 @@ test("desktop catalog choice keeps newer questions and ignores stale previews an
   assert.equal(root.querySelector(".dz-image-picker"), null);
   act(() => invocation.callbacks.imageChoice(1, { kind: "catalog", catalog }));
   assert.equal(root.querySelector(".dz-image-picker"), null);
-  await reset();
 });
 
 test("desktop retry actions retain a newer native question", async () => {
+  const { root, start } = mountDesktop();
   const invocation = await start();
   const request = { tile: { index: 3 }, attempt: 4, requires_approval: true };
   act(() => invocation.callbacks.retry(1, request));
@@ -302,10 +178,10 @@ test("desktop retry actions retain a newer native question", async () => {
   assert.equal(invocation.answers[1].choice, "cancel");
   await act(async () => invocation.answers[1].resolve());
   assert.equal(root.querySelector("[data-dz-retry-actions]"), null);
-  await reset();
 });
 
 test("a failed image answer closes the picker and exposes recovery", async () => {
+  const { root, start } = mountDesktop();
   const invocation = await start();
   const catalog = {
     entries: [
@@ -320,10 +196,10 @@ test("a failed image answer closes the picker and exposes recovery", async () =>
   assert.ok(root.querySelector(".dz-error-section"));
   act(() => invocation.callbacks.imageChoice(2, { kind: "catalog", catalog }));
   assert.equal(root.querySelector(".dz-image-picker"), null);
-  await reset();
 });
 
 test("a late retry answer failure cannot replace the next invocation", async () => {
+  const { root, start, reset } = mountDesktop();
   const first = await start();
   const request = { tile: { index: 3 }, attempt: 4, requires_approval: true };
   act(() => first.callbacks.retry(1, request));
@@ -335,10 +211,10 @@ test("a late retry answer failure cannot replace the next invocation", async () 
   assert.ok(root.querySelector(".dz-job-section"));
   act(() => second.callbacks.retry(2, request));
   assert.ok(root.querySelector("[data-dz-retry-choice=retry]"));
-  await reset();
 });
 
 test("raw header text is submitted as-is; nothing is pre-validated or blocked", async () => {
+  const { root, start } = mountDesktop();
   click(root.querySelector(".dz-settings-more"));
   const textarea = root.querySelector(".dz-headers-disclosure textarea");
   assert.ok(textarea, "request headers stay in advanced settings");
@@ -346,51 +222,62 @@ test("raw header text is submitted as-is; nothing is pre-validated or blocked", 
   typeInto(textarea, text);
   const invocation = await start();
   assert.deepEqual(invocation.request.settings.headers, text.split("\n"));
-  await reset();
 });
 
 test("a typed Rust save rejection shows its reason and persists nothing", async () => {
+  const { root, start, reset } = mountDesktop();
   const invocation = await start();
   await act(async () =>
     invocation.reject({ kind: "invalid-settings", detail: "invalid header: bad name" }),
   );
-  await tick();
+  await flush();
   const diagnostics = root.querySelector("#dz-job-diagnostics");
   assert.match(diagnostics.textContent, /invalid header: bad name/);
   await reset();
-  await tick();
+  await flush();
   const settingsError = root.querySelector("#dz-settings-error");
   assert.ok(settingsError, "the settings panel surfaces the Rust rejection reason");
   assert.match(settingsError.textContent, /invalid header: bad name/);
 });
 
 test("a refused settings edit shows the shell reason and persists nothing", async () => {
+  const { root, native } = mountDesktop();
   const retries = root.querySelector('input[aria-label="Retries"]');
   assert.ok(retries, "retries stay in the settings panel");
-  globalThis.desktopTestNative.validateSettings = async (settings) => {
+  native.validateSettings = async (settings) => {
     if (settings.retries > 100) throw { kind: "invalid-settings", detail: "invalid retries: 101" };
   };
   typeInto(retries, 5);
-  await tick();
+  await flush();
   assert.equal(loadSettings().retries, 5, "an accepted edit is persisted");
   typeInto(retries, 101);
-  await tick();
+  await flush();
   const settingsError = root.querySelector("#dz-settings-error");
   assert.match(settingsError.textContent, /invalid retries: 101/);
   assert.equal(loadSettings().retries, 5, "the refused edit persists nothing");
-  delete globalThis.desktopTestNative.validateSettings;
 });
 
 test("AVIF settings persist and reach the native invocation", async () => {
+  const { root, start } = mountDesktop();
   const avif = [...root.querySelectorAll('.dz-quick-menu[aria-label="Format"] button')].find(
     (button) => button.firstElementChild.textContent === "AVIF",
   );
   click(avif);
-  await tick();
+  await flush();
   assert.equal(loadSettings().output_format, "avif");
   const invocation = await start();
   assert.equal(invocation.request.settings.output_format, "avif");
   await act(async () => invocation.resolve({ ...output, format: "avif" }));
-  await tick();
-  await reset();
+  await flush();
+});
+
+test("disposing a desktop mount releases its view and ignores late job events", async () => {
+  const { app, root, start } = mountDesktop();
+  const invocation = await start();
+  await act(() => app.dispose());
+  act(() => invocation.callbacks.progress({ ...progress, completed: 999 }));
+  await act(async () => invocation.resolve(output));
+  act(() => window.dispatchEvent(new window.Event("focus")));
+  assert.equal(root.childElementCount, 0);
+  assert.equal(app.getCurrentJobId(), null);
 });

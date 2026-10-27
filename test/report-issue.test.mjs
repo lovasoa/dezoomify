@@ -7,7 +7,7 @@ import {
   diagnosticIssueUrl,
 } from "../packages/shared-ui/src/diagnostic-details.tsx";
 import { createDiagnosticRecorder } from "../packages/shared-ui/src/diagnostics.ts";
-import { act, click, makeContainer } from "./react-dom.mjs";
+import { act, click, makeContainer, onCleanup } from "./react-dom.mjs";
 
 const report = () => {
   const d = createDiagnosticRecorder({
@@ -97,6 +97,7 @@ test("issue labels use composed structured errors and do not infer bugs from pro
 test("failed clipboard leaves selectable report and never claims success", async () => {
   const el = makeContainer();
   const root = createRoot(el);
+  onCleanup(() => root.unmount());
   act(() =>
     root.render(
       createElement(DiagnosticDetails, {
@@ -113,5 +114,4 @@ test("failed clipboard leaves selectable report and never claims success", async
   assert.match(el.querySelector('[role="alert"]').textContent, /Could not copy/);
   assert.equal(el.querySelector('[role="status"]'), null);
   assert.match(el.querySelector("pre").textContent, /challenge/);
-  act(() => root.unmount());
 });

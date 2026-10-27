@@ -932,6 +932,12 @@ function SharedView({
 
 const roots = new WeakMap<HTMLElement, Root>();
 
+/** Release the mounted view and its effects. The container can be rendered again. */
+export function unmountView(container: HTMLElement): void {
+  roots.get(container)?.unmount();
+  roots.delete(container);
+}
+
 function renderInto(container: HTMLElement, node: ReactElement): void {
   let root = roots.get(container);
   if (!root) {

@@ -3,8 +3,11 @@
 // The root suite runs on bare `node --test`; this module installs linkedom as
 // the global DOM and re-exports React's `act` so tests can mount components,
 // dispatch events, and assert on the rendered tree.
+
+import { afterEach, beforeEach } from "node:test";
 import { parseHTML } from "linkedom";
 import { act } from "react";
+import { getLocale, setLocale } from "../packages/shared-ui/src/i18n.ts";
 
 const { document } = parseHTML(
   "<!doctype html><html lang='en'><head><title>t</title></head><body></body></html>",
@@ -39,6 +42,41 @@ expose("KeyboardEvent", document.defaultView?.KeyboardEvent);
 expose("IS_REACT_ACT_ENVIRONMENT", true);
 
 export { act, document };
+
+const cleanups = [];
+let savedGlobals, savedLocale, savedLang;
+beforeEach(() => {
+  savedGlobals = ["localStorage", "navigator", "location", "requestAnimationFrame"].map((name) => [
+    name,
+    Object.getOwnPropertyDescriptor(globalThis, name),
+  ]);
+  savedLocale = getLocale();
+  savedLang = document.documentElement.lang;
+});
+
+/** Register lifecycle cleanup before making assertions, so failures also release resources. */
+export function onCleanup(cleanup) {
+  cleanups.push(cleanup);
+}
+
+afterEach(async () => {
+  try {
+    while (cleanups.length) await act(cleanups.pop());
+  } finally {
+    const { unmountView } = await import("../packages/shared-ui/src/view.tsx");
+    act(() => {
+      document.querySelector(".dz-modal-close")?.click();
+      for (const container of document.body.children) unmountView(container);
+      document.body.replaceChildren();
+    });
+    for (const [name, descriptor] of savedGlobals) {
+      if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+      else delete globalThis[name];
+    }
+    setLocale(savedLocale);
+    document.documentElement.lang = savedLang;
+  }
+});
 
 /** A fresh detached container appended to the document body. */
 export function makeContainer() {
