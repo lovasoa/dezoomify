@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { errorPayload, HttpError } from "@dezoomify/browser-runtime";
 import { createSourceAccess } from "../../src/job/source-access.ts";
 import {
   cancelSourceFetch,
@@ -160,9 +161,10 @@ function snapshot(documentUrl = SOURCE_URL) {
 
 test("live tile capabilities stay bound to their exact viewer frame and are released on retirement", async () => {
   const viewerUrl = "https://gallery.example/viewer";
-  const base = `${viewerUrl}#dezoomify-viewer-tile/test-source/image`;
-  const uri = `${base}/10/0/0/256/256.png`;
-  const tile = { ok: true, documentUrl: viewerUrl, status: 200, url: uri, data: "AQ==", bytes: 1 };
+  const handle = "test-source";
+  const request = { handle, source_url: viewerUrl, level: 10, column: 0, row: 0 };
+  const extent = { width: 256, height: 256 };
+  const tile = { ok: true, documentUrl: viewerUrl, data: "AQ==", bytes: 1 };
   let tileReply = () => tile;
   const fake = fakeBrowser(async (injection) => {
     const frameId = injection.target.frameIds[0];
@@ -171,14 +173,14 @@ test("live tile capabilities stay bound to their exact viewer frame and are rele
       return {
         ok: true,
         documentUrl,
-        resources: frameId === 9 ? [base] : [],
+        handles: frameId === 9 ? [handle] : [],
         inputs:
           frameId === 9
             ? [
                 {
                   kind: "observed-metadata",
                   url: viewerUrl,
-                  contents: JSON.stringify({ Image: { Url: base } }),
+                  contents: JSON.stringify({ dezoomify_viewer: { handle, source_url: viewerUrl } }),
                 },
               ]
             : [],
@@ -206,13 +208,39 @@ test("live tile capabilities stay bound to their exact viewer frame and are rele
     });
     assert.ok((await observe("forbidden", new AbortController().signal)).length);
     await source.scan();
-    const result = await source.fetch({ uri, headers: [] }, new AbortController().signal);
-    assert.deepEqual([...result.bytes], [1]);
+    const result = await source.loadViewerTile(request, extent, new AbortController().signal);
+    assert.deepEqual([...new Uint8Array(result)], [1]);
+    const refusal = new HttpError({
+      status: 503,
+      transport: "browser-session",
+      request: "https://tiles.example/real.jpg",
+      retry_after_ms: 2000,
+    });
+    tileReply = () => ({ documentUrl: viewerUrl, ok: false, error: errorPayload(refusal) });
+    await assert.rejects(
+      source.loadViewerTile(request, extent, new AbortController().signal),
+      (caught) => {
+        assert.ok(caught instanceof Error);
+        assert.deepEqual(errorPayload(caught), errorPayload(refusal));
+        return true;
+      },
+    );
+    await assert.rejects(
+      source.loadViewerTile(
+        { ...request, source_url: SOURCE_URL },
+        extent,
+        new AbortController().signal,
+      ),
+      {
+        kind: "policy-denied",
+        blocked_reason: "source-document-lost",
+      },
+    );
     // Cancellation stops waiting without clearing the page viewer's own queue.
     const late = Promise.withResolvers();
     tileReply = () => late.promise;
     const controller = new AbortController();
-    const cancelled = assert.rejects(source.fetch({ uri }, controller.signal), {
+    const cancelled = assert.rejects(source.loadViewerTile(request, extent, controller.signal), {
       kind: "cancelled",
     });
     await new Promise((resolve) => setImmediate(resolve));
@@ -220,12 +248,12 @@ test("live tile capabilities stay bound to their exact viewer frame and are rele
     await cancelled;
     late.resolve(tile);
     source.releaseTiles();
-    await assert.rejects(source.fetch({ uri, headers: [] }, new AbortController().signal), {
+    await assert.rejects(source.loadViewerTile(request, extent, new AbortController().signal), {
       kind: "policy-denied",
       blocked_reason: "source-document-lost",
     });
     const release = fake.calls.find((call) => call.func === releaseViewerTiles);
-    assert.deepEqual(release.args, [[base]]);
+    assert.deepEqual(release.args, [[handle]]);
     assert.deepEqual(release.target.frameIds, [9]);
   } finally {
     source.dispose();
@@ -606,7 +634,8 @@ test("generated failure facts survive source validation unchanged", async () => 
         new AbortController().signal,
       ),
       (caught) => {
-        assert.equal(caught, error);
+        assert.ok(caught instanceof Error);
+        assert.deepEqual(errorPayload(caught), error);
         return true;
       },
     );

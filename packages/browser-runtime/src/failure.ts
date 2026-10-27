@@ -1,18 +1,20 @@
-// Structured failures shared by browser operations. Hosts throw plain
-// objects matching the generated `Error` shapes: serde round-trips them
-// across the Rust/TypeScript boundary unchanged. The closed-enum vocabulary
-// lives beside its validation in the shared UI's failure module.
+// Structured failures shared by browser operations. Runtime error classes carry
+// the generated Rust facts; boundary payloads preserve the same shapes.
+// The closed-enum vocabulary lives beside its validation in the shared UI.
 import type { Error as JobError } from "@dezoomify/wasm-bindings";
 import { blockedReason, isJobError, unknownDetail } from "../../shared-ui/src/failure.ts";
+import { DezoomifyError, errorFromPayload } from "./errors.ts";
 
 export { blockedReason, isJobError, unknownDetail };
 
 /** Typed tile failure with its diagnostic cause retained in `detail`.
- * Already-typed causes pass through unchanged; decoding and processing
+ * Already-typed failure facts are preserved; decoding and processing
  * failures are deterministic, so they never degrade to the retryable
  * transport fallback. */
 export function tileError(kind: "decode-failed" | "processing-failed", cause: unknown): JobError {
-  return isJobError(cause) ? cause : { kind, detail: unknownDetail(cause) };
+  return isJobError(cause)
+    ? errorFromPayload(cause)
+    : new DezoomifyError({ kind, detail: unknownDetail(cause) }, { cause });
 }
 
 /** Typed output failure with its diagnostic cause retained in `detail`. */
@@ -26,6 +28,6 @@ export function outputError(
     case "encode-failed":
     case "write-failed":
     case "internal":
-      return detail === undefined ? { kind } : { kind, detail };
+      return new DezoomifyError(detail === undefined ? { kind } : { kind, detail });
   }
 }

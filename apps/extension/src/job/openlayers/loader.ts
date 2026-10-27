@@ -1,3 +1,4 @@
+import { CancelledError, NetworkError } from "@dezoomify/browser-runtime";
 import { PageObject } from "../viewers/page-object.ts";
 import type { ViewerTile } from "../viewers/session.ts";
 
@@ -20,7 +21,7 @@ export async function loadTile(
     };
     const aborted = () => {
       cleanup();
-      reject({ kind: "cancelled" });
+      reject(new CancelledError());
     };
     const changed = () => {
       const state = tile.call("getState");
@@ -29,11 +30,7 @@ export async function loadTile(
         resolve();
       } else if (state === 3 || state === 4) {
         cleanup();
-        reject({
-          kind: "network-failure",
-          detail: "OpenLayers tile load failed",
-          transport: "browser-session",
-        });
+        reject(new NetworkError("OpenLayers tile load failed", { transport: "browser-session" }));
       }
     };
     tile.call("addEventListener", "change", changed);

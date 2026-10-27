@@ -6,7 +6,14 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { BrowserHost, createCanvasAssembly, selectionLimitsFor } from "@dezoomify/browser-runtime";
+import {
+  BrowserHost,
+  createCanvasAssembly,
+  errorPayload,
+  HttpError,
+  NetworkError,
+  selectionLimitsFor,
+} from "@dezoomify/browser-runtime";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const target = JSON.parse(
@@ -102,6 +109,114 @@ test("async Host reads binary metadata and saves the full selected image", async
   assert.equal(platform.observed.settled, 1);
   assert.ok(platform.observed.reads.every((request) => request.uri === url));
   assert.ok(platform.observed.progress.some((progress) => progress.completed === 4));
+});
+
+test("viewer acquisition retries transport failures and keeps internal exceptions fatal", async () => {
+  const sourceUrl = "https://iiif.nichibun.test/viewer";
+  const size = { width: 256, height: 256 };
+  const observation = {
+    dezoomify_viewer: {
+      source_url: sourceUrl,
+      handle: "job-viewer",
+      levels: [
+        {
+          level: 7,
+          size,
+          tile_size: size,
+          overlap: { width: 0, height: 0 },
+          grid_size: { width: 1, height: 1 },
+        },
+      ],
+    },
+  };
+  const network = new NetworkError("Image load aborted", { transport: "browser-session" });
+  const http = (status) =>
+    new HttpError({
+      transport: "browser-session",
+      status,
+      request: "https://images.test/real-tile.jpg",
+      detail: "Original HTTP failure",
+    });
+  for (const [failure, retries] of [
+    [network, true],
+    [http(503), true],
+    [http(403), false],
+    [new TypeError("broken adapter"), false],
+  ]) {
+    let attempts = 0,
+      saved = false;
+    const painted = [];
+    const platform = new BrowserHost({
+      signal: new AbortController().signal,
+      selectionLimits: { maxWidth: 1024, maxHeight: 1024, maxArea: 1048576 },
+      fetchResource: async () => assert.fail("viewer tiles must never enter a URL transport"),
+      loadDisplayImage: async () => assert.fail("viewer tiles must never enter image fallback"),
+      async loadViewerTile(request, extent) {
+        assert.deepEqual(request, {
+          kind: "viewer",
+          handle: "job-viewer",
+          source_url: sourceUrl,
+          level: 7,
+          column: 0,
+          row: 0,
+        });
+        assert.deepEqual(extent, size);
+        if (++attempts === 1) throw failure;
+        return Uint8Array.of(1, 2, 3).buffer;
+      },
+      assembly: {
+        prepare() {},
+        async acquireTile(index, _placement, bytes) {
+          painted.push([index, ...new Uint8Array(bytes)]);
+        },
+        async finalizeOutput() {
+          saved = true;
+          return "browser-save-ready";
+        },
+        dimensions: () => size,
+        release() {},
+      },
+      decoder: { dispose() {}, async settle() {} },
+      chooseImage: async () => 0,
+      approveRetry: async () => assert.fail("one automatic retry is sufficient"),
+      onProgress() {},
+    });
+    // Node has no DOM; this complete metadata observation needs no HTML projection.
+    platform.parseHtml = async () => ({});
+    const job = wasm.dezoomify(
+      [
+        { url: sourceUrl },
+        {
+          kind: "observed-metadata",
+          url: `${sourceUrl}#observation`,
+          contents: JSON.stringify(observation),
+        },
+      ],
+      { max_concurrent: 1, max_retries: 1, retry_base_delay_ms: 1 },
+      platform,
+    );
+    if (retries) {
+      assert.equal((await job).disposition, "browser-save-ready");
+      assert.deepEqual(painted, [[0, 1, 2, 3]]);
+      assert.equal(attempts, 2);
+      assert.equal(saved, true);
+    } else {
+      await assert.rejects(job, (error) => {
+        assert.equal(error.kind, "tile-failed");
+        assert.equal(error.attempts, 1);
+        if (failure instanceof TypeError) {
+          assert.equal(error.cause.kind, "internal");
+          assert.match(
+            error.cause.detail,
+            /loading viewer tile \(level 7, column 0, row 0\): TypeError: broken adapter/,
+          );
+        } else assert.deepEqual(error.cause, errorPayload(failure));
+        return true;
+      });
+      assert.equal(saved, false);
+      assert.deepEqual(painted, []);
+    }
+  }
 });
 
 test("Gallica viewer and manifest save the largest fitting IIIF resolution without an advertised pyramid", async () => {
@@ -276,11 +391,11 @@ test("FreezoomPack WASM plans match the native/browser fixture golden", async ()
       assert.deepEqual(output.canvas, { width: golden.width, height: golden.height });
       const tiles = platform.observed.tiles.sort((a, b) => a.index - b.index);
       assert.deepEqual(
-        tiles.map((tile) => new URL(tile.request.uri).pathname),
+        tiles.map((tile) => new URL(tile.source.uri).pathname),
         golden.requests,
       );
       for (const tile of tiles) {
-        assert.equal(tile.request.purpose, "tile");
+        assert.equal(tile.source.purpose, "tile");
         assert.equal(tile.placement.processing, "none");
         assert.ok(tile.placement.expected_size.width > 0);
         assert.ok(tile.placement.expected_size.height > 0);

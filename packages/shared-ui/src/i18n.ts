@@ -385,7 +385,7 @@ const en = {
   "desktop.start.failed": "Could not start saving this picture from {host}. Try again.",
   "desktop.choice.failed": "That choice was not accepted. Try again.",
   "desktop.internal.error":
-    "Something unexpected stopped this save from {host}. Try again, and copy diagnostics if it keeps happening.",
+    "An internal Dezoomify error stopped this save from {host}. Report this bug with the diagnostics.",
   "desktop.save.fallback": "Could not save this picture from {host}. Try again.",
   "desktop.invoke.startFallback": "Could not start the job.",
   "desktop.invoke.retry": "The retry choice was rejected.",

@@ -9,14 +9,20 @@
  */
 
 import {
+  CancelledError,
+  DezoomifyError,
   forwardCoreHeaders,
+  HttpError,
   isJobError,
   isPublicHttpUrl,
+  NetworkError,
   originOfUrl,
+  PolicyDeniedError,
   readErrorPreview,
   readRequestedBytes,
   requestedByteRange,
   retryAfterMs,
+  TimeoutError,
   unknownDetail,
 } from "@dezoomify/browser-runtime";
 import type { DiagnosticRecorder } from "@dezoomify/shared-ui";
@@ -59,19 +65,19 @@ export function transportError(
 ): JobError {
   switch (kind) {
     case "bad-url":
-      return { kind, detail };
+      return new DezoomifyError({ kind, detail });
     case "cancelled":
-      return { kind };
+      return new CancelledError();
     case "network-failure":
+      return new NetworkError(detail, { transport: "browser-session" });
     case "timeout":
-      return { kind, transport: "browser-session", detail };
+      return new TimeoutError(detail, { transport: "browser-session" });
     case "source-lost":
-      return {
-        kind: "policy-denied",
+      return new PolicyDeniedError({
         blocked_reason: "source-document-lost",
         transport: "browser-session",
         detail,
-      };
+      });
   }
 }
 
@@ -102,12 +108,11 @@ export function createExtensionFetcher(deps: FetchDeps) {
     const range = requestedByteRange(request.headers);
     const origin = originOfUrl(parsed.href);
     if (!(await deps.hasPermission(origin))) {
-      throw {
-        kind: "policy-denied",
+      throw new PolicyDeniedError({
         blocked_reason: "access-required",
         transport: "browser-session",
         detail: `access to ${origin} requires an explicit action`,
-      } satisfies JobError;
+      });
     }
     deps.diagnostics?.count("requests");
     deps.diagnostics?.count("requests_pending");
@@ -196,14 +201,13 @@ export function createExtensionFetcher(deps: FetchDeps) {
       throw transportError("bad-url", "malformed fetch response");
     if (!response.ok) {
       const retry_after_ms = retryAfterMs(response.headers.get("retry-after"));
-      throw {
-        kind: "http-error",
+      throw new HttpError({
         status: response.status,
         request: request.uri,
         transport: "browser-session",
         preview: await readErrorPreview(response, signal),
         ...(retry_after_ms === undefined ? {} : { retry_after_ms }),
-      } satisfies JobError;
+      });
     }
     const contentType = response.headers.get("content-type") ?? "";
     assertContentType(contentType, request.purpose);

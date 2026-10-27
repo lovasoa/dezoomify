@@ -139,6 +139,13 @@ pub fn grid(level: &ResolvedLevel) -> Result<&Grid, String> {
 pub fn tile_urls(level: &ResolvedLevel) -> Result<Vec<String>, String> {
     Ok(grid(level)?
         .tiles_row_major()
-        .map(|tile| tile.expect("grid tile").request.uri)
+        .map(|tile| {
+            tile.expect("grid tile")
+                .source
+                .resource()
+                .unwrap()
+                .uri
+                .clone()
+        })
         .collect())
 }

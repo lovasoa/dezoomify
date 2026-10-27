@@ -65,7 +65,10 @@ export interface BrowserApplicationContext {
   permission(pending: PermissionWait[]): void;
 }
 export interface BrowserCapabilities
-  extends Pick<BrowserHostDependencies, "fetchResource" | "loadDisplayImage" | "observe"> {
+  extends Pick<
+    BrowserHostDependencies,
+    "fetchResource" | "loadDisplayImage" | "loadViewerTile" | "observe"
+  > {
   fetchPreview?(request: ResourceRequest, signal: AbortSignal): Promise<ResourceRead>;
   inputs(url: string): Promise<JobInput[]>;
   recoverDiscovery?(error: JobError): Promise<Completion | undefined>;
@@ -340,6 +343,7 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
       fetchResource: capabilities.fetchResource,
       observe: capabilities.observe,
       loadDisplayImage: capabilities.loadDisplayImage,
+      loadViewerTile: capabilities.loadViewerTile,
       onProgress: (progress) => {
         if (current === a && !a.controller.signal.aborted) {
           a.progress = progress;
@@ -362,6 +366,7 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
               fetch:
                 capabilities.fetchPreview ??
                 ((request, owned) => capabilities.fetchResource(request, owned, "forbidden")),
+              loadViewerTile: capabilities.loadViewerTile,
               process: (recipe, bytes) =>
                 wasm.applyProcessing(recipe, new Uint8Array(bytes)).slice().buffer,
               decoder,
@@ -373,7 +378,7 @@ export function createBrowserApplication(options: BrowserApplicationOptions) {
           },
           failed(tile, error) {
             a.diagnostics.record("debug", "image-preview-failed", {
-              request: tile.request.uri,
+              source: tile.source,
               detail: unknownDetail(error),
             });
           },

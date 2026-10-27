@@ -44,7 +44,9 @@ failures; they must not add a second retry policy. The extension's
 [live viewer adapters](../apps/extension/src/job/viewers/session.ts) reuse
 page loaders, retaining their built-in retries. Cancellation stops waiting
 without clearing the viewer's queue or cache. Rust validates the observed finite
-grids and plans tile placement through its existing grid geometry. GUI Hosts await Retry or Cancel
+grids and plans tile placement through its existing grid geometry. Tile sources
+distinguish resource requests from calls through job-owned viewer handles; viewer
+calls never enter URL transports or ordinary-image fallback. GUI Hosts await Retry or Cancel
 inside optional acquisitions, pausing new work while in-flight operations settle.
 Retry approval retains successful tiles. Every required tile must succeed before
 finalization; permanent tile and output failures stop the job. Exact policies

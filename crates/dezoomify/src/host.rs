@@ -51,6 +51,9 @@ macro_rules! host_members {
                 /// Success means the tile has joined output; retain resources as needed
                 /// until finish/settlement. Calls for different tiles can overlap;
                 /// retries of the same tile are sequential and must not duplicate output.
+                /// Dispatch by `TileSource`: viewer handles never enter URL transports.
+                /// Preserve typed transport failures; unexpected adapter/encoding
+                /// exceptions are internal errors with operation context.
                 acquire_tile => acquireTile(request: TileAcquisition) -> ();
                 /// Finalize after all required tiles succeeded, including reused probes.
                 /// Called at most once; report the actual save disposition, which need

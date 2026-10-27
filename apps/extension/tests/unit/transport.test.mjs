@@ -17,7 +17,6 @@ function setup({ sourceFailure, origin = "https://source.test" } = {}) {
     sourceAccess: {
       origin,
       hasOrigin: (value) => value === origin,
-      handlesResource: (value) => value.includes("#dezoomify-openseadragon-tile/"),
       async fetch(input, owned) {
         calls.push(["source", input, owned]);
         if (sourceFailure) throw sourceFailure;
@@ -132,24 +131,4 @@ test("a source deadline does not start an unbounded second route", async () => {
   });
   await assert.rejects(h.fetch(request, signal, "allowed"), { kind: "timeout" });
   assert.equal(h.calls.length, 1);
-});
-
-test("live viewer tile failures never fall through to HTTP", async () => {
-  const h = setup({ sourceFailure: { kind: "network-failure", detail: "tile loader failed" } });
-  await assert.rejects(
-    h.fetch(
-      {
-        ...request,
-        uri: "https://source.test/page#dezoomify-openseadragon-tile/id/image/10/0_0.png",
-        purpose: "tile",
-      },
-      signal,
-      "allowed",
-    ),
-    { kind: "network-failure" },
-  );
-  assert.deepEqual(
-    h.calls.map(([route]) => route),
-    ["source"],
-  );
 });

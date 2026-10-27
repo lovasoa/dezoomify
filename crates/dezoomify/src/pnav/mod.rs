@@ -124,7 +124,7 @@ impl PnavSource {
     ) -> Result<Option<ResolvedGrid>, crate::model::Error> {
         let tile = TileSpec {
             ordinal: 0,
-            request: Request::new(self.probe_url()),
+            source: Request::new(self.probe_url()).into(),
             destination: Vec2d::default(),
             expected_size: None,
             processing: crate::core::ProcessingRecipe::None,
@@ -222,7 +222,7 @@ mod tests {
         };
         let requests: Vec<_> = grid
             .tiles_row_major()
-            .map(|tile| tile.unwrap().request.uri)
+            .map(|tile| tile.unwrap().source.resource().unwrap().uri.clone())
             .collect();
         assert!(
             requests

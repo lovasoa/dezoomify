@@ -329,14 +329,14 @@ mod tests {
         };
         let first = tiles.tiles().next().unwrap().unwrap();
         assert_eq!(
-            first.request.uri,
+            first.source.resource().unwrap().uri.clone(),
             "https://sc.example.test/gigapixel/modern/normal_3_0_0.jpg"
         );
         assert_eq!(tiles.image_size(), Some(Vec2d { x: 1300, y: 900 }));
         let last = tiles.tiles().last().unwrap().unwrap();
         assert_eq!(last.destination, Vec2d { x: 1024, y: 512 });
         assert_eq!(last.expected_size, None, "padded edge tiles are clipped");
-        assert!(last.request.headers.is_empty());
+        assert!(last.source.resource().unwrap().headers.is_empty());
     }
 
     #[test]

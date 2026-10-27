@@ -1,15 +1,24 @@
 import {
   decodeBase64Payload,
+  errorFromPayload,
+  InternalError,
   isJobError,
   isPublicHttpUrl,
   originOfUrl,
   requestedByteRange,
+  SizeLimitError,
   SOURCE_FETCH_BYTE_LIMIT,
+  TimeoutError,
   validateByteRangeLength,
   validateByteRangeResponse,
   validateRequestHeaders,
 } from "@dezoomify/browser-runtime";
-import type { Interaction, Error as JobError, ResourceRequest } from "@dezoomify/wasm-bindings";
+import type {
+  Interaction,
+  ResourceRequest,
+  Size,
+  ViewerTileRequest,
+} from "@dezoomify/wasm-bindings";
 import type { PublicPath, WxtBrowser } from "wxt/browser";
 import { transportError } from "../runtime/fetch.ts";
 import { findImageDownloadLink, findLoadedImage } from "./loaded-image.ts";
@@ -19,12 +28,7 @@ import {
   fetchSource,
   inspectSourceDocument,
 } from "./source-operations.ts";
-import {
-  isViewerTile,
-  readViewerTile,
-  releaseViewerTiles,
-  tileResourceBase,
-} from "./viewers/session.ts";
+import { readViewerTile, releaseViewerTiles } from "./viewers/session.ts";
 
 type SourceApi = Pick<WxtBrowser, "tabs" | "scripting">;
 type SourceFrame = { frameId: number; documentUrl: string; token?: string; documentId?: string };
@@ -151,7 +155,7 @@ function readSourcePayload(
 ) {
   if (!validFetchResult(result, expectedUrl))
     throw transportError("bad-url", "invalid source fetch result");
-  if (!result.ok) throw result.error;
+  if (!result.ok) throw errorFromPayload(result.error);
   if (range) {
     validateByteRangeResponse(range, result.status, result.contentRange, result.contentLength);
     validateByteRangeLength(range, result.bytes);
@@ -350,10 +354,10 @@ export function createSourceAccess(
       })
       .catch((cause: unknown) => {
         assertLive();
-        throw {
-          ...transportError("network-failure", "source operation could not run"),
-          detail: cause instanceof Error ? cause.message : String(cause),
-        };
+        throw transportError(
+          "network-failure",
+          cause instanceof Error ? cause.message : String(cause),
+        );
       });
     signal.throwIfAborted();
     assertLive();
@@ -373,11 +377,9 @@ export function createSourceAccess(
   ): Promise<Result> {
     assertLive();
     const deadline = new AbortController();
-    const timeout: JobError = {
-      kind: "timeout",
+    const timeout = new TimeoutError("the source operation timed out", {
       transport: "browser-session",
-      detail: "the source operation timed out",
-    };
+    });
     if (Date.now() >= deadlineAt) throw timeout;
     let reachDeadline = () => {};
     const deadlineReached = new Promise<void>((resolve) => {
@@ -465,7 +467,7 @@ export function createSourceAccess(
         frame,
       );
       ({ observed, memory } = memoryScanReply(reply));
-      rememberTileFrames(isRecord(reply) ? reply.resources : undefined, frame);
+      rememberTileFrames(isRecord(reply) ? reply.handles : undefined, frame);
     } catch (error) {
       // A memory scan is optional evidence; source loss/cancellation still
       // fails the following normal scan through the same lifetime guard.
@@ -515,17 +517,11 @@ export function createSourceAccess(
     }
   }
 
-  function rememberTileFrames(resources: unknown, frame: SourceFrame) {
-    if (!Array.isArray(resources) || resources.length > 100) return;
-    for (const base of resources) {
-      if (
-        typeof base === "string" &&
-        base.length <= MAX_URL_LENGTH &&
-        isPublicHttpUrl(base) &&
-        tileResourceBase(`${base}/0/0/0/1/1.png`) === base &&
-        sameDocumentUrl(base, frame.documentUrl)
-      )
-        tileFrames.set(base, frame);
+  function rememberTileFrames(handles: unknown, frame: SourceFrame) {
+    if (!Array.isArray(handles) || handles.length > 100) return;
+    for (const handle of handles) {
+      if (typeof handle === "string" && /^[\w-]{1,128}$/.test(handle))
+        tileFrames.set(handle, frame);
     }
   }
 
@@ -713,7 +709,7 @@ export function createSourceAccess(
     if (signal.aborted) throw transportError("cancelled", "source fetch cancelled");
     if (!validSourceRequestUrl(request.uri))
       throw transportError("bad-url", "invalid source request URL");
-    return isViewerTile(request.uri) ? fetchTile(request.uri, signal) : fetchHttp(request, signal);
+    return fetchHttp(request, signal);
   }
 
   async function fetchHttp(request: Pick<ResourceRequest, "uri" | "headers">, signal: AbortSignal) {
@@ -721,7 +717,7 @@ export function createSourceAccess(
     if (!headers) throw transportError("bad-url", "invalid source request headers");
     const range = requestedByteRange(headers);
     if (range && range.length > SOURCE_FETCH_BYTE_LIMIT)
-      throw { kind: "size-limit", max_bytes: SOURCE_FETCH_BYTE_LIMIT } satisfies JobError;
+      throw new SizeLimitError(SOURCE_FETCH_BYTE_LIMIT);
 
     const operationId = crypto.randomUUID();
     const frame = sessionFrames.get(originOfUrl(request.uri)) ?? rootFrame;
@@ -757,15 +753,22 @@ export function createSourceAccess(
     return readSourcePayload(result, frame.documentUrl, range);
   }
 
-  async function fetchTile(url: string, signal: AbortSignal) {
-    const base = tileResourceBase(url);
-    const frame = base && tileFrames.get(base);
-    if (!base || !frame)
+  /** Resolve a job-owned handle in its exact live frame; cancellation stops
+   * waiting without cancelling the page viewer's loader or cache. */
+  async function loadViewerTile(
+    request: ViewerTileRequest,
+    extent: Size,
+    signal: AbortSignal,
+  ): Promise<ArrayBuffer> {
+    assertLive();
+    signal.throwIfAborted();
+    const frame = tileFrames.get(request.handle);
+    if (!frame || !sameDocumentUrl(request.source_url, frame.documentUrl))
       throw transportError("source-lost", "viewer source is no longer available");
     const result = await inject(
       {
         func: readViewerTile,
-        args: [url, base],
+        args: [request, extent],
         world: "MAIN",
       },
       signal,
@@ -773,7 +776,27 @@ export function createSourceAccess(
       Date.now() + timeoutMs,
       frame,
     );
-    return readSourcePayload(result, frame.documentUrl, undefined);
+    if (
+      !isRecord(result) ||
+      typeof result.documentUrl !== "string" ||
+      !sameDocumentUrl(result.documentUrl, frame.documentUrl)
+    )
+      throw new InternalError("Invalid viewer tile response document");
+    if (result.ok === false && isJobError(result.error)) throw errorFromPayload(result.error);
+    if (
+      result.ok !== true ||
+      typeof result.data !== "string" ||
+      result.data.length > MAX_BASE64_CHARS ||
+      !Number.isSafeInteger(result.bytes) ||
+      typeof result.bytes !== "number" ||
+      result.bytes < 0 ||
+      result.bytes > SOURCE_FETCH_BYTE_LIMIT
+    )
+      throw new InternalError("Invalid viewer tile byte payload");
+    const bytes = decodeBase64Payload(result.data, SOURCE_FETCH_BYTE_LIMIT);
+    if (!bytes || bytes.byteLength !== result.bytes)
+      throw new InternalError("Invalid viewer tile byte count");
+    return bytes.buffer as ArrayBuffer;
   }
 
   function dispose() {
@@ -785,18 +808,18 @@ export function createSourceAccess(
 
   function releaseTiles() {
     const frames = new Map<SourceFrame, string[]>();
-    for (const [base, frame] of tileFrames) {
-      const bases = frames.get(frame) ?? [];
-      bases.push(base);
-      frames.set(frame, bases);
+    for (const [handle, frame] of tileFrames) {
+      const handles = frames.get(frame) ?? [];
+      handles.push(handle);
+      frames.set(frame, handles);
     }
     tileFrames.clear();
-    for (const [frame, bases] of frames) {
+    for (const [frame, handles] of frames) {
       void browserApi.scripting
         .executeScript({
           target: target(frame),
           func: releaseViewerTiles,
-          args: [bases],
+          args: [handles],
           world: "MAIN",
         })
         .catch(() => {});
@@ -823,7 +846,7 @@ export function createSourceAccess(
     },
     observations,
     fetch,
-    handlesResource: isViewerTile,
+    loadViewerTile,
     releaseTiles,
     hasOrigin(origin: string) {
       return sessionFrames.has(origin);

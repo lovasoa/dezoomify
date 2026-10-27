@@ -4,7 +4,7 @@ export type ObservedMetadata = JobInput & { kind: "observed-metadata"; contents:
 
 export interface ViewerEvidence {
   input: ObservedMetadata;
-  resource?: string;
+  handle?: string;
 }
 
 export interface SourceGeometry {
@@ -81,7 +81,7 @@ export interface ScanResult {
   ok: true;
   documentUrl: string;
   inputs: ObservedMetadata[];
-  resources: string[];
+  handles: string[];
   diagnostics: ScanDiagnostics;
 }
 

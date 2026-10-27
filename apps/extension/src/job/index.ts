@@ -1,4 +1,11 @@
-import { createAttemptPermissions, loadTileImage, originOfUrl } from "@dezoomify/browser-runtime";
+import {
+  createAttemptPermissions,
+  DezoomifyError,
+  InternalError,
+  loadTileImage,
+  originOfUrl,
+  PolicyDeniedError,
+} from "@dezoomify/browser-runtime";
 import { createBrowserApplication } from "@dezoomify/browser-runtime/application";
 import {
   getLocale,
@@ -94,21 +101,19 @@ const app = createBrowserApplication({
       async inputs() {
         if (!source) {
           if (sourceTabId === null)
-            throw {
-              kind: "policy-denied",
+            throw new PolicyDeniedError({
               blocked_reason: "source-document-lost",
               transport: "browser-session",
               detail: "could not find the source tab for this job",
-            };
+            });
           const tab = await api.tabs.get(sourceTabId);
           context.signal.throwIfAborted();
           if (typeof tab.url !== "string" || originOfUrl(tab.url) === "")
-            throw {
-              kind: "policy-denied",
+            throw new PolicyDeniedError({
               blocked_reason: "source-document-lost",
               transport: "browser-session",
               detail: "the source tab no longer has a readable web page",
-            };
+            });
           source = createSourceAccess(api, { tabId: sourceTabId, documentUrl: tab.url });
           installTestAccess();
         }
@@ -172,7 +177,10 @@ const app = createBrowserApplication({
           },
         });
         if (scan.inputs.length === 0)
-          throw { kind: "no-image-found", detail: "no image references were found on this page" };
+          throw new DezoomifyError({
+            kind: "no-image-found",
+            detail: "no image references were found on this page",
+          });
         return scan.inputs;
       },
       fetchResource: (request, signal, interaction) => {
@@ -202,6 +210,13 @@ const app = createBrowserApplication({
       observe: (interaction, signal) => observe?.(interaction, signal) ?? Promise.resolve([]),
       dispose: () => source?.releaseTiles(),
       loadDisplayImage: (url, signal) => loadTileImage(url, { signal }),
+      loadViewerTile: (request, extent, signal) => {
+        if (!source)
+          throw new InternalError(
+            "Viewer tile acquisition started before scanning the source document",
+          );
+        return source.loadViewerTile(request, extent, signal);
+      },
       canvas: () => document.createElement("canvas"),
       async save(blob, width, height, signal, title) {
         downloadId = await saveExtensionBlob(

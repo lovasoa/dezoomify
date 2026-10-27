@@ -24,6 +24,30 @@ use crate::{
 };
 use dezoomify::{host::Host, model::*, Vec2d};
 
+/// Native acquisition accepts resource tiles only; viewer handles belong to a browser job.
+struct ResourceTile {
+    index: u32,
+    request: ResourceRequest,
+    placement: TilePlacement,
+}
+
+impl TryFrom<Tile> for ResourceTile {
+    type Error = Error;
+
+    fn try_from(tile: Tile) -> Result<Self, Error> {
+        match tile.source {
+            TileSource::Resource(request) => Ok(Self {
+                index: tile.index,
+                request,
+                placement: tile.placement,
+            }),
+            TileSource::Viewer(_) => Err(Error::InvalidInput(
+                "Live viewer tiles require their browser extension session".into(),
+            )),
+        }
+    }
+}
+
 /// Shared cancellation and pause controls, independent of the calling executor.
 #[derive(Clone, Default)]
 pub struct Controls(Arc<ControlState>);
@@ -535,7 +559,7 @@ impl<'a> NativeHost<'a> {
         .await
     }
 
-    async fn tile(&self, tile: &Tile) -> Result<ReceivedPixels, Error> {
+    async fn tile(&self, tile: &ResourceTile) -> Result<ReceivedPixels, Error> {
         let _flight = Flight::new(self);
         let namespace = crate::cache::job_namespace(&self.options.input_url);
         let dir = self
@@ -588,7 +612,10 @@ impl<'a> NativeHost<'a> {
         .await
     }
 
-    async fn encoded_tile(&self, tile: &Tile) -> Result<crate::tile_output::EncodedTile, Error> {
+    async fn encoded_tile(
+        &self,
+        tile: &ResourceTile,
+    ) -> Result<crate::tile_output::EncodedTile, Error> {
         let _flight = Flight::new(self);
         let namespace = crate::cache::job_namespace(&self.options.input_url);
         let dir = self
@@ -652,7 +679,7 @@ impl<'a> NativeHost<'a> {
         })
     }
 
-    fn storage_index(&self, tile: &Tile) -> u32 {
+    fn storage_index(&self, tile: &ResourceTile) -> u32 {
         if tile.placement.role.probe {
             (self.options.max_tiles as u32).saturating_add(tile.index)
         } else {
@@ -675,7 +702,7 @@ impl<'a> NativeHost<'a> {
         )
     }
 
-    fn evict_failed_tile<T>(&self, tile: &Tile, result: &Result<T, Error>) {
+    fn evict_failed_tile<T>(&self, tile: &ResourceTile, result: &Result<T, Error>) {
         if matches!(self.format, OutputFormat::IiifDir | OutputFormat::Zif)
             && result
                 .as_ref()
@@ -749,7 +776,7 @@ impl<'a> NativeHost<'a> {
         Ok(())
     }
 
-    async fn place(&self, tile: &Tile, pixels: ReceivedPixels) -> Result<(), Error> {
+    async fn place(&self, tile: &ResourceTile, pixels: ReceivedPixels) -> Result<(), Error> {
         // Separate resource slots prevent probe indices from colliding with
         // final plan indices. Finish supplies the plan order of reused probes.
         let storage_index = self.storage_index(tile);
@@ -1051,6 +1078,7 @@ impl Host for NativeHost<'_> {
     }
 
     async fn probe(&self, tile: Tile) -> Result<ProbeOutcome, Error> {
+        let tile = ResourceTile::try_from(tile)?;
         if matches!(self.format, OutputFormat::IiifDir | OutputFormat::Zif) {
             let result = async {
                 let mut encoded = self.encoded_tile(&tile).await?;
@@ -1150,7 +1178,7 @@ impl Host for NativeHost<'_> {
         }
         self.approve_retry(&request).await?;
         self.controls.checkpoint(Gate::Acquisition).await?;
-        let tile = request.tile;
+        let tile = ResourceTile::try_from(request.tile)?;
         let result = async {
             if matches!(self.format, OutputFormat::IiifDir | OutputFormat::Zif) {
                 let encoded = self.encoded_tile(&tile).await?;

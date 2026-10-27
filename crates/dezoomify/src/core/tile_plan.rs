@@ -5,9 +5,10 @@ use std::fmt;
 use std::sync::Arc;
 
 use crate::Vec2d;
+use crate::model::TileSource as TileRequest;
 
 use super::adaptive::{AdaptiveSource, DiscoverableGrid};
-use super::model::{ProcessingRecipe, Request, TileRole, TileSpec};
+use super::model::{ProcessingRecipe, TileRole, TileSpec};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TileSourceError {
@@ -62,7 +63,7 @@ pub struct GridTile {
 
 /// Format-specific request behavior for a geometrically known grid.
 pub trait GridRequests: fmt::Debug + Send + Sync {
-    fn request(&self, tile: GridTile) -> Request;
+    fn request(&self, tile: GridTile) -> TileRequest;
 
     fn use_first_tile_as_referer(&self) -> bool {
         true
@@ -84,9 +85,9 @@ impl<F> fmt::Debug for ClosureRequests<F> {
     }
 }
 
-impl<F: Fn(GridTile) -> Request + Send + Sync> GridRequests for ClosureRequests<F> {
-    fn request(&self, tile: GridTile) -> Request {
-        (self.request)(tile)
+impl<R: Into<TileRequest>, F: Fn(GridTile) -> R + Send + Sync> GridRequests for ClosureRequests<F> {
+    fn request(&self, tile: GridTile) -> TileRequest {
+        (self.request)(tile).into()
     }
 
     fn processing(&self) -> ProcessingRecipe {
@@ -155,11 +156,11 @@ impl Grid {
         })
     }
 
-    pub fn with_requests(
+    pub fn with_requests<R: Into<TileRequest>>(
         image_size: Vec2d,
         tile_size: Vec2d,
         overlap: Vec2d,
-        requests: impl Fn(GridTile) -> Request + Send + Sync + 'static,
+        requests: impl Fn(GridTile) -> R + Send + Sync + 'static,
     ) -> Result<Self, TileSourceError> {
         Self::with_processed_requests(
             image_size,
@@ -170,12 +171,12 @@ impl Grid {
         )
     }
 
-    pub(crate) fn with_processed_requests(
+    pub(crate) fn with_processed_requests<R: Into<TileRequest>>(
         image_size: Vec2d,
         tile_size: Vec2d,
         overlap: Vec2d,
         processing: ProcessingRecipe,
-        requests: impl Fn(GridTile) -> Request + Send + Sync + 'static,
+        requests: impl Fn(GridTile) -> R + Send + Sync + 'static,
     ) -> Result<Self, TileSourceError> {
         Self::new(
             image_size,
@@ -254,17 +255,23 @@ impl Grid {
     fn tile(&self, ordinal: u64) -> Result<TileSpec, TileSourceError> {
         let tile = self.grid_tile(ordinal);
         let mut request = self.requests.request(tile);
-        if self.requests.use_first_tile_as_referer() {
+        if let TileRequest::Resource(resource) = &mut request
+            && self.requests.use_first_tile_as_referer()
+        {
             // Referer carries the full first-tile URI.
-            if request.header("Referer").is_none() {
-                request =
-                    request.with_header("Referer", self.requests.request(self.grid_tile(0)).uri);
+            if resource.header("Referer").is_none()
+                && let TileRequest::Resource(first) = self.requests.request(self.grid_tile(0))
+            {
+                resource.headers.push(crate::model::Header {
+                    name: "Referer".into(),
+                    value: first.uri,
+                });
             }
         }
         let ordinal = u32::try_from(ordinal).map_err(|_| TileSourceError::ArithmeticOverflow)?;
         Ok(TileSpec {
             ordinal,
-            request,
+            source: request,
             destination: tile.destination,
             expected_size: Some(tile.expected_size),
             processing: self.requests.processing(),
@@ -303,7 +310,7 @@ pub(crate) trait PositionedGenerator: fmt::Debug + Send + Sync {
 
 #[derive(Clone, Debug)]
 pub struct PositionedTile {
-    pub request: Request,
+    pub request: TileRequest,
     pub destination: Vec2d,
     pub processing: ProcessingRecipe,
 }
@@ -396,7 +403,7 @@ impl Iterator for PositionedTiles {
         Some(self.source.generator.tile(ordinal).and_then(|tile| {
             Ok(TileSpec {
                 ordinal: u32::try_from(ordinal).map_err(|_| TileSourceError::ArithmeticOverflow)?,
-                request: tile.request,
+                source: tile.request,
                 destination: tile.destination,
                 expected_size: None,
                 processing: tile.processing,
@@ -472,14 +479,15 @@ impl From<DiscoverableGrid> for TileSource {
 
 #[cfg(test)]
 mod tests {
+    use super::super::Request;
     use super::*;
 
     #[derive(Debug)]
     struct Requests;
 
     impl GridRequests for Requests {
-        fn request(&self, tile: GridTile) -> Request {
-            Request::new(format!("memory://{}/{}", tile.coord.column, tile.coord.row))
+        fn request(&self, tile: GridTile) -> TileRequest {
+            Request::new(format!("memory://{}/{}", tile.coord.column, tile.coord.row)).into()
         }
     }
 
@@ -499,9 +507,18 @@ mod tests {
         assert_eq!(grid.shape(), Vec2d { x: 2, y: 2 });
         assert_eq!(grid.count(), 4);
         let tiles: Vec<_> = grid.tiles_row_major().collect::<Result<_, _>>().unwrap();
-        assert_eq!(tiles[0].request.uri, "memory://0/0");
-        assert_eq!(tiles[1].request.uri, "memory://1/0");
-        assert_eq!(tiles[2].request.uri, "memory://0/1");
+        assert_eq!(
+            tiles[0].source.resource().unwrap().uri.clone(),
+            "memory://0/0"
+        );
+        assert_eq!(
+            tiles[1].source.resource().unwrap().uri.clone(),
+            "memory://1/0"
+        );
+        assert_eq!(
+            tiles[2].source.resource().unwrap().uri.clone(),
+            "memory://0/1"
+        );
         assert_eq!(tiles[3].expected_size, Some(Vec2d { x: 2, y: 2 }));
     }
 

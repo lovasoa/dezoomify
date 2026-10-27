@@ -294,7 +294,7 @@ export const it = {
     "Impossibile avviare il salvataggio di questa immagine da {host}. Riprova.",
   "desktop.choice.failed": "Questa scelta non è stata accettata. Riprova.",
   "desktop.internal.error":
-    "Un problema imprevisto ha interrotto questo salvataggio da {host}. Riprova e copia la diagnostica se ricapita.",
+    "Un errore interno di Dezoomify ha interrotto questo salvataggio da {host}. Segnala questo bug con la diagnostica.",
   "desktop.save.fallback": "Impossibile salvare questa immagine da {host}. Riprova.",
   "desktop.invoke.startFallback": "Impossibile avviare l’attività.",
   "desktop.invoke.retry": "La scelta di riprovare è stata rifiutata.",

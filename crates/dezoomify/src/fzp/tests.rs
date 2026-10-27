@@ -102,8 +102,11 @@ fn verified_geometry_and_original_coordinate_edge_filenames() {
         assert_eq!(first.expected_size, Some(Vec2d::square(tile)));
         assert!(
             first
-                .request
+                .source
+                .resource()
+                .unwrap()
                 .uri
+                .clone()
                 .ends_with(&format!("0/0000000000{tile:05}{tile:05}.jpg"))
         );
         assert!(
@@ -119,7 +122,14 @@ fn verified_geometry_and_original_coordinate_edge_filenames() {
             .last()
             .unwrap()
             .unwrap();
-        assert!(reduced.request.uri.ends_with(reduced_edge));
+        assert!(
+            reduced
+                .source
+                .resource()
+                .unwrap()
+                .uri
+                .ends_with(reduced_edge)
+        );
         assert_eq!(reduced.expected_size, Some(reduced_size));
         assert_eq!(reduced.processing, crate::core::ProcessingRecipe::None);
     }

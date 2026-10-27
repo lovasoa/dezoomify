@@ -122,22 +122,21 @@ for (const [name, engine] of [
               height: fixture.tileSize,
             });
             assert.equal(observed.source_url, page.url());
-            assert.deepEqual(result.resources, [observed.resource_base]);
+            assert.deepEqual(result.handles, [observed.handle]);
             const loaded = await page.evaluate(
-              async ({ base, level, size, tileSize }) => {
-                const result = await ViewerScanner.readViewerTile(
-                  `${base}/${level}/0/0/256/256.png`,
-                  base,
-                );
+              async ({ handle, level, size, tileSize }) => {
+                const request = { handle, source_url: location.href, level, column: 0, row: 0 };
+                const extent = { width: 256, height: 256 };
+                const result = await ViewerScanner.readViewerTile(request, extent);
                 const x = Math.ceil(size.width / tileSize) - 1;
                 const y = Math.ceil(size.height / tileSize) - 1;
                 const width = size.width - x * tileSize;
                 const height = size.height - y * tileSize;
-                const edgeUrl = `${base}/${level}/${x}/${y}/${width}/${height}.png`;
+                const edgeRequest = { ...request, column: x, row: y };
                 const dimensions = [];
                 // A second read must leave the cached drawable usable by its viewer.
                 for (let attempt = 0; attempt < 2; attempt++) {
-                  const edge = await ViewerScanner.readViewerTile(edgeUrl, base);
+                  const edge = await ViewerScanner.readViewerTile(edgeRequest, { width, height });
                   if (!edge.ok) throw new Error(JSON.stringify(edge));
                   const image = await createImageBitmap(
                     new Blob([Uint8Array.fromBase64(edge.data)]),
@@ -146,24 +145,18 @@ for (const [name, engine] of [
                   image.close();
                 }
                 corpusSuspendLoading();
-                const pending = ViewerScanner.readViewerTile(
-                  `${base}/${level}/0/0/256/256.png`,
-                  base,
-                );
-                ViewerScanner.releaseViewerTiles([base]);
+                const pending = ViewerScanner.readViewerTile(request, extent);
+                ViewerScanner.releaseViewerTiles([handle]);
                 return {
                   result,
                   dimensions,
                   cancelled: await pending,
                   tileState: corpusPendingTileState(),
-                  retired: await ViewerScanner.readViewerTile(
-                    `${base}/${level}/0/0/256/256.png`,
-                    base,
-                  ),
+                  retired: await ViewerScanner.readViewerTile(request, extent),
                 };
               },
               {
-                base: observed.resource_base,
+                handle: observed.handle,
                 level: largest.level,
                 size: largest.size,
                 tileSize: fixture.tileSize,

@@ -90,8 +90,22 @@ fn iiif_probe_falls_back_to_caret_size_and_preserves_probe_tile() {
         .unwrap()
         .unwrap();
     let probes = host.probes.borrow();
-    assert!(probes[0].request.uri.ends_with("/256,256/0/default.jpg"));
-    assert!(probes[1].request.uri.ends_with("/^256,/0/default.jpg"));
+    assert!(
+        probes[0]
+            .source
+            .resource()
+            .unwrap()
+            .uri
+            .ends_with("/256,256/0/default.jpg")
+    );
+    assert!(
+        probes[1]
+            .source
+            .resource()
+            .unwrap()
+            .uri
+            .ends_with("/^256,/0/default.jpg")
+    );
     assert_eq!(resolved.previously_output, [Vec2d::default()]);
     assert_eq!(
         resolved
@@ -100,9 +114,12 @@ fn iiif_probe_falls_back_to_caret_size_and_preserves_probe_tile() {
             .next()
             .unwrap()
             .unwrap()
-            .request
-            .uri,
-        probes[1].request.uri
+            .source
+            .resource()
+            .unwrap()
+            .uri
+            .clone(),
+        probes[1].source.resource().unwrap().uri.clone()
     );
 }
 

@@ -299,7 +299,7 @@ export const de = {
     "Das Speichern dieses Bildes von {host} konnte nicht gestartet werden. Versuchen Sie es erneut.",
   "desktop.choice.failed": "Diese Wahl wurde nicht angenommen. Versuchen Sie es erneut.",
   "desktop.internal.error":
-    "Etwas Unerwartetes hat dieses Speichern von {host} gestoppt. Versuchen Sie es erneut und kopieren Sie die Diagnose, falls es erneut geschieht.",
+    "Ein interner Dezoomify-Fehler hat das Speichern von {host} gestoppt. Melden Sie diesen Fehler mit den Diagnosedaten.",
   "desktop.save.fallback":
     "Dieses Bild von {host} konnte nicht gespeichert werden. Versuchen Sie es erneut.",
   "desktop.invoke.startFallback": "Der Auftrag konnte nicht gestartet werden.",

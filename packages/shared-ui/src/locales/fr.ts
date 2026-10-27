@@ -294,7 +294,7 @@ export const fr = {
     "Impossible de démarrer l’enregistrement de cette image depuis {host}. Réessayez.",
   "desktop.choice.failed": "Ce choix n’a pas été accepté. Réessayez.",
   "desktop.internal.error":
-    "Un problème inattendu a interrompu cet enregistrement depuis {host}. Réessayez, et copiez les diagnostics si cela se reproduit.",
+    "Une erreur interne de Dezoomify a interrompu cet enregistrement depuis {host}. Signalez ce bug avec les diagnostics.",
   "desktop.save.fallback": "Impossible d’enregistrer cette image depuis {host}. Réessayez.",
   "desktop.invoke.startFallback": "Impossible de démarrer la tâche.",
   "desktop.invoke.retry": "Le choix de nouvelle tentative a été refusé.",

@@ -25,7 +25,6 @@ export function createResourceFetcher(deps: {
   ): Promise<ResourceRead> => {
     if (
       sourceFirst ||
-      deps.sourceAccess.handlesResource(request.uri) ||
       request.purpose === "metadata" ||
       deps.sourceAccess.hasOrigin(originOfUrl(request.uri))
     ) {
@@ -88,7 +87,6 @@ export function createResourceFetcher(deps: {
       });
     if (
       signal.aborted ||
-      deps.sourceAccess.handlesResource(request.uri) ||
       (isJobError(error) && (error.kind === "http-error" || error.kind === "timeout"))
     )
       throw error;

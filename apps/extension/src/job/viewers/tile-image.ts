@@ -1,4 +1,4 @@
-import { canvasToPngBlob } from "@dezoomify/browser-runtime";
+import { canvasToPngBlob, SizeLimitError } from "@dezoomify/browser-runtime";
 import type { Size } from "@dezoomify/wasm-bindings";
 
 /** Encode a loaded tile, clipping padding to the core's expected extent without
@@ -23,8 +23,7 @@ export async function imageBlob(value: unknown, extent: Size, owned = false): Pr
       height < extent.height
     )
       throw new Error("viewer returned an invalid tile size");
-    if (width * height > 16 * 1024 * 1024)
-      throw { kind: "size-limit", max_bytes: 64 * 1024 * 1024 };
+    if (width * height > 16 * 1024 * 1024) throw new SizeLimitError(64 * 1024 * 1024);
     const canvas = document.createElement("canvas");
     canvas.width = extent.width;
     canvas.height = extent.height;

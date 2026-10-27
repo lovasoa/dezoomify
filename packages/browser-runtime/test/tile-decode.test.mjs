@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { errorPayload } from "../src/errors.ts";
 import { createTileDecoder } from "../src/tile-decode.ts";
 
 function bitmap() {
@@ -35,9 +36,13 @@ test("decoder rejection preserves typed causes and bounds unexpected error detai
       },
     });
     await assert.rejects(decoder.decode(new ArrayBuffer(4)), (error) => {
-      if (original.kind) assert.equal(error, original);
+      assert.ok(error instanceof Error);
+      if (original.kind) assert.deepEqual(errorPayload(error), original);
       else
-        assert.deepEqual(error, { kind: "decode-failed", detail: String(original).slice(0, 2048) });
+        assert.deepEqual(errorPayload(error), {
+          kind: "decode-failed",
+          detail: String(original).slice(0, 2048),
+        });
       return true;
     });
     await decoder.settle();
