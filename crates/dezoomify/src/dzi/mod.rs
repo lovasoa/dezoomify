@@ -7,7 +7,7 @@ use regex::{Regex, bytes::Regex as BytesRegex};
 
 use crate::Vec2d;
 use crate::core::discovery::{
-    Metadata, any, image_url, js_matches, metadata, url_matches, url_suffix, viewer, xml_metadata,
+    Metadata, any, image_url, js_matches, metadata, url_matches, viewer, xml_metadata,
 };
 use crate::core::{
     CatalogPlan, DiscoveryError, DiscoveryResource, DiscoveryRoute, FormatSpec, Grid, ImagePlan,
@@ -51,7 +51,7 @@ const ROUTES: &[DiscoveryRoute] = &[
     viewer(js_matches(&WDL_MARKER_RE)).decode(follow_wdl_template),
     DiscoveryRoute::regex_link(&DZI_LINK_RE, "$url"),
     DiscoveryRoute::regex_link(&DZI_ATTR_RE, "$url").then_decode(decode_catalog),
-    metadata(url_suffix(".dzi")).decode(decode_catalog),
+    metadata(url_matches(is_dzi_url)).decode(decode_catalog),
     xml_metadata::<DziFile>(),
     metadata(any()).try_decode(embedded_metadata),
 ];
@@ -61,6 +61,17 @@ pub const SPEC: FormatSpec =
 
 fn is_tile_url(input: &str) -> bool {
     TILE_URL.is_match(input)
+}
+
+fn is_dzi_url(input: &str) -> bool {
+    input
+        .split(['?', '#'])
+        .next()
+        .is_some_and(|path| path.ends_with(".dzi"))
+        || url::Url::parse(input).is_ok_and(|url| {
+            url.query_pairs()
+                .any(|(key, value)| key == "filename" && value.ends_with(".dzi"))
+        })
 }
 
 static POLONA_ITEM_RE: LazyLock<Regex> =

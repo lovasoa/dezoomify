@@ -681,19 +681,15 @@ fn observed_metadata_wins_without_reading_a_valid_but_lower_priority_frame() {
     let catalog = futures::executor::block_on(default_registry().discover(
         vec![
             DiscoveryInput::with_contents(PAGE, FRAME),
-            observed("https://image.test/book/info.json"),
+            observed("https://image.test/proxy?filename=objectimages/art.dzi&cache=yes"),
         ],
         Default::default(),
         |request, _| {
-            reads.borrow_mut().push(request.uri.clone());
+            reads.borrow_mut().push(request.uri);
             async move {
                 Ok(ResourceRead::Response {
                     response: ResourceResponse {
-                        bytes: if request.uri.ends_with("info.json") {
-                            IIIF.to_vec()
-                        } else {
-                            DZI.to_vec()
-                        },
+                        bytes: DZI.to_vec(),
                         final_uri: None,
                     },
                 })
@@ -703,7 +699,9 @@ fn observed_metadata_wins_without_reading_a_valid_but_lower_priority_frame() {
         |_| async { Ok(Vec::new()) },
     ))
     .unwrap();
-    assert!(matches!(&catalog.entries()[0],DiscoveredEntry::Ready(image) if image.format=="iiif"));
+    assert!(
+        matches!(&catalog.entries()[0],DiscoveredEntry::Ready(image) if image.format=="deepzoom")
+    );
     assert!(
         !reads
             .borrow()
