@@ -67,24 +67,18 @@ impl DiscoveryInput {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct DiscoveryLimits {
-    /// URL evidence and followed pages, including sources supplied by the Host.
-    /// This is independent of the smaller resource-read budget: ranking many
-    /// observed addresses must not require fetching the unrelated ones first.
-    pub inputs: usize,
-    pub max_parses: usize,
-    /// Cached resource reads, including supplied documents and access attempts.
+    /// Resource attempts across the entire search, including supplied documents,
+    /// failures and interactive retries. Cache hits and URL evidence are free;
+    /// replacing supplied contents does not replenish the allowance.
     pub resources: usize,
-    pub retained_bytes: usize,
+    /// Scheduling width, independent of the total resource allowance.
     pub concurrent: usize,
 }
 
 impl Default for DiscoveryLimits {
     fn default() -> Self {
         Self {
-            inputs: 4096,
-            max_parses: 10_000,
             resources: 256,
-            retained_bytes: 64 * 1024 * 1024,
             concurrent: 8,
         }
     }
@@ -769,9 +763,7 @@ pub enum DiscoveryError {
     },
     /// A format handler or extractor failed without a typed rejection.
     InvalidMetadata(String),
-    ParseLimitExceeded,
-    InputLimitExceeded,
-    MetadataSizeLimitExceeded,
+    ResourceLimitExceeded,
 }
 
 impl From<TileSourceError> for DiscoveryError {
@@ -923,11 +915,7 @@ impl fmt::Display for DiscoveryError {
             } => f.write_str(detail),
             Self::Rejected { .. } => f.write_str("candidate rejected the input"),
             Self::InvalidMetadata(message) => f.write_str(message),
-            Self::ParseLimitExceeded => f.write_str("discovery parse limit exceeded"),
-            Self::InputLimitExceeded => f.write_str("discovery input limit exceeded"),
-            Self::MetadataSizeLimitExceeded => {
-                f.write_str("discovery metadata size limit exceeded")
-            }
+            Self::ResourceLimitExceeded => f.write_str("discovery resource limit exceeded"),
         }
     }
 }
@@ -984,7 +972,7 @@ impl ReadResource {
 
 #[derive(Clone, Debug)]
 struct ParsedResponse {
-    bytes: Vec<u8>,
+    bytes: Arc<Vec<u8>>,
     final_uri: Option<String>,
     html: HtmlDocument,
 }
@@ -1026,11 +1014,10 @@ struct Resources<'a, F, P> {
     fetch: &'a F,
     parse_html: &'a P,
     selectors: Vec<String>,
-    supplied: BTreeMap<Request, Vec<u8>>,
+    supplied: BTreeMap<Request, Arc<Vec<u8>>>,
     reads: RefCell<Vec<(Request, bool, SharedRead<'a>)>>,
     responses: Rc<RefCell<Vec<ReadResource>>>,
-    retained: Rc<Cell<usize>>,
-    parsed: Cell<usize>,
+    attempted: Cell<usize>,
     depths: RefCell<BTreeMap<Request, usize>>,
     limits: DiscoveryLimits,
 }
@@ -1042,13 +1029,13 @@ where
     P: Fn(HtmlQuery) -> PFut,
     PFut: std::future::Future<Output = Result<HtmlDocument, Error>> + 'a,
 {
+    /// Move document bodies into shared storage after computing root evidence.
     fn new(
         fetch: &'a F,
         parse_html: &'a P,
-        roots: &[Root],
+        roots: &mut [Root],
         specs: &[FormatSpec],
         limits: DiscoveryLimits,
-        supplied_bytes: usize,
     ) -> Self {
         Self {
             fetch,
@@ -1072,19 +1059,18 @@ where
                 .into_iter()
                 .collect(),
             supplied: roots
-                .iter()
+                .iter_mut()
                 .rev()
                 .filter_map(|(_, _, _, input)| {
                     input
                         .contents
-                        .as_ref()
-                        .map(|bytes| (Request::new(&input.url), bytes.clone()))
+                        .take()
+                        .map(|bytes| (Request::new(&input.url), Arc::new(bytes)))
                 })
                 .collect(),
             reads: Default::default(),
             responses: Default::default(),
-            retained: Rc::new(Cell::new(supplied_bytes)),
-            parsed: Default::default(),
+            attempted: Default::default(),
             depths: Default::default(),
             limits,
         }
@@ -1125,6 +1111,7 @@ where
         .buffer_unordered(self.limits.concurrent.max(1));
         let mut winner: Option<(Priority, DiscoveryCatalog)> = None;
         let mut metadata = Vec::new();
+        let mut exhausted = false;
         loop {
             let next = futures_util::future::poll_fn(|cx| {
                 use futures_util::Stream;
@@ -1146,6 +1133,11 @@ where
                 break;
             };
             finished[index] = true;
+            if matches!(result, Err(DiscoveryError::ResourceLimitExceeded)) {
+                // Stop new reads without discarding an in-flight or cached win.
+                exhausted = true;
+                continue;
+            }
             record_resolution(
                 (rank, spec, uri, result),
                 &mut winner,
@@ -1164,6 +1156,9 @@ where
                     .into_iter()
                     .flat_map(|(_, catalog)| catalog.into_entries()),
             )));
+        }
+        if winner.is_none() && exhausted {
+            return Err(DiscoveryError::ResourceLimitExceeded);
         }
         Ok(winner.map(|(_, catalog)| catalog))
     }
@@ -1197,7 +1192,7 @@ where
                     Err(url::ParseError::RelativeUrlWithoutBase) => url::Url::parse(base).is_err(),
                     Err(_) => false,
                 };
-                if supported && *branch < self.limits.inputs && visited.insert(uri.clone()) {
+                if supported && visited.insert(uri.clone()) {
                     let depth = self.depths.borrow().get(request).copied().unwrap_or(0) + 1;
                     roots.push((
                         Evidence::ViewerPage,
@@ -1211,20 +1206,22 @@ where
         }
     }
 
-    fn supply(&mut self, input: &DiscoveryInput) -> Result<bool, DiscoveryError> {
+    /// Consume changed contents and invalidate earlier reads. Compute the input's
+    /// evidence before calling; unchanged observations leave the cache intact.
+    fn supply(&mut self, input: &mut DiscoveryInput) -> bool {
         let request = Request::new(&input.url);
         if let Some(bytes) = &input.contents {
-            if self.supplied.get(&request) == Some(bytes) {
-                return Ok(false);
+            if self
+                .supplied
+                .get(&request)
+                .is_some_and(|old| **old == *bytes)
+            {
+                return false;
             }
-            let total = self
-                .retained
-                .get()
-                .checked_add(bytes.len())
-                .filter(|total| *total <= self.limits.retained_bytes)
-                .ok_or(DiscoveryError::MetadataSizeLimitExceeded)?;
-            self.retained.set(total);
-            self.supplied.insert(request.clone(), bytes.clone());
+            self.supplied.insert(
+                request.clone(),
+                Arc::new(input.contents.take().expect("supplied bytes")),
+            );
         } else if self.supplied.contains_key(&request)
             || !self
                 .reads
@@ -1232,7 +1229,7 @@ where
                 .iter()
                 .any(|(key, _, _)| *key == request)
         {
-            return Ok(false);
+            return false;
         }
         // A live observation can improve earlier evidence, including a URL
         // now readable through a newly permitted source's session.
@@ -1242,7 +1239,7 @@ where
         self.responses
             .borrow_mut()
             .retain(|read| read.request != request);
-        Ok(true)
+        true
     }
 
     async fn resolve_blocked(
@@ -1250,6 +1247,7 @@ where
         candidates: impl Iterator<Item = (Priority, FormatSpec, String)>,
         diagnostics: &mut Vec<CandidateDiagnostic>,
     ) -> Result<Option<DiscoveryCatalog>, DiscoveryError> {
+        let mut exhausted = false;
         for (rank, spec, uri) in candidates {
             match self
                 .resolve(
@@ -1264,8 +1262,12 @@ where
             {
                 Ok(Some((_, catalog))) => return Ok(Some(catalog)),
                 Ok(None) => {}
+                Err(DiscoveryError::ResourceLimitExceeded) => exhausted = true,
                 Err(error) => record_diagnostic(diagnostics, spec, error)?,
             }
+        }
+        if exhausted {
+            return Err(DiscoveryError::ResourceLimitExceeded);
         }
         Ok(None)
     }
@@ -1281,27 +1283,19 @@ where
         let future = if let Some(cached) = cached {
             cached
         } else {
-            if self.reads.borrow().len() >= self.limits.resources {
-                return Err(DiscoveryError::rejected(
-                    RejectionKind::Failed,
-                    "discovery resource limit exceeded",
-                ));
+            if self.attempted.get() >= self.limits.resources {
+                return Err(DiscoveryError::ResourceLimitExceeded);
             }
+            self.attempted.set(self.attempted.get() + 1);
             let supplied = self.supplied.get(&request).cloned();
-            let supplied_bytes = supplied.is_some();
             let parse_html = self.parse_html;
             let fetch = self.fetch;
             let selectors = self.selectors.clone();
             let responses = self.responses.clone();
-            let retained = self.retained.clone();
-            let limit = self.limits.retained_bytes;
             let key = request.clone();
             let future = async move {
-                let response = if let Some(bytes) = supplied {
-                    crate::model::ResourceResponse {
-                        bytes,
-                        final_uri: None,
-                    }
+                let (bytes, final_uri) = if let Some(bytes) = supplied {
+                    (bytes, None)
                 } else {
                     let interaction = if interactive {
                         crate::model::Interaction::Allowed
@@ -1312,38 +1306,19 @@ where
                         crate::model::ResourceRead::NeedsAccess { .. } => {
                             return Ok(Read::NeedsAccess);
                         }
-                        crate::model::ResourceRead::Response { response } => response,
+                        crate::model::ResourceRead::Response { response } => {
+                            (Arc::new(response.bytes), response.final_uri)
+                        }
                     }
                 };
-                let added = if supplied_bytes {
-                    0
-                } else {
-                    response.bytes.len()
-                };
-                let total = retained
-                    .get()
-                    .checked_add(added)
-                    .filter(|total| *total <= limit)
-                    .ok_or_else(|| {
-                        Error::ResourceLimit("discovery metadata size limit exceeded".into())
-                    })?;
-                retained.set(total);
                 let html = parse_html(HtmlQuery {
-                    source: String::from_utf8_lossy(&response.bytes).into_owned(),
+                    source: String::from_utf8_lossy(&bytes).into_owned(),
                     selectors,
                 })
                 .await?;
-                let total = retained
-                    .get()
-                    .checked_add(html.byte_len())
-                    .filter(|total| *total <= limit)
-                    .ok_or_else(|| {
-                        Error::ResourceLimit("discovery HTML projection size limit exceeded".into())
-                    })?;
-                retained.set(total);
                 let response = Arc::new(ParsedResponse {
-                    bytes: response.bytes,
-                    final_uri: response.final_uri,
+                    bytes,
+                    final_uri,
                     html,
                 });
                 responses.borrow_mut().push(ReadResource {
@@ -1421,10 +1396,6 @@ where
                     RejectionKind::Failed,
                     "discovery followed the same resource twice",
                 ));
-            }
-            self.parsed.set(self.parsed.get() + 1);
-            if self.parsed.get() > self.limits.max_parses {
-                return Err(DiscoveryError::ParseLimitExceeded);
             }
             let response = match self.read(request.clone(), false).await {
                 Ok(Read::NeedsAccess) if interactive => self.read(request.clone(), true).await,
@@ -1526,8 +1497,9 @@ fn input_evidence(input: &DiscoveryInput, specs: &[FormatSpec]) -> Evidence {
 /// Declared source catalogs precede reconstructed format metadata. Complete
 /// snapshots retain loader-only siblings; otherwise recognized resource URLs
 /// precede live page-loader fallback. All precede speculative navigation.
-/// Inputs consume the evidence budget, not the resource-read budget; Hosts must
-/// supply the available inventory so relevance is decided before reads begin.
+/// Hosts supply the available URL inventory so relevance is decided before
+/// spending the resource allowance. Hosts must bound individual response and
+/// supplied-document sizes; discovery does not estimate heap usage.
 pub async fn discover<F, Fut, P, PFut, O, OFut>(
     inputs: Vec<DiscoveryInput>,
     specs: &[FormatSpec],
@@ -1544,25 +1516,13 @@ where
     O: Fn(Interaction) -> OFut,
     OFut: std::future::Future<Output = Result<Vec<DiscoveryInput>, Error>>,
 {
-    if inputs.len() > limits.inputs {
-        return Err(DiscoveryError::InputLimitExceeded);
-    }
-    let supplied_bytes = inputs
-        .iter()
-        .filter_map(|input| input.contents.as_ref())
-        .try_fold(0usize, |total, bytes| {
-            total
-                .checked_add(bytes.len())
-                .filter(|total| *total <= limits.retained_bytes)
-        })
-        .ok_or(DiscoveryError::MetadataSizeLimitExceeded)?;
     let mut roots: Vec<_> = inputs
         .into_iter()
         .enumerate()
         .map(|(order, input)| (input_evidence(&input, specs), 0usize, order, input))
         .collect();
     roots.sort_by_key(|(evidence, depth, order, _)| (*evidence, *depth, *order));
-    let mut resources = Resources::new(&fetch, &parse_html, &roots, specs, limits, supplied_bytes);
+    let mut resources = Resources::new(&fetch, &parse_html, &mut roots, specs, limits);
     let mut visited: HashSet<String> = roots
         .iter()
         .map(|(_, _, _, input)| input.url.clone())
@@ -1571,7 +1531,7 @@ where
     let mut blocked = Vec::new();
     let mut branch = roots.len();
     loop {
-        let candidates = tier_candidates(&mut roots, specs);
+        let candidates = tier_candidates(&mut roots, specs)?;
         if let Some(catalog) = resources
             .resolve_tier(candidates, &mut blocked, &mut diagnostics)
             .await?
@@ -1612,21 +1572,22 @@ where
                 return Err(DiscoveryError::NoCandidateAccepted { diagnostics });
             }
         }
-        for input in inputs {
-            let supplied = resources.supply(&input)?;
+        for mut input in inputs {
+            let evidence = input_evidence(&input, specs);
+            let supplied = resources.supply(&mut input);
             if !visited.insert(input.url.clone()) && !supplied {
                 continue;
             }
-            if branch >= limits.inputs {
-                return Err(DiscoveryError::InputLimitExceeded);
-            }
-            roots.push((input_evidence(&input, specs), 0, branch, input));
+            roots.push((evidence, 0, branch, input));
             branch += 1;
         }
     }
 }
 
-fn tier_candidates(roots: &mut Vec<Root>, specs: &[FormatSpec]) -> Vec<Candidate> {
+fn tier_candidates(
+    roots: &mut Vec<Root>,
+    specs: &[FormatSpec],
+) -> Result<Vec<Candidate>, DiscoveryError> {
     roots.sort_by_key(|(evidence, depth, order, _)| (*evidence, *depth, *order));
     let mut candidates = Vec::new();
     let tier = roots
@@ -1651,6 +1612,9 @@ fn tier_candidates(roots: &mut Vec<Root>, specs: &[FormatSpec]) -> Vec<Candidate
             let kind = spec.url_kind(&input.url);
             (kind.is_none(), kind)
         });
+        candidates.try_reserve(formats.len()).map_err(|error| {
+            DiscoveryError::Host(Box::new(Error::ResourceLimit(error.to_string().into())))
+        })?;
         candidates.extend(formats.into_iter().enumerate().map(|(rank, spec)| {
             (
                 (evidence, depth, order, rank),
@@ -1660,7 +1624,7 @@ fn tier_candidates(roots: &mut Vec<Root>, specs: &[FormatSpec]) -> Vec<Candidate
             )
         }));
     }
-    candidates
+    Ok(candidates)
 }
 
 fn preceding_settled(

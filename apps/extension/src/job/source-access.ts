@@ -88,16 +88,12 @@ function validCandidate(value: unknown): value is JobInput {
 }
 
 function validSnapshotInputs(inputs: unknown[]): boolean {
-  const encoder = new TextEncoder();
-  let resourceBytes = 0;
   for (const [index, input] of inputs.entries()) {
     if (!validCandidate(input)) return false;
     if (index === 0) continue;
     // Only the document carries contents. Memory observations are validated
     // separately; resource inventory replies cannot multiply document payloads.
     if (input.contents !== undefined || input.kind !== "observed-resource") return false;
-    resourceBytes += encoder.encode(input.url).byteLength;
-    if (resourceBytes > sourceSnapshotLimits.resourceBytes) return false;
   }
   return true;
 }
@@ -109,9 +105,6 @@ function validSnapshot(value: unknown, expectedUrl: string): value is CandidateS
     typeof value.documentUrl === "string" &&
     isPublicHttpUrl(value.documentUrl) &&
     sameDocumentUrl(value.documentUrl, expectedUrl) &&
-    typeof value.overflow === "number" &&
-    Number.isSafeInteger(value.overflow) &&
-    value.overflow >= 0 &&
     Array.isArray(value.inputs) &&
     validSnapshotInputs(value.inputs)
   );

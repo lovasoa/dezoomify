@@ -3,7 +3,7 @@ use dezoomify::core::discovery::{DiscoveryError, DiscoveryInput, DiscoveryLimits
 use dezoomify::core::{
     DiscoveredEntry, DiscoveryCatalog, Registry, RejectionKind, default_registry, registry_for,
 };
-use dezoomify::model::{DiscoveryInputKind, Error, ResourceRead, ResourceResponse};
+use dezoomify::model::{DiscoveryInputKind, ResourceRead, ResourceResponse};
 use std::cell::RefCell;
 
 const PAGE: &str = "https://museum.test/viewer";
@@ -590,7 +590,7 @@ fn local_paths_and_only_supported_iframe_sources_are_followed() {
 fn a_large_resource_inventory_is_ranked_before_spending_the_read_budget() {
     let metadata = "https://museum.test/proxy?filename=objectimages/painting.dzi";
     let mut inputs = vec![DiscoveryInput::with_contents(PAGE, "<html></html>")];
-    inputs.extend((0..400).map(|index| observed(&format!("https://analytics.test/{index}.js"))));
+    inputs.extend((0..5000).map(|index| observed(&format!("https://analytics.test/{index}.js"))));
     inputs.push(observed(
         "https://museum.test/proxy?filename=objectimages/painting_files/9/0_0.jpg",
     ));
@@ -614,7 +614,7 @@ fn a_large_resource_inventory_is_ranked_before_spending_the_read_budget() {
 }
 
 #[test]
-fn navigation_cycles_and_resource_budgets_are_independent_of_parser_count() {
+fn resource_attempts_are_shared_across_formats_and_navigation() {
     for page in [
         FRAME,
         br#"<script>Seadragon.embed('viewer', 'title', '/art');</script>"#,
@@ -630,7 +630,11 @@ fn navigation_cycles_and_resource_budgets_are_independent_of_parser_count() {
                 },
                 None,
             );
-            assert_eq!(result.is_ok(), resources == 2);
+            if resources == 1 {
+                assert_eq!(result.unwrap_err(), DiscoveryError::ResourceLimitExceeded);
+            } else {
+                assert!(result.is_ok());
+            }
         }
     }
     assert!(
@@ -647,50 +651,28 @@ fn navigation_cycles_and_resource_budgets_are_independent_of_parser_count() {
         .is_err()
     );
 }
-#[test]
-fn evidence_and_document_bytes_have_independent_limits() {
-    for (inputs, limits, expected) in [
-        (
-            vec![DiscoveryInput::new(PAGE); 2],
-            DiscoveryLimits {
-                inputs: 1,
-                ..Default::default()
-            },
-            DiscoveryError::InputLimitExceeded,
-        ),
-        (
-            vec![DiscoveryInput::with_contents(PAGE, FRAME)],
-            DiscoveryLimits {
-                retained_bytes: 1,
-                ..Default::default()
-            },
-            DiscoveryError::MetadataSizeLimitExceeded,
-        ),
-    ] {
-        assert_eq!(
-            lookup(default_registry(), inputs, &[], limits, None).unwrap_err(),
-            expected
-        );
-    }
-    for retained_bytes in [FRAME.len(), DZI.len()] {
-        let error = lookup(
-            default_registry(),
-            vec![DiscoveryInput::with_contents(PAGE, FRAME)],
-            &[("https://museum.test/art", DZI)],
-            DiscoveryLimits {
-                retained_bytes,
-                ..Default::default()
-            },
-            None,
-        )
-        .unwrap_err();
-        assert!(matches!(
-            error,
-            DiscoveryError::Host(ref error) if matches!(error.cause(), Error::ResourceLimit { .. })
-        ));
-    }
-}
 
+#[test]
+fn an_endless_chain_of_distinct_pages_stops_at_the_resource_limit() {
+    let mut next = 0;
+    let (result, requests) = support::discover_inputs(
+        default_registry(),
+        vec![DiscoveryInput::new(PAGE)],
+        DiscoveryLimits {
+            resources: 3,
+            ..Default::default()
+        },
+        |_| {
+            next += 1;
+            Some(Ok((
+                format!("<iframe src='/page/{next}'></iframe>").into_bytes(),
+                None,
+            )))
+        },
+    );
+    assert_eq!(result.unwrap_err(), DiscoveryError::ResourceLimitExceeded);
+    assert_eq!(requests.len(), 3);
+}
 #[test]
 fn observed_metadata_wins_without_reading_a_valid_but_lower_priority_frame() {
     let reads = RefCell::new(Vec::new());

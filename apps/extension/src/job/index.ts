@@ -125,7 +125,6 @@ const app = createBrowserApplication({
             context.diagnostics.record("debug", "frame-scan", {
               document_url: snapshot.documentUrl,
               candidates: snapshot.inputs.length,
-              overflow: snapshot.overflow,
               ...snapshot.memory,
             });
           },
@@ -147,7 +146,6 @@ const app = createBrowserApplication({
           scan: {
             document_url: scan.documentUrl,
             candidates: scan.inputs.length,
-            overflow: scan.overflow,
             memory: scan.memory,
           },
         });

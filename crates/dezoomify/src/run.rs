@@ -406,14 +406,10 @@ fn discovery_failure(error: core::DiscoveryError) -> Error {
                     diagnostic.kind == core::RejectionKind::InvalidMetadata
                 }));
             match &error {
-                core::DiscoveryError::ParseLimitExceeded
-                | core::DiscoveryError::InputLimitExceeded
-                | core::DiscoveryError::MetadataSizeLimitExceeded => {
-                    Error::ResourceLimit(Failure {
-                        request: None,
-                        detail,
-                    })
-                }
+                core::DiscoveryError::ResourceLimitExceeded => Error::ResourceLimit(Failure {
+                    request: None,
+                    detail,
+                }),
                 _ if empty_image => Error::NoImageFound(Failure {
                     request: None,
                     detail,
@@ -514,9 +510,6 @@ impl From<core::TileSourceError> for Error {
     }
 }
 fn validate(inputs: &[JobInput], options: &Options) -> Result<(), Error> {
-    if inputs.len() > DiscoveryLimits::default().inputs {
-        return Err(discovery_failure(core::DiscoveryError::InputLimitExceeded));
-    }
     let valid = |input: &str| {
         if input.is_empty() || input.len() > 2048 {
             return false;

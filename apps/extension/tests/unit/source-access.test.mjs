@@ -155,7 +155,6 @@ function snapshot(documentUrl = SOURCE_URL) {
     ok: true,
     documentUrl,
     inputs: [{ url: "https://gallery.example/info.json" }],
-    overflow: 0,
   };
 }
 

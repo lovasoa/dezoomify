@@ -39,20 +39,6 @@ impl HtmlDocument {
     pub fn select(&self, selector: &str) -> impl Iterator<Item = &HtmlElement> {
         self.0.get(selector).into_iter().flatten()
     }
-    /// Retained element content; query keys are authored format selectors.
-    pub fn byte_len(&self) -> usize {
-        self.0
-            .values()
-            .flatten()
-            .flat_map(|element| {
-                [&element.name, &element.text]
-                    .into_iter()
-                    .chain(element.attributes.keys())
-                    .chain(element.attributes.values())
-            })
-            .map(String::len)
-            .sum()
-    }
 }
 
 impl HtmlElement {
