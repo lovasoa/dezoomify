@@ -1626,6 +1626,7 @@ fn tier_candidates(
             )
         }));
     }
+    candidates.sort_by_key(|(_, spec, uri, _)| spec.url_kind(uri).is_none());
     Ok(candidates)
 }
 

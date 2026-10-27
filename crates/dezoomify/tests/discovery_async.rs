@@ -277,6 +277,42 @@ fn a_later_stalled_read_cannot_delay_an_earlier_winner() {
     }
 }
 #[test]
+fn recognized_tile_routes_do_not_fetch_jpegs_as_metadata() {
+    let (send, receive) = futures::channel::oneshot::channel();
+    let receive = RefCell::new(Some(receive));
+    let reads = RefCell::new(Vec::new());
+    let registry = core::default_registry();
+    let future = registry.discover(
+        (0..8)
+            .map(|index| {
+                DiscoveryInput::new(format!("https://test/image_files/9/{index}_0.jpg"))
+                    .with_kind(dezoomify::model::DiscoveryInputKind::ObservedResource)
+            })
+            .collect(),
+        Default::default(),
+        |request, _| {
+            reads.borrow_mut().push(request.uri);
+            let wait = receive.borrow_mut().take();
+            async move {
+                wait.expect("only the descriptor should be fetched")
+                    .await
+                    .unwrap();
+                Ok(response(include_str!(
+                    "../../../fixtures/deepzoom/basic/image.dzi"
+                )))
+            }
+        },
+        support::parse_html,
+        |_| async { Ok(Vec::new()) },
+    );
+    let mut future = Box::pin(future);
+    assert!(future.as_mut().now_or_never().is_none());
+    assert_eq!(*reads.borrow(), ["https://test/image.dzi"]);
+    send.send(()).unwrap();
+    assert!(future.as_mut().now_or_never().unwrap().is_ok());
+}
+
+#[test]
 fn blocked_access_yields_to_ordinary_work_without_asking_for_permission() {
     let calls = RefCell::new(Vec::new());
     let registry = registry();
