@@ -124,6 +124,7 @@ fn dzi_links_skip_javascript_identifiers_and_preserve_query_parameters() {
         let metadata = format!("https://museum.test/art.{extension}?token=exact%2Bvalue&v=2");
         let script = format!(
             r#"function xhr(){{try{{return new C.XMLHttpRequest}}catch(e){{}}}};var u=window.XMLHttpRequest;
+            viewer.openDzi('/proxy?filename=' + unescape('fragment.{extension}'));
             const script = 'viewer.{extension}.js'; const image = '{metadata}';"#
         );
         let (catalog, requests) = support::discover_inputs(
