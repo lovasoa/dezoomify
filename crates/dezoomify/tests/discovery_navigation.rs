@@ -587,6 +587,33 @@ fn local_paths_and_only_supported_iframe_sources_are_followed() {
     );
 }
 #[test]
+fn a_large_resource_inventory_is_ranked_before_spending_the_read_budget() {
+    let metadata = "https://museum.test/proxy?filename=objectimages/painting.dzi";
+    let mut inputs = vec![DiscoveryInput::with_contents(PAGE, "<html></html>")];
+    inputs.extend((0..400).map(|index| observed(&format!("https://analytics.test/{index}.js"))));
+    inputs.push(observed(
+        "https://museum.test/proxy?filename=objectimages/painting_files/9/0_0.jpg",
+    ));
+    let (catalog, requests) = support::discover_inputs(
+        default_registry(),
+        inputs,
+        DiscoveryLimits {
+            resources: 2,
+            ..Default::default()
+        },
+        |uri| {
+            assert_eq!(uri, metadata, "unrelated observations must not be fetched");
+            Some(Ok((DZI.to_vec(), None)))
+        },
+    );
+    assert_eq!(
+        support::ready_image(catalog.unwrap()).source_url.as_deref(),
+        Some(metadata)
+    );
+    assert_eq!(requests.len(), 1);
+}
+
+#[test]
 fn navigation_cycles_and_resource_budgets_are_independent_of_parser_count() {
     for page in [
         FRAME,
@@ -621,15 +648,15 @@ fn navigation_cycles_and_resource_budgets_are_independent_of_parser_count() {
     );
 }
 #[test]
-fn supplied_inputs_and_fetched_documents_share_limits() {
+fn evidence_and_document_bytes_have_independent_limits() {
     for (inputs, limits, expected) in [
         (
             vec![DiscoveryInput::new(PAGE); 2],
             DiscoveryLimits {
-                resources: 1,
+                inputs: 1,
                 ..Default::default()
             },
-            DiscoveryError::ResourceLimitExceeded,
+            DiscoveryError::InputLimitExceeded,
         ),
         (
             vec![DiscoveryInput::with_contents(PAGE, FRAME)],

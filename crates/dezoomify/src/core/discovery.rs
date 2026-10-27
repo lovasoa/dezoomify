@@ -67,7 +67,12 @@ impl DiscoveryInput {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct DiscoveryLimits {
+    /// URL evidence and followed pages, including sources supplied by the Host.
+    /// This is independent of the smaller resource-read budget: ranking many
+    /// observed addresses must not require fetching the unrelated ones first.
+    pub inputs: usize,
     pub max_parses: usize,
+    /// Cached resource reads, including supplied documents and access attempts.
     pub resources: usize,
     pub retained_bytes: usize,
     pub concurrent: usize,
@@ -76,6 +81,7 @@ pub struct DiscoveryLimits {
 impl Default for DiscoveryLimits {
     fn default() -> Self {
         Self {
+            inputs: 4096,
             max_parses: 10_000,
             resources: 256,
             retained_bytes: 64 * 1024 * 1024,
@@ -764,7 +770,7 @@ pub enum DiscoveryError {
     /// A format handler or extractor failed without a typed rejection.
     InvalidMetadata(String),
     ParseLimitExceeded,
-    ResourceLimitExceeded,
+    InputLimitExceeded,
     MetadataSizeLimitExceeded,
 }
 
@@ -918,7 +924,7 @@ impl fmt::Display for DiscoveryError {
             Self::Rejected { .. } => f.write_str("candidate rejected the input"),
             Self::InvalidMetadata(message) => f.write_str(message),
             Self::ParseLimitExceeded => f.write_str("discovery parse limit exceeded"),
-            Self::ResourceLimitExceeded => f.write_str("discovery resource limit exceeded"),
+            Self::InputLimitExceeded => f.write_str("discovery input limit exceeded"),
             Self::MetadataSizeLimitExceeded => {
                 f.write_str("discovery metadata size limit exceeded")
             }
@@ -1191,7 +1197,7 @@ where
                     Err(url::ParseError::RelativeUrlWithoutBase) => url::Url::parse(base).is_err(),
                     Err(_) => false,
                 };
-                if supported && visited.insert(uri.clone()) && roots.len() < self.limits.resources {
+                if supported && *branch < self.limits.inputs && visited.insert(uri.clone()) {
                     let depth = self.depths.borrow().get(request).copied().unwrap_or(0) + 1;
                     roots.push((
                         Evidence::ViewerPage,
@@ -1520,6 +1526,8 @@ fn input_evidence(input: &DiscoveryInput, specs: &[FormatSpec]) -> Evidence {
 /// Declared source catalogs precede reconstructed format metadata. Complete
 /// snapshots retain loader-only siblings; otherwise recognized resource URLs
 /// precede live page-loader fallback. All precede speculative navigation.
+/// Inputs consume the evidence budget, not the resource-read budget; Hosts must
+/// supply the available inventory so relevance is decided before reads begin.
 pub async fn discover<F, Fut, P, PFut, O, OFut>(
     inputs: Vec<DiscoveryInput>,
     specs: &[FormatSpec],
@@ -1536,8 +1544,8 @@ where
     O: Fn(Interaction) -> OFut,
     OFut: std::future::Future<Output = Result<Vec<DiscoveryInput>, Error>>,
 {
-    if inputs.len() > limits.resources {
-        return Err(DiscoveryError::ResourceLimitExceeded);
+    if inputs.len() > limits.inputs {
+        return Err(DiscoveryError::InputLimitExceeded);
     }
     let supplied_bytes = inputs
         .iter()
@@ -1609,8 +1617,8 @@ where
             if !visited.insert(input.url.clone()) && !supplied {
                 continue;
             }
-            if branch >= limits.resources {
-                return Err(DiscoveryError::ResourceLimitExceeded);
+            if branch >= limits.inputs {
+                return Err(DiscoveryError::InputLimitExceeded);
             }
             roots.push((input_evidence(&input, specs), 0, branch, input));
             branch += 1;

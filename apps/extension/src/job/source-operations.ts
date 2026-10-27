@@ -7,7 +7,7 @@
  * page that invoked it.
  */
 
-import type { DiscoveryInputKind, Error as JobError, JobInput } from "@dezoomify/wasm-bindings";
+import type { Error as JobError } from "@dezoomify/wasm-bindings";
 
 type SourceRequest = {
   url: string;
@@ -88,86 +88,6 @@ export function inspectSourceDocument(includeFrames = false) {
       if (entries++ >= 2048 || frames.size >= 16) break;
       if ((entry as PerformanceResourceTiming).initiatorType === "iframe") append(entry.name);
     }
-  }
-}
-
-export interface SourceSnapshot {
-  ok: true;
-  documentUrl: string;
-  inputs: JobInput[];
-  overflow: number;
-}
-
-/**
- * Take one bounded snapshot of the rendered document and retained resource
- * URLs. The job page owns frame traversal and permission checks.
- */
-export function collectCandidates(): SourceSnapshot {
-  const MAX_URL_LENGTH = 2048;
-  const MAX_CANDIDATES = 100;
-  const MAX_DOM_BYTES = 8 * 1024 * 1024;
-  const documentUrl = String(globalThis.location?.href ?? "");
-  const inputs: JobInput[] = [];
-  const seen = new Set<string>();
-  let overflow = 0;
-  function readableSourceContents(contents: unknown): string | undefined {
-    if (typeof contents !== "string" || contents.length === 0) return undefined;
-    try {
-      return new TextEncoder().encode(contents).byteLength <= MAX_DOM_BYTES ? contents : undefined;
-    } catch {
-      return undefined;
-    }
-  }
-  const append = (value: unknown, kind: DiscoveryInputKind, contents?: unknown) => {
-    if (typeof value !== "string" || value.length === 0 || value.length > MAX_URL_LENGTH) return;
-    let parsed: URL;
-    try {
-      parsed = new URL(value);
-    } catch {
-      return;
-    }
-    if ((parsed.protocol !== "http:" && parsed.protocol !== "https:") || seen.has(value)) return;
-    seen.add(value);
-    if (inputs.length >= MAX_CANDIDATES) {
-      overflow += 1;
-      return;
-    }
-    const readableContents = readableSourceContents(contents);
-    inputs.push({
-      url: value,
-      kind,
-      ...(readableContents !== undefined ? { contents: readableContents } : {}),
-    });
-  };
-
-  try {
-    const doc = globalThis.document;
-    // Image documents have a browser-generated HTML wrapper. XML/JSON viewers
-    // still need their original bytes for ordinary format discovery.
-    const html =
-      doc.contentType === "text/html" ||
-      doc.contentType === "application/xhtml+xml" ||
-      imageDocument()
-        ? String(doc.documentElement?.outerHTML ?? "")
-        : undefined;
-    append(documentUrl, "source", html);
-  } catch {
-    append(documentUrl, "source");
-  }
-
-  // A standalone image's favicon and other browser requests are unrelated to
-  // the artwork. Its wrapper and loaded image already supply all evidence.
-  if (imageDocument()) return { ok: true, documentUrl, inputs, overflow };
-
-  try {
-    for (const entry of globalThis.performance?.getEntriesByType?.("resource") ?? []) {
-      append(typeof entry === "string" ? entry : entry?.name, "observed-resource");
-    }
-  } catch {}
-  return { ok: true, documentUrl, inputs, overflow };
-
-  function imageDocument() {
-    return globalThis.document?.contentType?.startsWith("image/") ?? false;
   }
 }
 

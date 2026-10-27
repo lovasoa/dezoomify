@@ -1,0 +1,19 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Image loaded after unrelated assets</title>
+<script>
+  (async () => {
+    performance.setResourceTimingBufferSize(1024);
+    await Promise.all(Array.from({ length: 400 }, async (_, i) => {
+      await (await fetch(`assets/${i}.js`)).arrayBuffer();
+    }));
+    const image = "imageproxy.aspx?filename=objectimages/painting.cci";
+    await (await fetch(image.replace(".cci", ".dzi"))).arrayBuffer();
+    const tile = new Image();
+    tile.src = image.replace(".cci", "_files/9/0_0.png");
+    await tile.decode();
+    document.body.append(tile);
+    document.documentElement.dataset.viewerReady = "true";
+  })();
+</script>
+<body></body>

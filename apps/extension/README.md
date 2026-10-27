@@ -24,6 +24,9 @@ hints, then refreshes after a grant. Bind follow-up operations to the document;
 frame IDs survive reloads. Resource snapshots inspect one document. Memory
 scanning follows only readable frames without HTTP URLs (such as `srcdoc` or
 `blob:`); HTTP frames belong to the job's inventory, avoiding a second traversal.
+Resource snapshots bound URL payloads separately from document contents. Rust
+ranks this evidence within its input budget before spending its resource-read
+budget, so unrelated page assets do not displace late image requests.
 
 Scanned origins can use their frame's session. Other cross-origin access uses
 credential-free extension fetches under explicitly granted host permissions.
