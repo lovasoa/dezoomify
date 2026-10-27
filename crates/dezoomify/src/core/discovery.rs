@@ -1086,7 +1086,9 @@ where
         let priorities: Vec<_> = candidates
             .iter()
             .map(|(rank, spec, uri, _)| {
-                let direct = spec.url_kind(uri) == Some(RouteKind::Image);
+                let direct = spec.routes.iter().any(|route| {
+                    matches!(route.handler, RouteAction::Plan(_)) && route.matcher.matches_url(uri)
+                });
                 Cell::new((rank.0, rank.1 + usize::from(!direct), rank.2, rank.3))
             })
             .collect();

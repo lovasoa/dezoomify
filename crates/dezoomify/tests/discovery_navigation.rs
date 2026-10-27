@@ -591,14 +591,16 @@ fn a_large_resource_inventory_is_ranked_before_spending_the_read_budget() {
     let metadata = "https://museum.test/proxy?filename=objectimages/painting.dzi";
     let mut inputs = vec![DiscoveryInput::with_contents(PAGE, "<html></html>")];
     inputs.extend((0..5000).map(|index| observed(&format!("https://analytics.test/{index}.js"))));
-    inputs.push(observed(
-        "https://museum.test/proxy?filename=objectimages/painting_files/9/0_0.jpg",
-    ));
+    inputs.extend((0..8).map(|index| {
+        observed(&format!(
+            "https://museum.test/proxy?filename=objectimages/painting_files/9/{index}_0.jpg"
+        ))
+    }));
     let (catalog, requests) = support::discover_inputs(
         default_registry(),
         inputs,
         DiscoveryLimits {
-            resources: 2,
+            resources: 3,
             ..Default::default()
         },
         |uri| {
