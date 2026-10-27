@@ -30,6 +30,31 @@ function prepareViewer(mode) {
   });
   window.cycle = {};
   window.cycle.self = window.cycle;
+  if (mode === "seadragon") {
+    const canvas = element.appendChild(document.createElement("div"));
+    const base = "https://fixture.invalid/imageproxy.aspx?&filename=objectimages/image_files/";
+    window.referenceFlood = Object.fromEntries(Array.from({ length: 20000 }, (_, i) => [i, i]));
+    window.viewer = {
+      container: element,
+      drawer: { elmt: canvas },
+      tracker: { target: canvas },
+      viewport: {},
+      openDzi() {},
+      source: {
+        width: 1024,
+        height: 768,
+        tileSize: 256,
+        tileOverlap: 1,
+        minLevel: 0,
+        maxLevel: 10,
+        fileFormat: "png",
+        displayRects: [],
+        getTileUrl: (level, x, y) => `${base}${level}/${x}_${y}.png`,
+      },
+    };
+    window.fixtureReady = true;
+    return;
+  }
   if (mode === "negative") {
     window.fixtureReady = true;
     return;
@@ -209,6 +234,7 @@ for (const [name, engine] of [
         "large-dom",
         "large-properties",
         "global",
+        "seadragon",
         "large-registry",
         "negative",
         "throwing-listener",
@@ -365,5 +391,10 @@ function assertMemoryInput(input, mode) {
     const metadata = JSON.parse(input.contents).Image;
     assert.deepEqual(metadata.Size, { Width: 1024, Height: 768 });
     assert.equal(metadata.TileSize, 256);
+    if (mode === "seadragon")
+      assert.equal(
+        metadata.Url,
+        "https://fixture.invalid/imageproxy.aspx?&filename=objectimages/image_files/",
+      );
   }
 }

@@ -2,16 +2,19 @@ import type { ViewerAdapter } from "../viewers/adapter.ts";
 import { createElementProbe, PageAccess } from "../viewers/page-object.ts";
 import { scanLimits } from "../viewers/scan-state.ts";
 import type { MetadataContext } from "../viewers/types.ts";
-import { projectMetadata, readTileSource } from "./metadata.ts";
+import { projectMetadata, readSeadragonSource, readTileSource } from "./metadata.ts";
 import { registerTileSource } from "./session.ts";
 
 export const openSeadragonAdapter: ViewerAdapter = {
   identify(object, access) {
-    const canvas = access.element(object.reference("canvas"));
-    const tracker = object.reference("innerTracker");
+    const canvas = access.element(
+      object.reference("canvas") ?? object.reference("drawer")?.reference("elmt"),
+    );
+    const tracker = object.reference("innerTracker") ?? object.reference("tracker");
     if (!canvas || !tracker || !object.truthy("viewport")) return undefined;
     const container = object.reference("container");
     return tracker.matches("element", canvas) ||
+      tracker.matches("target", canvas) ||
       (container && tracker.matches("element", container.identity))
       ? canvas
       : undefined;
@@ -27,7 +30,10 @@ export const openSeadragonAdapter: ViewerAdapter = {
           identity: source.identity,
           read(context: MetadataContext, base: string) {
             try {
-              return { input: projectMetadata(readTileSource(source, base), context) };
+              const snapshot = viewer.has("openDzi")
+                ? readSeadragonSource(source, base)
+                : readTileSource(source, base);
+              return { input: projectMetadata(snapshot, context) };
             } catch {
               return registerTileSource(source.identity, item.identity, context);
             }

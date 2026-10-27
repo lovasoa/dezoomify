@@ -22,13 +22,7 @@ function geometry(source: PageObject): SourceGeometry {
   const dimensions = source.reference("dimensions");
   const width = dimensions?.number("x", source.number("width")) ?? source.number("width");
   const height = dimensions?.number("y", source.number("height")) ?? source.number("height");
-  if (
-    !width ||
-    !height ||
-    source.matches("ready", false) ||
-    source.has("getTileUrl") ||
-    source.has("downloadTileStart")
-  )
+  if (!width || !height || source.matches("ready", false) || source.has("downloadTileStart"))
     throw new Error("unsupported source");
   const format = source.string(
     "fileFormat",
@@ -48,8 +42,9 @@ function readTiledSource(
   source: PageObject,
   shape: SourceGeometry,
   baseURI: string,
+  tilesUrl = source.string("tilesUrl"),
 ): DziSource | ZoomifySource {
-  const base = address(source.string("tilesUrl"), baseURI);
+  const base = address(tilesUrl, baseURI);
   if (!shape.tileWidth || shape.tileWidth !== shape.tileHeight)
     throw new Error("unsupported tiles");
   if (source.isArray("imageSizes")) {
@@ -128,6 +123,7 @@ function iiifId(source: PageObject): string {
 }
 
 export function readTileSource(source: PageObject, baseURI: string): TileSource {
+  if (source.has("getTileUrl")) throw new Error("unsupported source");
   const shape = geometry(source);
   if (source.truthy("tilesUrl") && source.truthy("fileFormat"))
     return readTiledSource(source, shape, baseURI);
@@ -135,6 +131,21 @@ export function readTileSource(source: PageObject, baseURI: string): TileSource 
   if (source.truthy("iipsrv") && source.truthy("image"))
     return readIipSource(source, shape, baseURI);
   throw new Error("unsupported protocol");
+}
+
+/** Call only for a source from an identified, DOM-bound Seadragon viewer. Its
+ * tile-address method exposes the base URL hidden in the legacy source closure. */
+export function readSeadragonSource(source: PageObject, baseURI: string): TileSource {
+  const shape = geometry(source);
+  const level = source.number("maxLevel");
+  const suffix = `${level}/0_0.${shape.format}`;
+  const url = source.call("getTileUrl", level, 0, 0);
+  if (typeof url !== "string" || !url.endsWith(suffix))
+    throw new Error("unsupported Seadragon address");
+  const base = url.slice(0, -suffix.length);
+  if (source.call("getTileUrl", 0, 0, 0) !== `${base}0/0_0.${shape.format}`)
+    throw new Error("unsupported Seadragon address");
+  return readTiledSource(source, shape, baseURI, base);
 }
 
 function dziMetadata(source: DziSource, context: MetadataContext): ObservedInput {
