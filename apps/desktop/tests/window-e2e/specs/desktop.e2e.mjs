@@ -7,10 +7,11 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import path from "node:path";
 import { after, afterEach, before, describe, it } from "node:test";
-import { Builder, By } from "selenium-webdriver";
+import { Builder, By, Key } from "selenium-webdriver";
 import { formats } from "../../../../../test/support/formats.cjs";
 import { chooseFixtureImages } from "../../../../../test/support/image-choice.mjs";
 import { assertSavedPyramid } from "../../../../../test/support/png.mjs";
+import { SETTINGS_STORAGE_KEY } from "../../../src/settings.ts";
 import {
   createRunDirs,
   gatewayInput,
@@ -111,6 +112,22 @@ async function submitUrl(driver, url) {
   await (await driver.findElement(By.css(".dz-button-row .dz-btn-tactile"))).click();
 }
 
+async function chooseQuickOption(driver, label, value) {
+  await (await driver.findElement(By.css(`summary[aria-label^="${label}:"]`))).click();
+  const choice = await driver.findElement(
+    By.xpath(`//fieldset[@aria-label="${label}"]//button[span[1]="${value}"]`),
+  );
+  assert.equal(await choice.isDisplayed(), true);
+  await choice.click();
+  await driver.wait(
+    async () =>
+      (await driver.findElements(By.css(`summary[aria-label="${label}: ${value}"]`))).length > 0,
+    5000,
+    `${label} selection changes to ${value}`,
+  );
+  assert.equal(await choice.isDisplayed(), false, "choosing an option closes its menu");
+}
+
 async function resetToIdle(driver) {
   await driver.executeScript(() => {
     const byId = (id) => document.getElementById(id);
@@ -208,12 +225,7 @@ describe("Dezoomify desktop window", () => {
       await waitForDefaultOutputDirectory(driver);
       // The format matrix checks exact pixels, so select lossless PNG
       // explicitly rather than relying on Auto's JPEG default.
-      await (await driver.findElement(By.css('summary[aria-label^="Format:"]'))).click();
-      await (
-        await driver.findElement(
-          By.xpath('//fieldset[@aria-label="Format"]//button[span[1]="PNG"]'),
-        )
-      ).click();
+      await chooseQuickOption(driver, "Format", "PNG");
     } catch (error) {
       await teardown();
       throw error;
@@ -226,6 +238,54 @@ describe("Dezoomify desktop window", () => {
 
   afterEach(async () => {
     await resetToIdle(driver);
+  });
+
+  it("quick choices update, persist, and keep the selected label visible", async () => {
+    try {
+      await chooseQuickOption(driver, "Format", "AVIF");
+      await chooseQuickOption(driver, "Size", "4K");
+      await chooseQuickOption(driver, "Network", "Aggressive");
+      const stored = await driver.executeScript(
+        (key) => JSON.parse(localStorage.getItem(key)),
+        SETTINGS_STORAGE_KEY,
+      );
+      assert.equal(stored.output_format, "avif");
+      assert.equal(stored.max_width, 3840);
+      assert.equal(stored.max_height, 2160);
+      assert.equal(stored.network_profile, "aggressive");
+      const bounds = await driver.executeScript(() => {
+        const label = document.querySelector(
+          'summary[aria-label="Network: Aggressive"] .dz-choice-selected',
+        );
+        const range = document.createRange();
+        range.selectNodeContents(label);
+        return {
+          font: getComputedStyle(label).font,
+          text: range.getBoundingClientRect().toJSON(),
+          box: label.getBoundingClientRect().toJSON(),
+          scrollWidth: label.scrollWidth,
+          clientWidth: label.clientWidth,
+        };
+      });
+      const detail = JSON.stringify(bounds);
+      assert.ok(bounds.text.top >= bounds.box.top, `label clips ascenders: ${detail}`);
+      assert.ok(bounds.text.bottom <= bounds.box.bottom, `label clips descenders: ${detail}`);
+      assert.ok(bounds.scrollWidth <= bounds.clientWidth, `label is truncated: ${detail}`);
+      const summary = await driver.findElement(By.css('summary[aria-label^="Network:"]'));
+      await summary.click();
+      await summary.sendKeys(Key.ESCAPE);
+      assert.equal(
+        await driver.executeScript(
+          () =>
+            document.querySelector('.dz-quick-menu[aria-label="Network"]').closest("details").open,
+        ),
+        false,
+      );
+    } finally {
+      await chooseQuickOption(driver, "Format", "PNG");
+      await chooseQuickOption(driver, "Size", "Full resolution");
+      await chooseQuickOption(driver, "Network", "Automatic");
+    }
   });
 
   it("saves the expected PNG automatically", async () => {

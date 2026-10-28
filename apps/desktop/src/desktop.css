@@ -300,7 +300,7 @@ body {
   gap: 0.4rem;
   padding: 0.45rem;
   color: var(--dz-text-primary);
-  font: 550 0.74rem / 1 var(--dz-font-sans);
+  font: 550 0.74rem / normal var(--dz-font-sans);
   text-transform: none;
   letter-spacing: 0;
   cursor: pointer;
