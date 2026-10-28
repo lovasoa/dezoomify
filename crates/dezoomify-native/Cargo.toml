@@ -20,7 +20,7 @@ sha2.workspace = true
 sysinfo.workspace = true
 image = { workspace = true, features = ["tiff", "webp", "avif", "rayon", "nasm"] }
 tiff = "0.11"
-scraper = { version = "0.27", default-features = false }
+scraper = { version = "0.29", default-features = false }
 tempfile = "3.27"
 fdeflate = "0.3"
 zif-tiff = "0.3.0"

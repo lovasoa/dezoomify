@@ -36,7 +36,7 @@ serde_json = { workspace = true }
 sha2 = { workspace = true }
 tokio = { workspace = true, features = ["sync"] }
 # Real window shell (optional; see the `tauri` feature below).
-tauri = { version = "=2.12.4", optional = true , features = [] }
+tauri = { version = "=2.12.5", optional = true , features = [] }
 tauri-plugin-dialog = { version = "=2.8.3", optional = true }
 tauri-plugin-opener = { version = "=2.7.2", optional = true }
 tauri-plugin-single-instance = { version = "=2.5.4", optional = true }
