@@ -253,19 +253,24 @@ describe("Dezoomify desktop window", () => {
       assert.equal(stored.max_width, 3840);
       assert.equal(stored.max_height, 2160);
       assert.equal(stored.network_profile, "aggressive");
-      const labelFits = await driver.executeScript(() => {
+      const bounds = await driver.executeScript(() => {
         const label = document.querySelector(
           'summary[aria-label="Network: Aggressive"] .dz-choice-selected',
         );
         const range = document.createRange();
         range.selectNodeContents(label);
-        const text = range.getBoundingClientRect();
-        const box = label.getBoundingClientRect();
-        return (
-          text.top >= box.top && text.bottom <= box.bottom && label.scrollWidth <= label.clientWidth
-        );
+        return {
+          font: getComputedStyle(label).font,
+          text: range.getBoundingClientRect().toJSON(),
+          box: label.getBoundingClientRect().toJSON(),
+          scrollWidth: label.scrollWidth,
+          clientWidth: label.clientWidth,
+        };
       });
-      assert.equal(labelFits, true, "the selected label fits without clipping its descenders");
+      const detail = JSON.stringify(bounds);
+      assert.ok(bounds.text.top >= bounds.box.top, `label clips ascenders: ${detail}`);
+      assert.ok(bounds.text.bottom <= bounds.box.bottom, `label clips descenders: ${detail}`);
+      assert.ok(bounds.scrollWidth <= bounds.clientWidth, `label is truncated: ${detail}`);
       const summary = await driver.findElement(By.css('summary[aria-label^="Network:"]'));
       await summary.click();
       await summary.sendKeys(Key.ESCAPE);
