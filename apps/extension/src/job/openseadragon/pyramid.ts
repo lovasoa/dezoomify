@@ -1,4 +1,5 @@
 import type { ViewerLevel } from "@dezoomify/wasm-bindings";
+import { snapshotPyramid } from "../viewers/pyramid.ts";
 
 interface LiveSource {
   width: number;
@@ -6,12 +7,14 @@ interface LiveSource {
   minLevel: number;
   maxLevel: number;
   tileOverlap: number;
-  ready: boolean;
-  displayRects?: unknown[];
   getLevelScale(level: number): number;
   getTileWidth(level: number): number;
   getTileHeight(level: number): number;
   getNumTiles(level: number): { x: number; y: number };
+  ready: boolean;
+  displayRects?: unknown[];
+  tileSize: number;
+  getTileSize?(level: number): number;
 }
 
 /** Snapshot the viewer's regular grids. Rust checks coverage and computes crops;
@@ -22,25 +25,20 @@ export function readLivePyramid(value: object): ViewerLevel[] {
     source.ready === false ||
     source.displayRects?.length ||
     Object.hasOwn(source, "getTileBounds") ||
-    Object.hasOwn(source, "tileExists") ||
-    !Number.isSafeInteger(source.minLevel) ||
-    source.minLevel < 0 ||
-    !Number.isSafeInteger(source.maxLevel) ||
-    source.maxLevel < source.minLevel ||
-    source.maxLevel - source.minLevel >= 64
+    Object.hasOwn(source, "tileExists")
   )
     throw new Error("unsupported OpenSeadragon grid");
-  const levels: ViewerLevel[] = [];
-  for (let level = source.minLevel; level <= source.maxLevel; level++) {
-    const scale = source.getLevelScale(level);
-    const count = source.getNumTiles(level);
-    levels.push({
-      level,
-      size: { width: Math.ceil(source.width * scale), height: Math.ceil(source.height * scale) },
-      tile_size: { width: source.getTileWidth(level), height: source.getTileHeight(level) },
-      overlap: { width: source.tileOverlap ?? 0, height: source.tileOverlap ?? 0 },
-      grid_size: { width: count.x, height: count.y },
-    });
-  }
-  return levels;
+  return snapshotPyramid({
+    width: source.width,
+    height: source.height,
+    minLevel: source.minLevel,
+    maxLevel: source.maxLevel,
+    tileOverlap: source.tileOverlap,
+    getLevelScale: (level) => source.getLevelScale(level),
+    getNumTiles: (level) => source.getNumTiles(level),
+    getTileWidth: (level) =>
+      source.getTileWidth?.(level) ?? source.getTileSize?.(level) ?? source.tileSize,
+    getTileHeight: (level) =>
+      source.getTileHeight?.(level) ?? source.getTileSize?.(level) ?? source.tileSize,
+  });
 }

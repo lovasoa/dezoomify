@@ -1,7 +1,7 @@
 import type { ViewerAdapter, ViewerImage } from "../viewers/adapter.ts";
 import { PageObject } from "../viewers/page-object.ts";
 import { scanLimits } from "../viewers/scan-state.ts";
-import { registerViewer } from "../viewers/session.ts";
+import { type LiveViewerSource, viewerImage } from "../viewers/source.ts";
 import { loadTile } from "./loader.ts";
 import { readPyramid } from "./pyramid.ts";
 
@@ -29,24 +29,22 @@ export const openLayersAdapter: ViewerAdapter = {
       if (!layer.method("getSource")) continue;
       const source = PageObject.from(layer.call("getSource"));
       if (!source?.method("getTileGrid") || !source.method("getTile")) continue;
-      images.push({
-        identity: source.identity,
-        read(context) {
-          const levels = readPyramid(source);
-          const view = PageObject.from(map.call("getView"));
-          const projection = source.method("getProjection")
-            ? source.call("getProjection")
-            : undefined;
-          const fallback = view?.call("getProjection");
-          return registerViewer(levels, context, (level, x, y, signal) =>
-            loadTile(source, level, x, y, projection ?? fallback, signal),
-          );
-        },
-      });
+      images.push(viewerImage(source.identity, () => openSource(map, source)));
     }
     return images;
   },
 };
+
+function openSource(map: PageObject, source: PageObject): LiveViewerSource {
+  const levels = readPyramid(source);
+  const view = PageObject.from(map.call("getView"));
+  const projection = source.method("getProjection") ? source.call("getProjection") : undefined;
+  const fallback = view?.call("getProjection");
+  return {
+    levels,
+    load: (level, x, y, signal) => loadTile(source, level, x, y, projection ?? fallback, signal),
+  };
+}
 
 function collection(value: unknown): PageObject[] {
   const object = PageObject.from(value);

@@ -1,10 +1,9 @@
 import type { ViewerAdapter } from "../viewers/adapter.ts";
 import { createElementProbe, PageAccess } from "../viewers/page-object.ts";
 import { scanLimits } from "../viewers/scan-state.ts";
-import type { MetadataContext } from "../viewers/types.ts";
-import { projectMetadata, readTileSource } from "./metadata.ts";
-import { registerTileSource } from "./session.ts";
+import { openSeadragonImages } from "./images.ts";
 
+/** OpenSeadragon discovery only. Original Seadragon has a separate adapter. */
 export const openSeadragonAdapter: ViewerAdapter = {
   identify(object, access) {
     const canvas = access.element(object.reference("canvas"));
@@ -16,26 +15,7 @@ export const openSeadragonAdapter: ViewerAdapter = {
       ? canvas
       : undefined;
   },
-  images(viewer) {
-    const world = viewer.reference("world");
-    const items = world ? world.objects("_items", scanLimits.images) : [viewer];
-    return items.flatMap((item) => {
-      const source = item.reference("source");
-      if (!source) return [];
-      return [
-        {
-          identity: source.identity,
-          read(context: MetadataContext, base: string) {
-            try {
-              return { input: projectMetadata(readTileSource(source, base), context) };
-            } catch {
-              return registerTileSource(source.identity, item.identity, context);
-            }
-          },
-        },
-      ];
-    });
-  },
+  images: openSeadragonImages,
   roots: (root) => {
     const namespace = root.reference("OpenSeadragon");
     return namespace ? [namespace] : [];

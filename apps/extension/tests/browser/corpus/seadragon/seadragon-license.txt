@@ -1,0 +1,167 @@
+Live Labs Software License Agreement - Seadragon Ajax Code
+
+This is an agreement between You ( "You") and Microsoft Corporation,
+located at One Microsoft Way, Redmond, WA 98052-6399, ("Microsoft")
+regarding Your use of the Seadragon Ajax Code made available by
+Microsoft ("Software") at this link:
+
+http://go.microsoft.com/fwlink/?LinkId=164943.
+
+By installing, accessing or otherwise using the Software, You accept the
+terms of this agreement.  If You do not agree to the terms of this
+agreement, do not install, access or use the Software.
+
+If You comply with this agreement, You have the rights below.
+
+1. USE AND MODIFICATION OF THE SOFTWARE.
+
+   A) Subject to the terms, conditions, and limitations in this
+      Agreement, Microsoft grants you a non-exclusive, world-wide,
+      royalty-free copyright license to use and modify the Software
+      solely as part of your own web applications which are served at
+      runtime from a web server over the internet to run on a Javascript
+      runtime in a remote end user's web browser (referred to as
+      "Applications").  You may distribute the Software only to the
+      extent necessary for end users to make use of your Application(s)
+      in their web browsers.  You may not rent, lease or lend any of
+      Your rights in the Software.
+
+   B) Subject to the terms, conditions, and limitations in this
+      Agreement, Microsoft grants you a non-exclusive, worldwide,
+      non-transferable, non-sublicensable, royalty-free license under
+      only its patents that read directly on the Software as provided to
+      you to make, use, sell, offer for sale, import and/or otherwise
+      dispose of the Software in your Applications, conditioned upon
+      your compliance with the requirements and limitations described in
+      Sections 1(A) and 1(C).
+
+   C) You must
+
+      - ensure that the Applications are compatible with the then
+        current Deep Zoom Image (DZI) File Format published by Microsoft
+        at http://go.microsoft.com/fwlink/?LinkId=164944;
+
+      - indicate in the user interface of your Application that your
+        Application is "built on Microsoft technology"; and
+
+      - indemnify, defend and hold harmless Microsoft from any claims,
+        including attorneys' fees, related to the distribution or use of
+        Your Applications.
+
+      Additionally, You may not
+
+      - alter any copyright, trademark or patent notice in the Software;
+
+      - Except as expressly granted in this Agreement, use Microsoft's
+        trademarks in Your programs' names or in a way that suggests
+        Your Applications come from or are endorsed by Microsoft;
+
+      - include the Software in malicious, deceptive or unlawful
+        Applications;
+
+      - port the Software to another programming language; or
+
+      - modify or distribute the Software so that any part of it becomes
+        subject to an Excluded License.  An Excluded License is one that
+        requires, as a condition of use, modification or distribution,
+        that
+
+        - the code be disclosed or distributed in source code form; or
+
+        - others have the right to modify it.
+
+2. SCOPE OF LICENSES.  The Software is licensed, not sold. This
+   agreement only gives You some rights to use and distribute the
+   Software.  Microsoft reserves all other rights.  Unless applicable
+   law gives You more rights despite this limitation, You may use and
+   distribute the Software only as expressly permitted in this
+   agreement.
+
+3. EXPORT RESTRICTIONS.  THE SOFTWARE IS SUBJECT TO UNITED STATES EXPORT
+   LAWS AND REGULATIONS.  YOU MUST COMPLY WITH ALL DOMESTIC AND
+   INTERNATIONAL EXPORT LAWS AND REGULATIONS THAT APPLY TO THE SOFTWARE.
+   THESE LAWS INCLUDE RESTRICTIONS ON DESTINATIONS, END USERS AND END
+   USE.  FOR ADDITIONAL INFORMATION, SEE WWW.MICROSOFT.COM/EXPORTING.
+
+4. SUPPORT.  Microsoft is not obligated to provide any technical or
+   other support ("Support Services") for the Software to You.  However,
+   if Microsoft chooses to provide any Support Services to You, Your use
+   of such Support Services will be governed by then-current Microsoft
+   policies.  With respect to any technical or other information You
+   provide to Microsoft in connection with the Support Services, You
+   agree that Microsoft has an unrestricted right to use such
+   information for its business purposes, including for product support
+   and development.  Microsoft will not use such information in a form
+   that personally identifies You.
+
+5. TERMINATION.  If You are dissatisfied with any aspect of the Software
+   at any time, Your sole and exclusive remedy is to cease using it.
+   You acknowledge that termination and/or monetary damages may not be a
+   sufficient remedy if You breach this agreement and that Microsoft
+   will be entitled, without waiving any other rights or remedies, to
+   injunctive or equitable relief as may be deemed proper by a court of
+   competent jurisdiction in the event of a breach.  This Section and
+   Sections 2,  6, 7, 8, 9, 10, and 11 will survive termination of this
+   agreement, along with any other provisions that would reasonably be
+   deemed to survive such events.
+
+6. RESERVATION OF RIGHTS.  Except for the licenses expressly granted
+   under this agreement, Microsoft retains all right, title and interest
+   in and to the Software, and all intellectual property rights therein.
+   No other rights except those expressly granted in this Agreement
+   shall be deemed granted, waived or received by implication,
+   exhaustion, estoppel, or otherwise.  Without limiting the foregoing,
+   You are not authorized to alter, modify, copy, edit, format, create
+   derivative works of or otherwise use any materials, content or
+   technology provided under this agreement except as explicitly
+   provided in this agreement.
+
+7. ENTIRE AGREEMENT.  This agreement is the entire agreement with
+   respect to the Software.
+
+8. APPLICABLE LAW.
+
+   i. United States. If You acquired the Software in the United States,
+      Washington State law governs the interpretation of this agreement
+      and applies to claims for breach of it, regardless of conflict of
+      laws principles. The laws of the state where You live govern all
+      other claims, including claims under state consumer protection
+      laws, unfair competition laws and in tort.
+
+  ii. Outside the United States. If You acquired the Software in any
+      other country, the laws of that country apply.
+
+9. LEGAL EFFECT.  This agreement describes certain legal rights.  You
+   may have other rights under the laws of Your country.  This agreement
+   does not change Your rights under the laws of Your country if the
+   laws of Your country do not permit it to do so.
+
+10. DISCLAIMER OF WARRANTY.   The Software is licensed "as-is."  You
+    bear the risk of using it.  Microsoft gives no express or implied
+    warranties, guarantees or conditions.  You may have additional
+    consumer rights under Your local laws which this agreement cannot
+    change.  To the extent permitted under Your local laws, Microsoft
+    excludes the implied warranties of merchantability, fitness for a
+    particular purpose and non-infringement.  Without limiting the
+    generality of the foregoing, Microsoft makes no warranties regarding
+    the  Software, and hereby disclaims all warranties that might
+    otherwise be implied by law.
+
+11. LIMITATION ON AND EXCLUSION OF REMEDIES AND DAMAGES.   You can
+    recover from Microsoft and its suppliers only direct damages up to
+    U.S. $5.00.  You cannot recover any other damages, including
+    consequential, lost profits, special, indirect or incidental
+    damages.
+
+    This limitation applies to
+
+    - anything related to the Software; and
+
+    - claims for breach of contract, breach of warranty, guarantee or
+      condition, strict liability, negligence, or other tort to the
+      extent permitted by applicable law.
+
+    It applies even if Microsoft knew or should have known about the
+    possibility of the damages.  The above limitation or exclusion may
+    not apply to You because Your country may not allow the exclusion or
+    limitation of incidental, consequential or other damages.

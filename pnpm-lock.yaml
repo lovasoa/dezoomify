@@ -165,6 +165,18 @@ importers:
       openseadragon:
         specifier: 6.1.1
         version: 6.1.1
+      openseadragon2:
+        specifier: npm:openseadragon@2.4.2
+        version: openseadragon@2.4.2
+      openseadragon3:
+        specifier: npm:openseadragon@3.1.0
+        version: openseadragon@3.1.0
+      openseadragon4:
+        specifier: npm:openseadragon@4.1.1
+        version: openseadragon@4.1.1
+      openseadragon5:
+        specifier: npm:openseadragon@5.0.1
+        version: openseadragon@5.0.1
       playwright:
         specifier: 1.64.1
         version: 1.64.1
@@ -1562,6 +1574,18 @@ packages:
   open@8.4.2:
     resolution: {integrity: sha512-7x81NCL719oNbsq/3mh+hVrAWmFuEYUqrq/Iw3kUzH8ReypT9QQ0BLoJS7/G9k6N81XjW4qHWtjWwe/9eLy1EQ==}
     engines: {node: '>=12'}
+
+  openseadragon@2.4.2:
+    resolution: {integrity: sha512-398KbZwRtOYA6OmeWRY4Q0737NTacQ9Q6whmr9Lp1MNQO3p0eBz5LIASRne+4gwequcSM1vcHcjfy3dIndQziw==}
+
+  openseadragon@3.1.0:
+    resolution: {integrity: sha512-0zCbRIWUbCto7xm1tv2ZLEiSl84cDU659W/sfs2zqqTqVRa4CRHzhy7i9nsv6dHA1DryFR8IzjStjmWOqRs9Rg==}
+
+  openseadragon@4.1.1:
+    resolution: {integrity: sha512-owU9gsasAcobLN+LM8lN58Xc2VDSDotY9mkrwS/NB6g9KX/PcusV4RZvhHng2RF/Q0pMziwldf62glwXoGnuzg==}
+
+  openseadragon@5.0.1:
+    resolution: {integrity: sha512-a/hjouW9i3UfWxRADVYN2MyRhXMGnE7x9VVL7/4jXCcDLFyO4UM5o4RStYtqa5BfaHw/wMNAaD2WbxQF8f1pJg==}
 
   openseadragon@6.1.1:
     resolution: {integrity: sha512-g4iKe2q8B642SaBT3+x4ZF3/8b1TxPPydyjmtrOLgDrlYWMKd9ZXM+1Cb/xa9DVySkvs/7l6HR1nHKfD5F3Tsw==}
@@ -3065,6 +3089,14 @@ snapshots:
       define-lazy-prop: 2.0.0
       is-docker: 2.2.1
       is-wsl: 2.2.0
+
+  openseadragon@2.4.2: {}
+
+  openseadragon@3.1.0: {}
+
+  openseadragon@4.1.1: {}
+
+  openseadragon@5.0.1: {}
 
   openseadragon@6.1.1: {}
 
