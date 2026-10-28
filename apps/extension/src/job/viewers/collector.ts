@@ -1,12 +1,13 @@
 import { openLayersAdapter } from "../openlayers/adapter.ts";
 import { openSeadragonAdapter } from "../openseadragon/adapter.ts";
+import { seadragonAdapter } from "../seadragon/adapter.ts";
 import type { ViewerImage } from "./adapter.ts";
 import { type PageAccess, PageObject } from "./page-object.ts";
 import type { ScanState } from "./scan-state.ts";
 import { releaseViewerTiles } from "./session.ts";
 import type { PageRealm } from "./types.ts";
 
-const adapters = [openSeadragonAdapter, openLayersAdapter];
+const adapters = [openSeadragonAdapter, seadragonAdapter, openLayersAdapter];
 
 /** One collector deduplicates image sources across adapters and discovery paths. */
 export class ViewerCollector {

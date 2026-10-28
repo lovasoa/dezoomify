@@ -6,7 +6,11 @@ import { build } from "esbuild";
 import { chromium, firefox } from "playwright";
 
 const bundle = await build({
-  entryPoints: [fileURLToPath(new URL("../../src/job/openseadragon/session.ts", import.meta.url))],
+  stdin: {
+    contents: `export {openTileSource,readViewerTile,releaseViewerTiles} from './openseadragon/session.ts';
+export {registerViewer} from './viewers/session.ts';`,
+    resolveDir: fileURLToPath(new URL("../../src/job", import.meta.url)),
+  },
   bundle: true,
   write: false,
   format: "iife",
@@ -90,10 +94,15 @@ async function loadFixture(mode) {
       job.finish(new Blob([new Uint8Array(9 * 1024 * 1024)]), null, "rasterBlob");
 
   const globalKeys = new Set(Reflect.ownKeys(window));
-  const metadata = TileSession.registerTileSource(source, item, {
-    documentUrl: location.href,
-    imageIndex: 0,
-  });
+  const live = TileSession.openTileSource(source, item);
+  const metadata = TileSession.registerViewer(
+    live.levels,
+    {
+      documentUrl: location.href,
+      imageIndex: 0,
+    },
+    live.load,
+  );
   const addedGlobals = Reflect.ownKeys(window)
     .filter((key) => !globalKeys.has(key))
     .map(String);

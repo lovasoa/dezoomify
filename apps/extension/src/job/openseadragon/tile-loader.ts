@@ -21,6 +21,10 @@ interface ImageLoader {
 interface TiledImage {
   _imageLoader?: ImageLoader;
   imageLoader?: ImageLoader;
+  drawer?: {
+    imageLoader?: ImageLoader;
+    loadImage?(src: string, callback: (image: unknown) => void): boolean;
+  };
   loadTilesWithAjax?: boolean;
   ajaxHeaders?: Record<string, string>;
   crossOriginPolicy?: string | boolean;
@@ -59,12 +63,26 @@ export async function loadOpenSeadragonTile(
 ) {
   const native = source as TileSource;
   const image = item as TiledImage;
-  const loader = image._imageLoader ?? image.imageLoader;
-  if (!loader) throw new Error("OpenSeadragon image loader is unavailable");
+  const loader = image._imageLoader ?? image.imageLoader ?? image.drawer?.imageLoader;
+  const legacyDrawer = image.drawer;
+  if (!loader && !legacyDrawer?.loadImage)
+    throw new Error("OpenSeadragon image loader is unavailable");
   const tile = { level, x, y };
   const url = native.getTileUrl(level, x, y);
   const src = typeof url === "function" ? url.call(tile) : url;
   const data = await new Promise<unknown>((resolve, reject) => {
+    const callback = (result: unknown, error?: unknown, response?: unknown) => {
+      if (result) resolve(result);
+      else reject(loadFailure(error, response, src));
+    };
+    if (!loader) {
+      // 0.9.x exposes a bounded drawer loader rather than a queued ImageLoader.
+      if (!legacyDrawer?.loadImage?.(src, callback))
+        reject(
+          new NetworkError("OpenSeadragon image loader is busy", { transport: "browser-session" }),
+        );
+      return;
+    }
     loader.addJob({
       source,
       tile,
@@ -75,10 +93,7 @@ export async function loadOpenSeadragonTile(
       // A viewer can display a tainted image; downloading requires readable pixels.
       crossOriginPolicy: image.crossOriginPolicy || "Anonymous",
       ajaxWithCredentials: image.ajaxWithCredentials,
-      callback: (result: unknown, error: unknown, response: unknown) => {
-        if (result) resolve(result);
-        else reject(loadFailure(error, response, src));
-      },
+      callback,
     });
   });
   return data;
