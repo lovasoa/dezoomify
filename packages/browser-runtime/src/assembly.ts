@@ -242,8 +242,8 @@ export function createCanvasAssembly<C extends AssemblyCanvas>(
       const image = displayImages.get(tile);
       const w = placement.expected_size?.width ?? bitmap?.width ?? image?.naturalWidth ?? 0;
       const h = placement.expected_size?.height ?? bitmap?.height ?? image?.naturalHeight ?? 0;
-      width = Math.max(width, placement.position.x + (w > 0 ? w : 0));
-      height = Math.max(height, placement.position.y + (h > 0 ? h : 0));
+      width = Math.max(width, placement.position.x + Math.max(w, 0));
+      height = Math.max(height, placement.position.y + Math.max(h, 0));
     }
     return { width, height };
   }

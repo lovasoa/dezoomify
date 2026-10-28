@@ -5,13 +5,13 @@ issues. `cases.json` contains reduced public configuration facts, not downloaded
 artwork, credentials, or complete site scripts. Reproductions are synthetic
 GPL-3.0-or-later data and use the shared image tiles with real OpenLayers code.
 
-| Reports | Evidence and purpose |
-| --- | --- |
-| [#1296](https://github.com/lovasoa/dezoomify/issues/1296), [#734](https://github.com/lovasoa/dezoomify/issues/734) | Asian Art Museum HAR: IIIF with failing metadata and an eMuseum map stored in element data. |
-| [#715](https://github.com/lovasoa/dezoomify/issues/715) | Allen Memorial HTML and `modules.gz/emuseum/MediaZoom.js`: older initializer without a version argument, selecting IIIF 2 inside the module. |
-| [#773](https://github.com/lovasoa/dezoomify/issues/773) | New Britain HTML and the same module: explicit IIIF 2 version and different image geometry. |
-| [#321](https://github.com/lovasoa/dezoomify/issues/321) | Philadelphia history discussion records 6212×6248 inline Zoomify dimensions and missing metadata. The tile size is the reproduction's synthetic setting. Current page is challenged. |
-| [#455](https://github.com/lovasoa/dezoomify/issues/455), [#626](https://github.com/lovasoa/dezoomify/issues/626) | Geographic WMS requests are controls: a map is not automatically a finite image pyramid. #455's public `js/map.js` supplies the control's source type. |
+| Reports                                                                                                            | Evidence and purpose                                                                                                                                                                 |
+| ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| [#1296](https://github.com/lovasoa/dezoomify/issues/1296), [#734](https://github.com/lovasoa/dezoomify/issues/734) | Asian Art Museum HAR: IIIF with failing metadata and an eMuseum map stored in element data.                                                                                          |
+| [#715](https://github.com/lovasoa/dezoomify/issues/715)                                                            | Allen Memorial HTML and `modules.gz/emuseum/MediaZoom.js`: older initializer without a version argument, selecting IIIF 2 inside the module.                                         |
+| [#773](https://github.com/lovasoa/dezoomify/issues/773)                                                            | New Britain HTML and the same module: explicit IIIF 2 version and different image geometry.                                                                                          |
+| [#321](https://github.com/lovasoa/dezoomify/issues/321)                                                            | Philadelphia history discussion records 6212×6248 inline Zoomify dimensions and missing metadata. The tile size is the reproduction's synthetic setting. Current page is challenged. |
+| [#455](https://github.com/lovasoa/dezoomify/issues/455), [#626](https://github.com/lovasoa/dezoomify/issues/626)   | Geographic WMS requests are controls: a map is not automatically a finite image pyramid. #455's public `js/map.js` supplies the control's source type.                               |
 
 Source pages are linked in `cases.json`. Network observations supplement the
 deterministic replay; tests never depend on public sites staying available.
