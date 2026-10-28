@@ -185,7 +185,7 @@ export function createProxyRateLimiter(clock?: ProxyRateClock): ProxyRateLimiter
     if (inflight >= PROXY_MAX_INFLIGHT) return { kind: "wait-inflight" };
     if (starts.length >= PROXY_MAX_REQUESTS_PER_SECOND) {
       const waitMs = (starts[0] as number) + PROXY_RATE_WINDOW_MS - nowFn();
-      return { kind: "wait-rate", ms: waitMs > 0 ? waitMs : 0 };
+      return { kind: "wait-rate", ms: Math.max(waitMs, 0) };
     }
     starts.push(nowFn());
     inflight += 1;

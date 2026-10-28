@@ -19,22 +19,35 @@ function typeInto(element, value) {
   });
 }
 
+function SettingsHarness({ initialSettings, error, onChange }) {
+  const [settings, setSettings] = useState(initialSettings);
+  return createElement(DesktopSettingsView, {
+    settings,
+    error,
+    onChange(nextSettings) {
+      setSettings(nextSettings);
+      onChange(nextSettings);
+    },
+    onReset() {},
+  });
+}
+
 function renderSettings({ error = null, settings = {} } = {}) {
   let currentSettings = { ...defaultSettings(), ...settings };
-  function SettingsHarness() {
-    const [settings, setSettings] = useState(currentSettings);
-    currentSettings = settings;
-    return createElement(DesktopSettingsView, {
-      settings,
-      error,
-      onChange: setSettings,
-      onReset() {},
-    });
-  }
   const container = makeContainer();
   const root = createRoot(container);
   onCleanup(() => root.unmount());
-  act(() => root.render(createElement(SettingsHarness)));
+  act(() =>
+    root.render(
+      createElement(SettingsHarness, {
+        initialSettings: currentSettings,
+        error,
+        onChange(settings) {
+          currentSettings = settings;
+        },
+      }),
+    ),
+  );
   return { container, root, current: () => currentSettings };
 }
 

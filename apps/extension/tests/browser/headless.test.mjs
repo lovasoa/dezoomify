@@ -236,7 +236,7 @@ async function waitForVisible(page, selector, label) {
   } catch (error) {
     const body = await page
       .locator("body")
-      .innerText()
+      .textContent()
       .catch(() => "<unavailable>");
     throw new Error(`${label} did not become visible\njob page: ${body}`, { cause: error });
   }
@@ -347,7 +347,7 @@ async function runChromiumJob(base, work, options = {}) {
     if (!download) {
       const jobText = await jobPage
         .locator("body")
-        .innerText()
+        .textContent()
         .catch(() => "<unavailable>");
       const fixtureLog = existsSync(fixtureServer.logFile)
         ? readFileSync(fixtureServer.logFile, "utf8").trim()
@@ -739,7 +739,7 @@ for (const [browser, run, scenario] of [
         scenario,
         async afterSave(page) {
           assert.match(
-            await page.locator(".dz-completed-section").innerText(),
+            await page.locator(".dz-completed-section").textContent(),
             /image available on this page/,
           );
           assert.equal(await page.locator(".dz-error-section").count(), 0);
@@ -837,7 +837,7 @@ test("chromium: a direct DZI tab pauses exhausted retries and approval saves the
           await waitForVisible(jobPage, "[data-dz-retry-choice=retry]", "retry approval");
           assert.equal(await jobPage.locator("[data-dz-retry-actions]").count(), 1);
           assert.match(
-            await jobPage.locator(".dz-retry-section").innerText(),
+            await jobPage.locator(".dz-retry-section").textContent(),
             /no file has been saved/,
           );
           await jobPage.locator("[data-dz-retry-choice=retry]").click();

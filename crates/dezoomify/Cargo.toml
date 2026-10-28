@@ -35,7 +35,7 @@ zif-tiff = { version = "0.3.0", default-features = false }
 
 [dev-dependencies]
 futures = "0.3"
-scraper = { version = "0.27", default-features = false }
+scraper = { version = "0.29", default-features = false }
 
 [features]
 typescript = ["dep:tsify", "dep:wasm-bindgen"]
