@@ -17,6 +17,9 @@ checks WASM tools, and installs the versioned Git hooks. It does not install
 Rust toolchains or browsers. WASM builds need `wasm-bindgen-cli` matching
 `Cargo.lock`; setup reports mismatches.
 
+Native Cargo builds use Node and the installed workspace dependencies to bundle
+the offline IIIF viewer into the executable; run setup before building them.
+
 Read [Architecture](architecture.md) to choose where a change belongs and
 [Testing](testing.md) to choose regression coverage. For new site support, use
 [Contributing a format](CONTRIBUTING-format.md).

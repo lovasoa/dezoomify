@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Dezoomify image viewer</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: #171717; color: white; }
+      body { display: flex; flex-direction: column; font-family: system-ui, sans-serif; }
+      nav { display: flex; gap: 0.5rem; padding: 0.5rem; }
+      button { font: inherit; padding: 0.4rem 0.8rem; cursor: pointer; }
+      #viewer { flex: 1; min-height: 0; }
+    </style>
+  </head>
+  <body>
+    <nav aria-label="Image controls">
+      <button id="zoom-in" type="button">Zoom in</button>
+      <button id="zoom-out" type="button">Zoom out</button>
+      <button id="home" type="button">Reset</button>
+      <button id="fullscreen" type="button">Fullscreen</button>
+    </nav>
+    <div id="viewer" role="region" aria-label="Zoomable image"></div>
+    <script id="image-info" type="application/json">__DEZOOMIFY_IMAGE_INFO__</script>
+    <!--VIEWER_SCRIPT-->
+  </body>
+</html>

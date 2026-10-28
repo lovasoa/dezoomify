@@ -97,7 +97,9 @@ good cached tiles; see [resuming](../../apps/desktop/desktop-app.md#resuming-an-
 
 IIIF directories must have unused destinations, even with `--overwrite`.
 Compatible IIIF/ZIF tiles retain their original encoding; compression settings
-affect converted tiles and new levels. ZIF omits alpha. For an IIIF web viewer,
+affect converted tiles and new levels. ZIF omits alpha. Open an IIIF export's
+`viewer.html` in your browser to view and zoom offline; keep the entire folder
+together, including `full/` overview images. For another IIIF web viewer,
 resolve the relative service identifier against `info.json` and honor
 `preferredFormats`, especially for PNG-only output.
 

@@ -1258,14 +1258,22 @@ impl IiifWriter {
         } else {
             serde_json::json!([capabilities])
         };
-        let info = serde_json::to_vec_pretty(&serde_json::json!({
+        let info = serde_json::to_string_pretty(&serde_json::json!({
             "@context": "http://iiif.io/api/image/2/context.json", "@id": ".",
             "protocol": "http://iiif.io/api/image", "width": full_size.width, "height": full_size.height,
             "tiles": [{ "width": self.base.cell.width, "height": self.base.cell.height, "scaleFactors": factors }],
             "sizes": [{"width": level.size.width, "height": level.size.height}],
             "preferredFormats": [ext], "profile": profile
         })).map_err(|e| Error::EncodeFailed(e.to_string().into()))?;
-        self.staging.write("info.json", &info, cancelled)?;
+        self.staging
+            .write("info.json", info.as_bytes(), cancelled)?;
+        let viewer = include_str!(concat!(env!("OUT_DIR"), "/viewer.html")).replacen(
+            "__DEZOOMIFY_IMAGE_INFO__",
+            &info,
+            1,
+        );
+        self.staging
+            .write("viewer.html", viewer.as_bytes(), cancelled)?;
         Ok(crate::output::PreparedOutput {
             staging: crate::output::StagedOutput::Directory(self.staging),
             size: full_size,

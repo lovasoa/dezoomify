@@ -30,6 +30,9 @@ mod output_tests {
         );
         // A moved image does not prevent opening its containing directory.
         launch_saved_output(image, true).unwrap();
+        let directory = root.join("image folder.iiif");
+        launch_saved_output(directory.clone(), false).unwrap();
+        launch_saved_output(directory, true).unwrap();
         fs::write(root.join("gio"), "#!/bin/sh\nexit 1\n").unwrap();
         assert!(matches!(
             launch_saved_output(root.join("missing.png"), true).unwrap_err(),
@@ -43,6 +46,9 @@ mod output_tests {
             std::env::temp_dir().join(format!("dezoomify-launch-test-{}", std::process::id()));
         fs::create_dir_all(&root).unwrap();
         fs::write(root.join("saved image.png"), b"fixture").unwrap();
+        let directory = root.join("image folder.iiif");
+        fs::create_dir(&directory).unwrap();
+        fs::write(directory.join("viewer.html"), b"fixture").unwrap();
         // A failing first launcher must fall through to the next supported
         // desktop handler. Only the child process sees this isolated PATH.
         for (name, script) in [
@@ -64,7 +70,13 @@ mod output_tests {
             .unwrap();
         assert!(status.success());
         let calls = fs::read_to_string(root.join("calls")).unwrap();
-        let expected = [root.join("saved image.png"), root.clone(), root.clone()];
+        let expected = [
+            root.join("saved image.png"),
+            root.clone(),
+            root.clone(),
+            directory.join("viewer.html"),
+            root.clone(),
+        ];
         assert_eq!(
             calls
                 .lines()
@@ -76,7 +88,6 @@ mod output_tests {
     }
 }
 
-/// Open only an output published by this app; callers never supply paths.
 /// The retry policy of `Error::retryable()`, exposed at the boundary.
 #[tauri::command]
 fn is_retryable(error: dezoomify::model::Error) -> bool {
@@ -93,6 +104,7 @@ fn validate_settings(settings: serde_json::Value) -> Result<(), Error> {
         .map_err(|message| Error::InvalidSettings(message.into()))
 }
 
+/// Open only an output published by this app; callers never supply paths.
 #[tauri::command]
 async fn open_saved_output(
     table: State<'_, Mutex<JobTable>>,
@@ -118,6 +130,8 @@ async fn open_saved_output(
 fn launch_saved_output(path: std::path::PathBuf, reveal: bool) -> Result<(), Error> {
     let target = if reveal {
         path.parent().ok_or(Error::OutputNoParent)?.to_path_buf()
+    } else if path.is_dir() {
+        path.join("viewer.html")
     } else {
         path
     };

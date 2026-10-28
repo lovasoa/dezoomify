@@ -4,7 +4,7 @@
   "private": true,
   "description": "Real-webapp E2E: the new website served by the fixture server, driving the wasm core discovery + real save in Chromium",
   "scripts": {
-    "test": "playwright test webapp.spec.js",
+    "test": "playwright test webapp.spec.js iiif-viewer.spec.js",
     "test:live": "playwright test liveweb.spec.js"
   },
   "devDependencies": {
