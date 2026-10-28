@@ -89,6 +89,12 @@ for (const [format, width, height] of [["png", 513, 259], ["jpg", 513, 259], ["p
       await expect.poll(() => imageHeight(viewer)).toBeLessThan(original - 5);
       await page.getByRole("button", { name: "Reset", exact: true }).click();
       await expect.poll(() => imageHeight(viewer)).toBeGreaterThanOrEqual(original - 1);
+      const fullscreen = page.getByRole("button", { name: "Fullscreen", exact: true });
+      await fullscreen.click();
+      await expect(viewer).toHaveClass(/fullpage/);
+      await expect(fullscreen).toBeVisible();
+      await fullscreen.click();
+      await expect(viewer).not.toHaveClass(/fullpage/);
       expect(errors).toEqual([]);
     } finally {
       await page.goto("about:blank");

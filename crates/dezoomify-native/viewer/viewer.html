@@ -4,22 +4,26 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Dezoomify image viewer</title>
-    <style>
-      html, body { margin: 0; height: 100%; background: #171717; color: white; }
-      body { display: flex; flex-direction: column; font-family: system-ui, sans-serif; }
-      nav { display: flex; gap: 0.5rem; padding: 0.5rem; }
-      button { font: inherit; padding: 0.4rem 0.8rem; cursor: pointer; }
-      #viewer { flex: 1; min-height: 0; }
-    </style>
+    <style>/*VIEWER_STYLES*/</style>
   </head>
   <body>
-    <nav aria-label="Image controls">
-      <button id="zoom-in" type="button">Zoom in</button>
-      <button id="zoom-out" type="button">Zoom out</button>
-      <button id="home" type="button">Reset</button>
-      <button id="fullscreen" type="button">Fullscreen</button>
-    </nav>
     <div id="viewer" role="region" aria-label="Zoomable image"></div>
+    <div id="viewer-controls">
+      <nav class="viewer-controls" aria-label="Image controls">
+        <button id="zoom-in" class="dz-btn-secondary" type="button" aria-label="Zoom in" title="Zoom in">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+        </button>
+        <button id="zoom-out" class="dz-btn-secondary" type="button" aria-label="Zoom out" title="Zoom out">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/></svg>
+        </button>
+        <button id="home" class="dz-btn-secondary" type="button" aria-label="Reset" title="Reset view">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10a9 9 0 1 1 2 8M3 4v6h6"/></svg>
+        </button>
+        <button id="fullscreen" class="dz-btn-secondary" type="button" aria-label="Fullscreen" title="Toggle fullscreen">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M3 16v5h5M21 16v5h-5"/></svg>
+        </button>
+      </nav>
+    </div>
     <script id="image-info" type="application/json">__DEZOOMIFY_IMAGE_INFO__</script>
     <!--VIEWER_SCRIPT-->
   </body>

@@ -1,0 +1,60 @@
+@import "../../../packages/shared-ui/src/styles/theme.css";
+
+body {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--dz-page-bg);
+}
+
+#viewer {
+  width: 100%;
+  height: 100%;
+}
+
+#viewer-controls {
+  margin: 12px;
+}
+
+.viewer-controls {
+  display: flex;
+  gap: 2px;
+  padding: 4px;
+  background: var(--dz-surface-gradient);
+  border: 1px solid var(--dz-surface-border);
+  border-radius: var(--dz-radius);
+  box-shadow: var(--dz-surface-shadow);
+}
+
+.viewer-controls .dz-btn-secondary {
+  width: 36px;
+  height: 36px;
+  min-height: 36px;
+  padding: 0;
+  color: var(--dz-text-secondary);
+  background: transparent;
+  border: 0;
+}
+
+.viewer-controls .dz-btn-secondary:hover {
+  color: var(--dz-text-primary);
+  background: var(--dz-btn-secondary-hover-bg);
+}
+
+.viewer-controls svg {
+  width: 18px;
+  height: 18px;
+  vertical-align: middle;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+@media (pointer: coarse) {
+  .viewer-controls .dz-btn-secondary {
+    width: 44px;
+    height: 44px;
+  }
+}
