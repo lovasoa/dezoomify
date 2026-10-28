@@ -10,6 +10,13 @@ fn main() {
     ] {
         println!("cargo:rerun-if-changed={input}");
     }
+    for package in ["esbuild", "openseadragon"] {
+        let manifest = root.join("node_modules").join(package).join("package.json");
+        assert!(
+            manifest.is_file(),
+            "workspace dependency `{package}` is missing; run `pnpm install --frozen-lockfile` from the repository root"
+        );
+    }
     let status = Command::new("node")
         .arg(root.join("scripts/build-iiif-viewer.mjs"))
         .arg(env::var_os("OUT_DIR").expect("Cargo sets OUT_DIR"))
