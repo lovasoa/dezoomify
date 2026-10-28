@@ -109,6 +109,22 @@ function QuickChoice({
 }) {
   const ref = useRef<HTMLDetailsElement>(null);
   const selected = choices.find((choice) => choice.value === value) ?? choices[0];
+  useEffect(() => {
+    const dropdown = ref.current;
+    if (!dropdown) return;
+    const document = dropdown.ownerDocument;
+    const closeOutside = (event: Event) => {
+      if (!dropdown.contains(event.target as Node)) dropdown.open = false;
+    };
+    // WebKit may blur the summary without focusing a clicked menu button.
+    // Wait for an outside interaction instead of hiding that button before click.
+    document.addEventListener("pointerdown", closeOutside);
+    document.addEventListener("focusin", closeOutside);
+    return () => {
+      document.removeEventListener("pointerdown", closeOutside);
+      document.removeEventListener("focusin", closeOutside);
+    };
+  }, []);
   return (
     <details
       className="dz-quick-choice"
@@ -118,9 +134,6 @@ function QuickChoice({
           ref.current.open = false;
           ref.current.querySelector("summary")?.focus();
         }
-      }}
-      onBlur={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget)) event.currentTarget.open = false;
       }}
     >
       <summary aria-label={`${label}: ${selected.label}`}>
