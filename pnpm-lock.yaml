@@ -52,6 +52,9 @@ importers:
       linkedom:
         specifier: ^0.18.14
         version: 0.18.14
+      openseadragon:
+        specifier: 6.1.1
+        version: 6.1.1
       sharp:
         specifier: 0.35.5
         version: 0.35.5(@types/node@26.6.5)
@@ -162,9 +165,6 @@ importers:
       ol6:
         specifier: npm:ol@6.15.1
         version: ol@6.15.1
-      openseadragon:
-        specifier: 6.1.1
-        version: 6.1.1
       openseadragon2:
         specifier: npm:openseadragon@2.4.2
         version: openseadragon@2.4.2

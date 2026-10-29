@@ -103,7 +103,8 @@ This does not sign you in or transfer your browser session.
   It needs the complete image in memory and does not preserve embedded color
   profiles. Quality 100 is not a lossless mode.
 - **ZIF** is a tiled multi-resolution image and omits transparency.
-- **IIIF** saves a folder with `info.json` and tiles for a static web viewer.
+- **IIIF** saves a folder with an offline viewer. Press Open or open `viewer.html`
+  in your browser. Keep the whole folder together, including `full/` overview images.
 
 The Compression slider at the top of the Size menu updates the size budgets as
 you drag it. Its value passes unchanged to the encoder: higher compression aims

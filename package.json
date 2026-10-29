@@ -19,6 +19,7 @@
     "@vitejs/plugin-react": "^6.1.2",
     "esbuild": "0.28.2",
     "linkedom": "^0.18.14",
+    "openseadragon": "6.1.1",
     "sharp": "0.35.5",
     "typescript": "7.0.2",
     "vite": "^8.3.5",

@@ -2,7 +2,7 @@
 //! overwrite refusal unless explicitly requested.
 //! Single-file formats (PNG, JPEG, TIFF, WebP) encode to one file; `zif`
 //! encodes one multi-directory TIFF pyramid file; `iiif-dir`
-//! writes a static tiled directory holding an `info.json` beside JPEG tiles.
+//! writes a static tiled directory with `info.json`, tiles, and an offline viewer.
 
 use std::io::{Read, Seek, Write};
 use std::path::Path;

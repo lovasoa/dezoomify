@@ -361,6 +361,7 @@ fn iiif_dir_writes_manifest_and_addressable_tiles() {
     // server answers IIIF URLs, plus one full-image overview.
     let tile = output.join("0,0,256,256/256,/0/default.png");
     let overview = output.join("full/256,/0/default.png");
+    assert!(output.join("viewer.html").is_file());
     for path in [&tile, &overview] {
         let bytes = std::fs::read(path).expect("tile file written");
         assert!(bytes.starts_with(b"\x89PNG"), "tile is png");
