@@ -257,16 +257,29 @@ test("a refused settings edit shows the shell reason and persists nothing", asyn
   assert.equal(loadSettings().retries, 5, "the refused edit persists nothing");
 });
 
-test("AVIF settings persist and reach the native invocation", async () => {
+test("quick settings persist and reach the native invocation", async () => {
   const { root, start } = mountDesktop();
-  const avif = [...root.querySelectorAll('.dz-quick-menu[aria-label="Format"] button')].find(
-    (button) => button.firstElementChild.textContent === "AVIF",
-  );
-  click(avif);
+  for (const [label, value] of [
+    ["Format", "AVIF"],
+    ["Size", "4K"],
+    ["Network", "Aggressive"],
+  ]) {
+    const menu = root.querySelector(`.dz-quick-menu[aria-label="${label}"]`);
+    click(
+      [...menu.querySelectorAll("button")].find(
+        (button) => button.firstElementChild.textContent === value,
+      ),
+    );
+    await flush();
+    assert.ok(root.querySelector(`summary[aria-label="${label}: ${value}"]`));
+  }
   await flush();
-  assert.equal(loadSettings().output_format, "avif");
   const invocation = await start();
+  assert.deepEqual(invocation.request.settings, loadSettings());
   assert.equal(invocation.request.settings.output_format, "avif");
+  assert.equal(invocation.request.settings.max_width, 3840);
+  assert.equal(invocation.request.settings.max_height, 2160);
+  assert.equal(invocation.request.settings.network_profile, "aggressive");
   await act(async () => invocation.resolve({ ...output, format: "avif" }));
   await flush();
 });

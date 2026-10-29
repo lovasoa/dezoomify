@@ -11,7 +11,7 @@ const { createRoot } = await import("react-dom/client");
 const { setLocale } = await import("@dezoomify/shared-ui");
 const { DesktopSettingsView } = await import("../src/settingsView.tsx");
 
-/** Type into a controlled field the way the select preset test does. */
+/** Submit a controlled field edit through React's change event. */
 function typeInto(element, value) {
   act(() => {
     Object.defineProperty(element, "value", { configurable: true, writable: true, value });
@@ -50,6 +50,46 @@ function renderSettings({ error = null, settings = {} } = {}) {
   );
   return { container, root, current: () => currentSettings };
 }
+
+test("quick menus allow pointer selection when buttons do not take focus", () => {
+  const { container, current } = renderSettings();
+  for (const [label, value, field, expected] of [
+    ["Format", "AVIF", "output_format", "avif"],
+    ["Size", "4K", "max_width", 3840],
+    ["Network", "Aggressive", "network_profile", "aggressive"],
+  ]) {
+    const menu = container.querySelector(`.dz-quick-menu[aria-label="${label}"]`);
+    const dropdown = menu.closest("details");
+    const summary = dropdown.querySelector("summary");
+    const option = [...menu.querySelectorAll("button")].find(
+      (button) => button.firstElementChild.textContent === value,
+    );
+    act(() => {
+      dropdown.open = true;
+      option.dispatchEvent(new window.Event("pointerdown", { bubbles: true }));
+      // WebKit can blur the summary without focusing the clicked button.
+      summary.dispatchEvent(new window.Event("focusout", { bubbles: true }));
+    });
+    assert.equal(dropdown.open, true, "the option stays visible until its click arrives");
+    click(option);
+    assert.equal(current()[field], expected);
+    assert.equal(summary.getAttribute("aria-label"), `${label}: ${value}`);
+    assert.equal(dropdown.open, false);
+  }
+});
+
+test("quick menus close when pointer or keyboard focus moves outside", () => {
+  const { container } = renderSettings();
+  const dropdown = container.querySelector(".dz-quick-choice");
+  const outside = container.querySelector(".dz-settings-more");
+  for (const event of ["pointerdown", "focusin"]) {
+    act(() => {
+      dropdown.open = true;
+      outside.dispatchEvent(new window.Event(event, { bubbles: true }));
+    });
+    assert.equal(dropdown.open, false);
+  }
+});
 
 test("desktop quick choices apply sizes and update estimates with the format", () => {
   const { container, root, current } = renderSettings();
