@@ -66,7 +66,7 @@ export class ViewerCollector {
           doc.baseURI,
         );
         if (this.state.collect(evidence) === "full") {
-          if (evidence.handle) releaseViewerTiles([evidence.handle]);
+          if ("handle" in evidence && evidence.handle) releaseViewerTiles([evidence.handle]);
           break;
         }
       } catch {

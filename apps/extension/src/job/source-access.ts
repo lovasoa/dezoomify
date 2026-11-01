@@ -23,7 +23,7 @@ import type {
 } from "@dezoomify/wasm-bindings";
 import type { PublicPath, WxtBrowser } from "wxt/browser";
 import { transportError } from "../runtime/fetch.ts";
-import { findImageDownloadLink, findLoadedImage } from "./loaded-image.ts";
+import { findImageDownloadLink, findLoadedImage, type LoadedImage } from "./loaded-image.ts";
 import { cancelSourceFetch, fetchSource, inspectSourceDocument } from "./source-operations.ts";
 import { collectCandidates, type SourceSnapshot, sourceSnapshotLimits } from "./source-snapshot.ts";
 import { readViewerTile, releaseViewerTiles } from "./viewers/session.ts";
@@ -110,7 +110,7 @@ function validSnapshot(value: unknown, expectedUrl: string): value is CandidateS
   );
 }
 
-function validImage(value: unknown): boolean {
+function validImage(value: unknown): value is LoadedImage | undefined {
   return (
     value === undefined ||
     (isRecord(value) &&
@@ -229,11 +229,28 @@ function memoryDiagnostics(value: unknown): MemoryDiagnostics | undefined {
 
 function memoryScanReply(reply: unknown): {
   observed: ObservedInput[];
+  images: LoadedImage[];
   memory?: MemoryDiagnostics;
 } {
   if (!isRecord(reply) || !Array.isArray(reply.inputs) || reply.inputs.length > 100)
-    return { observed: [] };
-  return { observed: observedInputs(reply.inputs), memory: memoryDiagnostics(reply.diagnostics) };
+    return { observed: [], images: [] };
+  const images =
+    Array.isArray(reply.images) && reply.images.length <= 100
+      ? reply.images
+          .filter(
+            (image): image is LoadedImage =>
+              validImage(image) &&
+              image !== undefined &&
+              image.url.length <= MAX_URL_LENGTH &&
+              isPublicHttpUrl(image.url),
+          )
+          .map(({ url, width, height }) => ({ url, width, height }))
+      : [];
+  return {
+    observed: observedInputs(reply.inputs),
+    images,
+    memory: memoryDiagnostics(reply.diagnostics),
+  };
 }
 
 /**
@@ -256,6 +273,7 @@ export function createSourceAccess(
   const rootFrame: SourceFrame = { frameId: 0, documentUrl };
   const sessionFrames = new Map<string, SourceFrame>([[sourceOrigin, rootFrame]]);
   const tileFrames = new Map<string, SourceFrame>();
+  const singleImageFrames = new Map<SourceFrame, LoadedImage[]>();
   const timeoutMs = options.timeoutMs ?? 30_000;
   const lifetime = new AbortController();
   const onUpdated = (updatedTabId: number, changeInfo: { status?: string; url?: string }) => {
@@ -467,6 +485,7 @@ export function createSourceAccess(
   async function scan(signal?: AbortSignal, frame = rootFrame): Promise<CandidateSnapshot> {
     const scanDeadline = Date.now() + timeoutMs;
     let observed: ObservedInput[] = [];
+    let images: LoadedImage[] = [];
     let memory: MemoryDiagnostics | undefined;
     try {
       const reply = await inject(
@@ -476,7 +495,7 @@ export function createSourceAccess(
         scanDeadline,
         frame,
       );
-      ({ observed, memory } = memoryScanReply(reply));
+      ({ observed, images, memory } = memoryScanReply(reply));
       rememberTileFrames(isRecord(reply) ? reply.handles : undefined, frame);
     } catch (error) {
       // A memory scan is optional evidence; source loss/cancellation still
@@ -500,6 +519,7 @@ export function createSourceAccess(
     if (!validSnapshot(snapshot, frame.documentUrl))
       throw transportError("bad-url", "invalid source scan result");
     assertLive();
+    singleImageFrames.set(frame, images);
     return {
       ...snapshot,
       inputs: [...snapshot.inputs, ...observed].map((input) =>
@@ -816,7 +836,9 @@ export function createSourceAccess(
     browserApi.tabs.onRemoved.removeListener(onRemoved);
   }
 
+  /** Retire page tile handles and single-image candidates before the next job scans. */
   function releaseTiles() {
+    singleImageFrames.clear();
     const frames = new Map<SourceFrame, string[]>();
     for (const [handle, frame] of tileFrames) {
       const handles = frames.get(frame) ?? [];
@@ -838,11 +860,7 @@ export function createSourceAccess(
 
   return {
     scan,
-    async loadedImage(signal: AbortSignal) {
-      const reply = await inject({ func: findLoadedImage, args: [] }, signal);
-      if (!validImage(reply.image)) throw transportError("bad-url", "invalid loaded image result");
-      return reply.image;
-    },
+    loadedImage,
     async imageDownloadLink(signal: AbortSignal) {
       const reply = await inject({ func: findImageDownloadLink, args: [] }, signal);
       if (
@@ -869,4 +887,31 @@ export function createSourceAccess(
       return sourceOrigin;
     },
   };
+
+  /** Revalidate contributing documents before selecting a viewer original or
+   * the source page's current large DOM image. Never use a navigated frame's URL. */
+  function loadedImage(signal: AbortSignal) {
+    return bounded(async (owned) => {
+      const images: LoadedImage[] = [];
+      for (const [frame, candidates] of singleImageFrames) {
+        if (!candidates.length) continue;
+        images.push(...(await liveImages(frame, candidates, owned)));
+      }
+      const reply = await injectUnchecked({ func: findLoadedImage, args: [images] }, owned);
+      if (!validImage(reply.image)) throw transportError("bad-url", "invalid loaded image result");
+      return reply.image;
+    }, signal);
+  }
+
+  async function liveImages(frame: SourceFrame, images: LoadedImage[], signal: AbortSignal) {
+    try {
+      await inspect(frame, signal);
+      return images;
+    } catch (error) {
+      assertLive();
+      signal.throwIfAborted();
+      if (frame.frameId === 0) throw error;
+      return [];
+    }
+  }
 }
