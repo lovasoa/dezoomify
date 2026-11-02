@@ -5,6 +5,7 @@
 #![deny(clippy::unwrap_used)]
 
 mod arguments;
+mod interactive;
 mod report;
 
 use std::collections::BTreeMap;
@@ -62,10 +63,11 @@ fn main() {
         run_bulk(parsed);
         return;
     }
+    let interaction = interactive::Interaction::new(&parsed);
     if has_args {
-        run_single_from_cli(parsed);
+        run_single_from_cli(parsed, &interaction);
     } else {
-        run_interactive_loop(parsed);
+        run_interactive_loop(parsed, &interaction);
     }
 }
 
@@ -76,20 +78,26 @@ fn help_text() -> String {
     }
 }
 
-/// One-shot single run for command-line invocation. Missing input prompts
-/// once when a terminal is present, else prints help; missing output
-/// auto-names from the fallback. Pickers prompt when no selector was given
-/// and a terminal is present.
-fn run_single_from_cli(parsed: Args) {
+/// One-shot invocation. Only interactive runs may ask for missing input;
+/// selection callbacks run later, after discovery supplies the actual options.
+fn run_single_from_cli(parsed: Args, interaction: &interactive::Interaction) {
     let input = match parsed.input.clone() {
         Some(input) => input,
-        None => match prompt_input() {
-            Some(input) => input,
-            None => {
-                println!("{}", help_text());
+        None if interaction.enabled => match interaction.input() {
+            Ok(Some(input)) => input,
+            Ok(None) => {
+                warn_end_of_input(&parsed.logging);
                 std::process::exit(0);
             }
+            Err(error) => {
+                eprintln!("error: {error}");
+                std::process::exit(1);
+            }
         },
+        None => {
+            eprintln!("error: no input given\n{}", help_text());
+            std::process::exit(2);
+        }
     };
     if input.trim().is_empty() {
         eprintln!("error: no input given");
@@ -99,18 +107,12 @@ fn run_single_from_cli(parsed: Args) {
         Some(output) => output,
         None => single_auto_output(),
     };
-    let mut parsed = Args {
+    let parsed = Args {
         input: Some(input.clone()),
         output: Some(output.clone()),
         ..parsed
     };
-    if !apply_pickers(&mut parsed) {
-        if report::show_warning(&parsed.logging) {
-            eprintln!("warning: Reached end of input. Exiting...");
-        }
-        std::process::exit(0);
-    }
-    let ok = run_single_inner(&parsed, &input, &output);
+    let ok = run_single_inner(&parsed, &input, &output, interaction);
     if !ok {
         std::process::exit(1);
     }
@@ -118,20 +120,22 @@ fn run_single_from_cli(parsed: Args) {
 
 /// No-args terminal loop: repeat
 /// prompts until EOF, continue after failures, exit 1 when any run failed.
-fn run_interactive_loop(base: Args) {
-    use std::io::IsTerminal as _;
-    if !std::io::stdin().is_terminal() {
+fn run_interactive_loop(base: Args, interaction: &interactive::Interaction) {
+    if !interaction.enabled {
         println!("{}", help_text());
         std::process::exit(0);
     }
     let mut has_errors = false;
     loop {
-        let input = match prompt_input() {
-            Some(input) => input,
-            None => {
-                if report::show_warning(&base.logging) {
-                    eprintln!("warning: Reached end of input. Exiting...");
-                }
+        let input = match interaction.input() {
+            Ok(Some(input)) => input,
+            Ok(None) => {
+                warn_end_of_input(&base.logging);
+                break;
+            }
+            Err(error) => {
+                eprintln!("error: {error}");
+                has_errors = true;
                 break;
             }
         };
@@ -141,19 +145,16 @@ fn run_interactive_loop(base: Args) {
             continue;
         }
         let output = single_auto_output();
-        let mut parsed = Args {
+        let parsed = Args {
             input: Some(input.clone()),
             output: Some(output.clone()),
             ..base.clone()
         };
-        if !apply_pickers(&mut parsed) {
-            if report::show_warning(&parsed.logging) {
-                eprintln!("warning: Reached end of input. Exiting...");
-            }
-            break;
-        }
-        if !run_single_inner(&parsed, &input, &output) {
+        if !run_single_inner(&parsed, &input, &output, interaction) {
             has_errors = true;
+        }
+        if interaction.ended() {
+            break;
         }
     }
     if has_errors {
@@ -161,74 +162,9 @@ fn run_interactive_loop(base: Args) {
     }
 }
 
-/// Prompt for pickers when no selector was given and a terminal is present.
-/// Returns false on EOF (caller exits the loop), true otherwise. Bulk mode
-/// never prompts: the first image and automatic level win.
-fn apply_pickers(parsed: &mut Args) -> bool {
-    use std::io::IsTerminal as _;
-    if parsed.is_bulk_mode() || !std::io::stdin().is_terminal() {
-        return true;
-    }
-    if parsed.image_index.is_none() {
-        match image_picker() {
-            Some(index) => parsed.image_index = Some(index),
-            None => return false,
-        }
-    }
-    if !parsed.has_level_specifying_args() && !parsed.largest {
-        match level_picker() {
-            Some(index) => parsed.zoom_level = Some(index),
-            None => return false,
-        }
-    }
-    true
-}
-
-/// Prompt for an image index before starting the job. Out-of-range indices
-/// select the last image. Loops until a number or EOF.
-fn image_picker() -> Option<usize> {
-    loop {
-        let line = prompt_line("Which image do you want to download? ")?;
-        let trimmed = line.trim();
-        if let Ok(index) = trimmed.parse::<usize>() {
-            return Some(index);
-        }
-        eprintln!("error: '{trimmed}' is not a valid image number");
-    }
-}
-
-/// Interactive level picker, same shape as the image picker. Any number is
-/// accepted and out-of-range uses the last level.
-fn level_picker() -> Option<usize> {
-    loop {
-        let line = prompt_line("Which level do you want to download? ")?;
-        let trimmed = line.trim();
-        if let Ok(index) = trimmed.parse::<usize>() {
-            return Some(index);
-        }
-        eprintln!("error: '{trimmed}' is not a valid level number");
-    }
-}
-
-/// Prompt for the input URI when a terminal is present. Returns `None` on
-/// non-TTY or EOF.
-fn prompt_input() -> Option<String> {
-    use std::io::IsTerminal as _;
-    if !std::io::stdin().is_terminal() {
-        return None;
-    }
-    let input = prompt_line("Enter an URL or a path to a tiles.yaml file: ")?;
-    Some(input.trim().to_string())
-}
-
-fn prompt_line(prompt: &str) -> Option<String> {
-    use std::io::Write as _;
-    let _ = std::io::stderr().write_all(prompt.as_bytes());
-    let _ = std::io::stderr().flush();
-    let mut line = String::new();
-    match std::io::stdin().read_line(&mut line) {
-        Ok(0) | Err(_) => None,
-        Ok(_) => Some(line.trim_end_matches(['\r', '\n']).to_string()),
+fn warn_end_of_input(logging: &str) {
+    if report::show_warning(logging) {
+        eprintln!("warning: Reached end of input. Exiting...");
     }
 }
 
@@ -270,7 +206,12 @@ fn job_options_for(parsed: &Args, input: &str, output: &Path) -> JobOptions {
     }
 }
 
-fn run_single_inner(parsed: &Args, input: &str, output: &Path) -> bool {
+fn run_single_inner(
+    parsed: &Args,
+    input: &str,
+    output: &Path,
+    interaction: &interactive::Interaction,
+) -> bool {
     let level = parsed.logging.as_str();
     let json = parsed.json;
     let job_id = format!("job:cli-{}", std::process::id());
@@ -284,7 +225,7 @@ fn run_single_inner(parsed: &Args, input: &str, output: &Path) -> bool {
         eprintln!("error: {error} ({})", error.kind());
         false
     };
-    let result = run_native(parsed, input, output, true);
+    let result = run_native(parsed, input, output, Some(interaction));
     match result {
         Ok((summary, terminal_seq)) => {
             let Some(size) = summary.output.canvas.as_ref() else {
@@ -313,6 +254,13 @@ fn run_single_inner(parsed: &Args, input: &str, output: &Path) -> bool {
                     size.height,
                 );
             }
+            true
+        }
+        Err(error)
+            if interaction.ended()
+                && matches!(error.cause(), dezoomify::model::Error::Cancelled) =>
+        {
+            warn_end_of_input(level);
             true
         }
         Err(error) => fail(&error),
@@ -472,7 +420,7 @@ fn run_one_bulk_image(
     url: &str,
     output: &str,
 ) -> Result<(usize, String), dezoomify::model::Error> {
-    run_native(parsed, url, Path::new(output), false).map(|(publication, _)| {
+    run_native(parsed, url, Path::new(output), None).map(|(publication, _)| {
         (
             publication.tile_count,
             publication.path.to_string_lossy().into_owned(),
@@ -485,40 +433,47 @@ fn run_native(
     parsed: &Args,
     input: &str,
     output: &Path,
-    individual: bool,
+    interaction: Option<&interactive::Interaction>,
 ) -> Result<(dezoomify_native::Publication, u64), dezoomify::model::Error> {
     use dezoomify::model::Error;
     let started = Instant::now();
     let mut progress_gate = report::ProgressGate::default();
     let sequence = std::cell::Cell::new(1u64);
     let job_id = format!("job:cli-{}", std::process::id());
-    let visible = individual || !parsed.json;
+    let individual = interaction.is_some();
+    let interactive = interaction.is_some_and(|interaction| interaction.enabled);
+    let display =
+        report::InteractiveProgress::new(interactive && report::show_progress(&parsed.logging));
     let host = NativeHost::with_diagnostics(
         job_options_for(parsed, input, output),
-        report::job_diagnostics(&parsed.logging),
+        report::job_diagnostics(&parsed.logging, &display),
     )?;
-    if visible {
-        print_progress(
-            parsed.json,
-            &job_id,
-            1,
-            "started",
-            &BTreeMap::new(),
-            &parsed.logging,
+    if let Some(interaction) = interaction {
+        interaction.register(&host, &display);
+    }
+    if individual && parsed.json {
+        println!(
+            "{}",
+            report::machine_event_detail(&job_id, 1, "started", &BTreeMap::new())
         );
     }
     host.on_progress(|progress| {
         let (kind, detail) = progress_view(&progress);
-        if visible && (parsed.json || progress_gate.allow(kind, started.elapsed())) {
+        if parsed.json {
+            if !individual {
+                return;
+            }
             sequence.set(sequence.get() + 1);
-            print_progress(
-                parsed.json,
-                &job_id,
-                sequence.get(),
-                kind,
-                &detail,
-                &parsed.logging,
+            println!(
+                "{}",
+                report::machine_event_detail(&job_id, sequence.get(), kind, &detail)
             );
+        } else if report::show_progress(&parsed.logging) {
+            if interactive {
+                display.update(&progress);
+            } else if progress_gate.allow(kind, started.elapsed()) {
+                eprintln!("{}", report::human_progress(&progress));
+            }
         }
     });
     host.transport
@@ -541,33 +496,6 @@ fn run_native(
         .publication()
         .ok_or_else(|| Error::Internal("output was not published".to_string().into()))?;
     Ok((publication, sequence.get() + 1))
-}
-
-fn print_progress(
-    json: bool,
-    job: &str,
-    seq: u64,
-    kind: &str,
-    detail: &BTreeMap<String, String>,
-    logging: &str,
-) {
-    if json {
-        println!("{}", report::machine_event_detail(job, seq, kind, detail));
-        return;
-    }
-    if !report::show_progress(logging) {
-        return;
-    }
-    let flat = detail
-        .iter()
-        .map(|(key, value)| format!("{key}={value}"))
-        .collect::<Vec<_>>()
-        .join(" ");
-    if flat.is_empty() {
-        eprintln!("{kind} {job}");
-    } else {
-        eprintln!("{kind} {job} {flat}");
-    }
 }
 
 fn parse_text_list(content: &str) -> Vec<(String, Option<String>)> {

@@ -255,12 +255,15 @@ impl Controls {
 type RetryAnswer<'a> = Pin<Box<dyn Future<Output = Result<RetryChoice, Error>> + 'a>>;
 type RetryCallback<'a> = Box<dyn FnMut(TileAcquisition) -> RetryAnswer<'a> + 'a>;
 
-/// A graphical host owns the pending answer and publication of optional thumbnails.
+/// An image choice and thumbnail sink. Ready answers skip previews; graphical
+/// callers may keep the answer pending while publishing optional thumbnails.
 pub struct ImageSelection<'a> {
     pub answer: Pin<Box<dyn Future<Output = Result<u32, Error>> + 'a>>,
     pub preview: Box<dyn FnMut(u32, String) + 'a>,
 }
 type ImageChooser<'a> = Box<dyn FnMut(Catalog) -> Result<ImageSelection<'a>, Error> + 'a>;
+type LevelAnswer<'a> = Pin<Box<dyn Future<Output = Result<u32, Error>> + 'a>>;
+type LevelChooser<'a> = Box<dyn FnMut(Image) -> LevelAnswer<'a> + 'a>;
 
 struct PendingPixels {
     id: u32,
@@ -289,6 +292,7 @@ pub struct NativeHost<'a> {
     last_progress: RefCell<Progress>,
     retry: RefCell<Option<RetryCallback<'a>>>,
     image_chooser: RefCell<Option<ImageChooser<'a>>>,
+    level_chooser: RefCell<Option<LevelChooser<'a>>>,
     approved_attempt: Cell<u32>,
     retry_pending: Cell<bool>,
     published: RefCell<Option<Publication>>,
@@ -365,6 +369,7 @@ impl<'a> NativeHost<'a> {
             last_progress: RefCell::new(Progress::default()),
             retry: RefCell::new(None),
             image_chooser: RefCell::new(None),
+            level_chooser: RefCell::new(None),
             approved_attempt: Cell::new(0),
             retry_pending: Cell::new(false),
             published: RefCell::new(None),
@@ -394,11 +399,22 @@ impl<'a> NativeHost<'a> {
         *self.retry.borrow_mut() = Some(Box::new(callback));
     }
 
+    /// Register a chooser for multi-entry catalogs without an explicit image index.
+    /// Deferred entries can lead to another call. The core validates the returned
+    /// zero-based catalog index; pending answers are interrupted by cancellation.
     pub fn on_choose_image(
         &self,
         callback: impl FnMut(Catalog) -> Result<ImageSelection<'a>, Error> + 'a,
     ) {
         *self.image_chooser.borrow_mut() = Some(Box::new(callback));
+    }
+
+    /// Register a chooser for multi-level images without an explicit level, largest,
+    /// or dimension selector. Return an index in the supplied level order; the core
+    /// validates it. Pending answers are interrupted by cancellation. Without a
+    /// chooser, the existing automatic resolution policy applies.
+    pub fn on_choose_level(&self, callback: impl FnMut(Image) -> LevelAnswer<'a> + 'a) {
+        *self.level_chooser.borrow_mut() = Some(Box::new(callback));
     }
 
     async fn approve_retry(&self, request: &TileAcquisition) -> Result<(), Error> {
@@ -1320,6 +1336,7 @@ impl Host for NativeHost<'_> {
     }
 
     async fn choose_level(&self, image: Image) -> Result<u32, Error> {
+        self.controls.checkpoint(Gate::Cancellation).await?;
         let JobOptions {
             largest,
             max_width,
@@ -1327,6 +1344,21 @@ impl Host for NativeHost<'_> {
             zoom_level,
             ..
         } = &self.options;
+        if image.levels.len() > 1
+            && zoom_level.is_none()
+            && !largest
+            && max_width.is_none()
+            && max_height.is_none()
+        {
+            let answer = self
+                .level_chooser
+                .borrow_mut()
+                .as_mut()
+                .map(|choose| choose(image.clone()));
+            if let Some(answer) = answer {
+                return self.controlled(answer).await;
+            }
+        }
         let levels = &image.levels;
         let sizes = levels.iter().enumerate();
         let area = |level: &Level| {
@@ -1568,8 +1600,44 @@ mod tests {
                     level.size = None;
                 }
                 assert_eq!(host.choose_level(unknown).await.unwrap(), expected[1]);
+
+                host.on_choose_level(|_| Box::pin(std::future::ready(Ok(1))));
+                let should_prompt =
+                    !largest && zoom_level.is_none() && max_width.is_none() && max_height.is_none();
+                assert_eq!(
+                    host.choose_level(image.clone()).await.unwrap(),
+                    if should_prompt { 1 } else { expected[0] }
+                );
+                let mut single = image.clone();
+                single.levels.truncate(1);
+                assert_eq!(host.choose_level(single).await.unwrap(), 0);
             });
         }
+    }
+
+    #[test]
+    fn cancellation_interrupts_a_pending_level_choice() {
+        let image: Image = serde_json::from_value(serde_json::json!({
+            "format": "test", "levels": [{ "label": "small" }, { "label": "large" }]
+        }))
+        .unwrap();
+        let host = NativeHost::new(JobOptions {
+            input_url: "https://images.test/image.dzi".into(),
+            ..Default::default()
+        })
+        .unwrap();
+        let controls = host.controls.clone();
+        host.on_choose_level(move |_| {
+            let controls = controls.clone();
+            Box::pin(async move {
+                controls.cancel();
+                std::future::pending().await
+            })
+        });
+        assert!(matches!(
+            host.transport.block_on(host.choose_level(image)),
+            Err(Error::Cancelled)
+        ));
     }
 
     #[test]

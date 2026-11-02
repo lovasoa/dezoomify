@@ -13,6 +13,7 @@ path = "src/main.rs"
 [dependencies]
 dezoomify = { path = "../../crates/dezoomify" }
 dezoomify-native = { path = "../../crates/dezoomify-native" }
+indicatif = "0.18"
 serde_json.workspace = true
 
 [dev-dependencies]
