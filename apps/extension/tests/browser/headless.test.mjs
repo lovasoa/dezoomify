@@ -1009,6 +1009,33 @@ for (const [browser, runJob] of [
   ["firefox", runFirefoxJob],
 ]) {
   const deferredAccess = browser === "chromium";
+  test(`${browser}: krpano's hidden API saves without reading runtime JavaScript`, {
+    timeout: 180000,
+  }, async () => {
+    const work = mkdtempSync(path.join(tmpdir(), "dezoomify-e2e-memory-krpano-"));
+    const offset = readFileSync(fixtureServer.logFile, "utf8").length;
+    const scriptReads = [];
+    try {
+      assertPng(
+        await runJob(fixtureServer.base, work, {
+          scenario: "memory-krpano",
+          async beforeStart(context) {
+            await context.route("**/private-runtime.js", async (route) => {
+              if (route.request().resourceType() === "script") return route.continue();
+              scriptReads.push(route.request().url());
+              await route.abort("blockedbyclient");
+            });
+          },
+        }),
+      );
+      assert.deepEqual(scriptReads, []);
+      const events = newFixtureEvents(fixtureServer.logFile, offset);
+      assert.equal(events.filter((event) => event.path === "/private-runtime.js").length, 1);
+      assert.equal(events.filter((event) => event.path.endsWith(".xml")).length, 0);
+    } finally {
+      rmSync(work, { recursive: true, force: true });
+    }
+  });
   test(`${browser}: recursive iframe scanning ${deferredAccess ? "defers access" : "uses existing access"} and saves a dynamic viewer`, {
     timeout: 180000,
   }, async () => {

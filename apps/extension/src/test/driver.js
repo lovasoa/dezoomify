@@ -183,6 +183,7 @@ function testTargetUrl(origin, scenario) {
   if (scenario.startsWith("fixtures/")) return `${origin}/${scenario}/viewer.html`;
   if (scenario === "recursive-iframe") return `${origin}/recursive-iframe.html`;
   if (scenario === "memory-openseadragon-gallery") return `${origin}/viewer-gallery.html`;
+  if (scenario === "memory-krpano") return `${origin}/memory-krpano.html`;
   if (scenario.startsWith("memory-openseadragon-"))
     return `${origin}/memory-openseadragon.html?type=${encodeURIComponent(scenario.slice("memory-openseadragon-".length))}`;
   if (scenario.startsWith("memory-openlayers-"))
