@@ -92,14 +92,21 @@ fn complete_format_metadata_keeps_loader_only_siblings_without_fetching() {
                 serde_json::to_vec(&observation()).unwrap(),
             )
             .with_kind(DiscoveryInputKind::ObservedViewer),
+            DiscoveryInput::new("https://museum.test/image/info.json")
+                .with_kind(DiscoveryInputKind::ObservedResource),
+            DiscoveryInput::new("https://museum.test/image/0,0,256,256/256,256/0/default.png")
+                .with_kind(DiscoveryInputKind::ObservedResource),
+            DiscoveryInput::new("https://museum.test/image/256,0,256,256/256,256/0/default.png")
+                .with_kind(DiscoveryInputKind::ObservedResource),
             DiscoveryInput::with_contents(
                 "https://museum.test/image/info.json",
-                include_bytes!("../../../fixtures/iiif/v3/info.json").to_vec(),
+                include_str!("../../../fixtures/iiif/v3/info.json")
+                    .replace("{{origin}}/fixtures/iiif/v3", "https://museum.test/image"),
             )
             .with_kind(DiscoveryInputKind::ObservedMetadata),
         ],
         Default::default(),
-        |_| panic!("complete snapshots must not fetch"),
+        |uri| panic!("complete snapshots must not fetch: {uri}"),
     );
     let catalog = catalog.unwrap();
     assert_eq!(catalog.len(), 2);
@@ -110,6 +117,40 @@ fn complete_format_metadata_keeps_loader_only_siblings_without_fetching() {
         matches!(&catalog.entries()[1], dezoomify::core::DiscoveredEntry::Ready(image) if image.format == "viewer")
     );
     assert!(requests.is_empty());
+}
+
+#[test]
+fn accessible_viewers_precede_weak_resource_reads() {
+    let registry = default_registry();
+    let catalog = futures::executor::block_on(registry.discover(
+        vec![
+            DiscoveryInput::with_contents("https://museum.test/page", "<html></html>"),
+            DiscoveryInput::new("https://analytics.test/script.js")
+                .with_kind(DiscoveryInputKind::ObservedResource),
+            DiscoveryInput::new("https://museum.test/opaque")
+                .with_kind(DiscoveryInputKind::ObservedResource),
+        ],
+        Default::default(),
+        |request, _| async move {
+            panic!(
+                "the live viewer should prevent speculative reads: {}",
+                request.uri
+            )
+        },
+        support::parse_html,
+        |interaction| async move {
+            assert_eq!(interaction, dezoomify::model::Interaction::Forbidden);
+            Ok(vec![
+                DiscoveryInput::with_contents(
+                    "https://museum.test/art#observed",
+                    serde_json::to_vec(&observation()).unwrap(),
+                )
+                .with_kind(DiscoveryInputKind::ObservedViewer),
+            ])
+        },
+    ))
+    .unwrap();
+    assert_eq!(support::ready_image(catalog).format, "viewer");
 }
 
 #[test]

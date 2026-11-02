@@ -7,6 +7,19 @@ Follow [Caller contracts](code-quality.md): state parser input assumptions,
 URL/base handling, pixel/grid coordinate conventions, and malformed-input behavior
 at the owning declarations. Reuse shared geometry contracts where they apply.
 
+Declare each route's semantic role, matcher and action, such as
+`metadata(url_suffix("ImageProperties.xml")).decode(properties)`. Keep viewer
+entry points distinct from metadata resources and direct image URLs. Roles and
+matchers provide [specificity defaults](../crates/dezoomify/src/core/discovery.rs);
+explicit matcher overrides take precedence. Mark broad exceptions, such as
+generic JavaScript URLs or ordinary element IDs, as `Low`.
+Routes run in declaration order, so place broad fallbacks after specific routes.
+Content matchers strengthen evidence only after matching available bytes;
+they do not justify fetching arbitrary resources to try them. Wildcard/schema
+decoders retain the caller's evidence; explicitly broad matches also lower the
+priority of decoded results. Return a follow request for missing bytes;
+discovery shares reads and schedules the continuation.
+
 Decoding and metadata parsing designate the decoded resource as canonical by
 default. That URL must be able to reconstruct the image or catalog on its own.
 Use `non_canonical()` for intermediate routes, and `decode_intermediate_with()`

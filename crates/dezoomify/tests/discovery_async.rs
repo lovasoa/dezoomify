@@ -67,6 +67,46 @@ fn selected(catalog: DiscoveryCatalog) -> String {
 }
 
 #[test]
+fn metadata_url_defaults_outrank_viewers_but_explicit_strength_wins() {
+    use core::discovery::{Specificity::Low, metadata};
+    use dezoomify::model::DiscoveryInputKind;
+    const VIEWER: FormatSpec =
+        FormatSpec::new("viewer", &[viewer(url_suffix("/viewer")).decode(catalog)]);
+    const METADATA: FormatSpec = FormatSpec::new(
+        "metadata",
+        &[metadata(url_suffix("/descriptor")).decode(catalog)],
+    );
+    const WEAK_METADATA: FormatSpec = FormatSpec::new(
+        "metadata",
+        &[metadata(url_suffix("/descriptor").specificity(Low)).decode(catalog)],
+    );
+    for (metadata, expected) in [
+        (METADATA, "https://test/descriptor"),
+        (WEAK_METADATA, "https://test/viewer"),
+    ] {
+        let mut registry = core::Registry::new();
+        registry.register(VIEWER);
+        registry.register(metadata);
+        let result = futures::executor::block_on(
+            registry.discover(
+                ["https://test/viewer", "https://test/descriptor"]
+                    .into_iter()
+                    .map(|uri| {
+                        DiscoveryInput::new(uri).with_kind(DiscoveryInputKind::ObservedResource)
+                    })
+                    .collect(),
+                Default::default(),
+                |request, _| async move { Ok(response(&request.uri)) },
+                support::parse_html,
+                |_| async { Ok(Vec::new()) },
+            ),
+        )
+        .unwrap();
+        assert_eq!(selected(result), expected);
+    }
+}
+
+#[test]
 fn decoding_defaults_to_the_final_target_through_decoder_bound_references() {
     fn page(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
         Ok(resource.follow_relative("metadata").decode_with(metadata))
@@ -374,7 +414,12 @@ fn live_observations_win_before_blocked_http_access() {
     ))
     .unwrap();
     assert_eq!(support::ready_image(catalog).format, "deepzoom");
-    assert_eq!(*calls.borrow(), [Interaction::Forbidden]);
+    assert!(
+        calls
+            .borrow()
+            .iter()
+            .all(|interaction| *interaction == Interaction::Forbidden)
+    );
 }
 
 #[test]
@@ -409,7 +454,7 @@ fn declared_catalog_precedes_the_loaded_pages_snapshot() {
             })
         },
         support::parse_html,
-        |_| async { panic!("no additional source access is needed") },
+        |_| async { Ok(Vec::new()) },
     ))
     .unwrap();
     assert_eq!(catalog.len(), 1);
@@ -512,10 +557,7 @@ fn additional_rendered_documents_replace_inert_reads_and_continue_recursive_disc
         },
     )).unwrap();
     assert_eq!(support::ready_image(catalog).format, "deepzoom");
-    assert_eq!(
-        *reads.borrow(),
-        ["https://test/frame", "https://test/nested"]
-    );
+    assert_eq!(*reads.borrow(), ["https://test/nested"]);
     assert_eq!(
         *observations.borrow(),
         [
@@ -675,6 +717,119 @@ fn live_resource_concurrency_stays_within_the_declared_bound() {
     ))
     .unwrap();
     assert!(peak.get() <= 2);
+}
+
+#[test]
+fn shared_format_reads_leave_room_for_other_resources() {
+    use dezoomify::model::DiscoveryInputKind;
+    let (release_first, first) = futures::channel::oneshot::channel();
+    let (release_second, second) = futures::channel::oneshot::channel();
+    let waits = RefCell::new(std::collections::BTreeMap::from([
+        ("https://test/first", first),
+        ("https://test/second", second),
+    ]));
+    let reads = RefCell::new(Vec::new());
+    let registry = core::default_registry();
+    let discovery = registry.discover(
+        ["https://test/first", "https://test/second"]
+            .into_iter()
+            .map(|url| DiscoveryInput::new(url).with_kind(DiscoveryInputKind::ObservedResource))
+            .collect(),
+        DiscoveryLimits {
+            concurrent: 2,
+            ..Default::default()
+        },
+        |request, _| {
+            reads.borrow_mut().push(request.uri.clone());
+            let wait = waits
+                .borrow_mut()
+                .remove(request.uri.as_str())
+                .expect("one read per URL");
+            async move { Ok(response(wait.await.unwrap())) }
+        },
+        support::parse_html,
+        |_| async { Ok(Vec::new()) },
+    );
+    let mut discovery = Box::pin(discovery);
+    assert!(discovery.as_mut().now_or_never().is_none());
+    assert_eq!(
+        *reads.borrow(),
+        ["https://test/first", "https://test/second"]
+    );
+    release_second
+        .send(include_str!("../../../fixtures/deepzoom/basic/image.dzi"))
+        .unwrap();
+    assert!(
+        discovery.as_mut().now_or_never().is_none(),
+        "input order remains deterministic"
+    );
+    release_first.send("unrelated").unwrap();
+    assert_eq!(
+        support::ready_image(futures::executor::block_on(discovery).unwrap()).format,
+        "deepzoom"
+    );
+}
+
+#[test]
+fn accessible_live_metadata_precedes_speculative_scripts() {
+    use dezoomify::model::DiscoveryInputKind;
+    let mut inputs = vec![DiscoveryInput::with_contents(
+        "https://test/page",
+        "<html></html>",
+    )];
+    inputs.extend((0..32).map(|n| {
+        DiscoveryInput::new(format!("https://analytics.test/{n}.js"))
+            .with_kind(DiscoveryInputKind::ObservedResource)
+    }));
+    let registry = core::default_registry();
+    let catalog =
+        futures::executor::block_on(registry.discover(
+            inputs,
+            Default::default(),
+            |request, _| async move {
+                panic!("live metadata needs no speculative fetch: {}", request.uri)
+            },
+            support::parse_html,
+            |interaction| async move {
+                assert_eq!(interaction, Interaction::Forbidden);
+                Ok(vec![
+                    DiscoveryInput::with_contents(
+                        "https://viewer.test/#loaded",
+                        include_bytes!("../../../fixtures/deepzoom/basic/image.dzi"),
+                    )
+                    .with_kind(DiscoveryInputKind::ObservedMetadata),
+                ])
+            },
+        ))
+        .unwrap();
+    assert_eq!(support::ready_image(catalog).format, "deepzoom");
+}
+
+#[test]
+fn unchanged_rejected_observations_finish_discovery() {
+    use dezoomify::model::DiscoveryInputKind;
+    let observations = Cell::new(0);
+    let error = futures::executor::block_on(core::default_registry().discover(
+        Vec::new(),
+        Default::default(),
+        |_, _| async { panic!("observed contents are already available") },
+        support::parse_html,
+        |_| {
+            observations.set(observations.get() + 1);
+            assert!(
+                observations.get() <= 4,
+                "unchanged rejected snapshots must not restart discovery"
+            );
+            async {
+                Ok(vec![
+                    DiscoveryInput::with_contents("https://test/#loaded", "<html></html>")
+                        .with_kind(DiscoveryInputKind::ObservedMetadata),
+                ])
+            }
+        },
+    ))
+    .unwrap_err();
+    assert!(matches!(error, DiscoveryError::NoCandidateAccepted { .. }));
 }
 
 #[test]

@@ -591,6 +591,17 @@ fn local_paths_and_only_supported_iframe_sources_are_followed() {
 fn a_large_resource_inventory_is_ranked_before_spending_the_read_budget() {
     let metadata = "https://museum.test/proxy?filename=objectimages/painting.dzi";
     let mut inputs = vec![DiscoveryInput::with_contents(PAGE, "<html></html>")];
+    inputs.extend(
+        [
+            "https://analytics.test/playlist.js",
+            "https://analytics.test/bulk.js",
+            "https://analytics.test/event?source=page",
+            "https://analytics.test/media?event=view",
+            "https://analytics.test/image/icon.png",
+        ]
+        .into_iter()
+        .map(observed),
+    );
     inputs.extend((0..5000).map(|index| observed(&format!("https://analytics.test/{index}.js"))));
     inputs.extend((0..8).map(|index| {
         observed(&format!(
@@ -709,4 +720,59 @@ fn observed_metadata_wins_without_reading_a_valid_but_lower_priority_frame() {
             .iter()
             .any(|uri| uri == "https://museum.test/art")
     );
+}
+
+#[test]
+fn iframe_evidence_promotes_an_existing_resource() {
+    let (catalog, requests) = support::discover_inputs(
+        default_registry(),
+        vec![
+            DiscoveryInput::with_contents(PAGE, FRAME),
+            observed("https://analytics.test/opaque"),
+            observed("https://museum.test/art"),
+        ],
+        Default::default(),
+        |uri| (uri == "https://museum.test/art").then(|| Ok((DZI.to_vec(), None))),
+    );
+    assert_eq!(support::ready_image(catalog.unwrap()).format, "deepzoom");
+    assert_eq!(
+        requests
+            .iter()
+            .map(|request| request.uri.as_str())
+            .collect::<Vec<_>>(),
+        ["https://museum.test/art"]
+    );
+}
+
+#[test]
+fn generic_markers_yield_to_specific_metadata_references() {
+    for marker in [
+        "<url>/unrelated</url>",
+        "<script>const accessnumber = 'unrelated';</script>",
+        r#"<div id="map" vls:ot_id="1" vls:width="512" vls:height="512"></div>
+           <var id="zoomTileSize" value="256">"#,
+    ] {
+        for (reference, target) in [
+            ("Seadragon.embed('viewer', 'title', '/art');", "/art"),
+            ("const image = '/art.dzi';", "/art.dzi"),
+            ("openDzi('/art.xml');", "/art.xml"),
+        ] {
+            let target = format!("https://museum.test{target}");
+            let (catalog, _) = support::discover_inputs(
+                default_registry(),
+                vec![DiscoveryInput::with_contents(
+                    PAGE,
+                    format!(
+                        "{marker}<script>const unrelated = '/config.xml'; {reference}</script>"
+                    ),
+                )],
+                Default::default(),
+                |uri| {
+                    assert_eq!(uri, target, "specific evidence must precede generic links");
+                    Some(Ok((DZI.to_vec(), None)))
+                },
+            );
+            assert_eq!(support::ready_image(catalog.unwrap()).format, "deepzoom");
+        }
+    }
 }
