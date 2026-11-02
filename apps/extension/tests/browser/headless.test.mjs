@@ -908,6 +908,36 @@ test("chromium: packaged extension follows signed metadata and tile redirects wi
   }
 });
 
+test("chromium: gallery viewers reach the image chooser together", {
+  timeout: 180000,
+}, async () => {
+  const work = mkdtempSync(path.join(tmpdir(), "dezoomify-e2e-gallery-"));
+  try {
+    assertPng(
+      await runChromiumJob(fixtureServer.base, work, {
+        scenario: "memory-openseadragon-gallery",
+        async beforeCompletion(jobPage) {
+          await waitForVisible(jobPage, ".dz-image-picker", "gallery image chooser");
+          const urls = await jobPage.locator(".dz-image-url").allTextContents();
+          assert.deepEqual(
+            urls.sort(),
+            ["hidden", "visible"].map(
+              (item) => `${fixtureServer.base}/memory-openseadragon.html?type=custom&item=${item}`,
+            ),
+          );
+          await jobPage
+            .locator(".dz-image-row")
+            .filter({ hasText: "item=visible" })
+            .getByRole("button")
+            .click();
+        },
+      }),
+    );
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+});
+
 test("firefox: packaged extension runs the job-tab flow", { timeout: 180000 }, async () => {
   const work = mkdtempSync(path.join(tmpdir(), "dezoomify-e2e-firefox-"));
   try {

@@ -669,7 +669,8 @@ export function createSourceAccess(
     }, signal);
   }
 
-  /** One lazy traversal per Rust invocation; grants refresh the accessible inventory. */
+  /** One lazy traversal per Rust invocation. Batch accessible frames together so
+   * discovery can offer sibling viewers before requesting more permissions. */
   function observations(access: {
     hasPermission(origin: string): Promise<boolean>;
     ensurePermission(origin: string, signal: AbortSignal): Promise<void>;
@@ -678,15 +679,13 @@ export function createSourceAccess(
   }) {
     const seen = new Set<string>();
     const requested = new Set<string>();
-    async function scanAvailable(
-      frames: SourceFrame[],
-      signal: AbortSignal,
-    ): Promise<CandidateSnapshot | undefined> {
+    async function scanAvailable(frames: SourceFrame[], signal: AbortSignal): Promise<JobInput[]> {
+      const inputs: JobInput[] = [];
       for (const frame of frames) {
         const snapshot = await scanObservedFrame(frame, signal);
-        if (snapshot) return snapshot;
+        if (snapshot) inputs.push(...snapshot.inputs);
       }
-      return undefined;
+      return inputs;
     }
 
     async function scanObservedFrame(
@@ -752,8 +751,8 @@ export function createSourceAccess(
       // Re-probe live frames without repeating already-scanned documents.
       let available = await inventory(signal);
       while (seen.size < 16) {
-        const snapshot = await scanAvailable(available.frames, signal);
-        if (snapshot) return snapshot.inputs;
+        const inputs = await scanAvailable(available.frames, signal);
+        if (inputs.length) return inputs;
         if (!(await grantNextOrigin(available, interaction, signal))) return [];
         available = await inventory(signal);
       }

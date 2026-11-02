@@ -159,6 +159,48 @@ function snapshot(documentUrl = SOURCE_URL) {
   };
 }
 
+test("accessible frames arrive in one batch regardless of inventory order", async () => {
+  const left = { frameId: 8, documentUrl: "https://gallery.example/left", token: "left" };
+  const right = { frameId: 9, documentUrl: "https://gallery.example/right", token: "right" };
+  for (const frames of [
+    [left, right],
+    [right, left],
+  ]) {
+    const fake = fakeBrowser(async (injection) => {
+      const frame = frames.find((frame) => frame.frameId === injection.target.frameIds[0]);
+      const documentUrl = frame.documentUrl;
+      return {
+        documentUrl,
+        ok: true,
+        inputs: injection.files
+          ? []
+          : [{ url: documentUrl, kind: "source", contents: "<html></html>" }],
+      };
+    });
+    fake.setFrames([{ frameId: 0, documentUrl: SOURCE_URL, token: "root" }, ...frames]);
+    const source = createSourceAccess(fake.api, { tabId: 9, documentUrl: SOURCE_URL });
+    try {
+      const observe = source.observations({
+        hasPermission: async () => true,
+        ensurePermission: () => assert.fail("already granted"),
+        scanned() {},
+        failed(_frame, error) {
+          throw error;
+        },
+      });
+      const signal = new AbortController().signal;
+      const inputs = await observe("forbidden", signal);
+      assert.deepEqual(
+        new Set(inputs.map((input) => input.url)),
+        new Set([left.documentUrl, right.documentUrl]),
+      );
+      assert.deepEqual(await observe("forbidden", signal), []);
+    } finally {
+      source.dispose();
+    }
+  }
+});
+
 test("live tile capabilities stay bound to their exact viewer frame and are released on retirement", async () => {
   const viewerUrl = "https://gallery.example/viewer";
   const handle = "test-source";
