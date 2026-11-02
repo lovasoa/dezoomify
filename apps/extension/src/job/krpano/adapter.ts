@@ -1,6 +1,7 @@
 import type { ViewerAdapter } from "../viewers/adapter.ts";
+import { projectMetadata } from "../viewers/metadata.ts";
 import { PageObject } from "../viewers/page-object.ts";
-import { projectImage } from "./metadata.ts";
+import { readTileSource } from "./metadata.ts";
 
 function isViewer(object: PageObject): boolean {
   return ["get", "set", "call", "screentosphere", "spheretoscreen", "unload"].every((key) =>
@@ -27,7 +28,9 @@ export const krpanoAdapter: ViewerAdapter = {
       ? [
           {
             identity: image.identity,
-            read: (context, base) => ({ input: projectImage(runtime, image, context, base) }),
+            read: (context, base) => ({
+              input: projectMetadata(readTileSource(runtime, image, base), context),
+            }),
           },
         ]
       : [];

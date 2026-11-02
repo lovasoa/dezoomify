@@ -44,7 +44,38 @@ export interface IipSource extends SourceGeometry {
   levels: number;
 }
 
-export type TileSource = DziSource | ZoomifySource | IiifSource | IipSource;
+export const krpanoShapes = [
+  "cube",
+  "cylinder",
+  "flat",
+  "sphere",
+  "left",
+  "right",
+  "front",
+  "back",
+  "up",
+  "down",
+] as const;
+
+export interface KrpanoShape {
+  readonly type: (typeof krpanoShapes)[number];
+  readonly url: string;
+}
+
+export interface KrpanoLevel {
+  readonly width: number;
+  readonly height: number;
+  readonly shapes: readonly KrpanoShape[];
+}
+
+export interface KrpanoSource {
+  readonly protocol: "krpano";
+  readonly tileSize: number;
+  readonly baseIndex: number;
+  readonly levels: readonly KrpanoLevel[];
+}
+
+export type TileSource = DziSource | ZoomifySource | IiifSource | IipSource | KrpanoSource;
 
 export interface MetadataContext {
   documentUrl: string;
