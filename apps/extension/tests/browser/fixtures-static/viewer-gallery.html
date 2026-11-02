@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8"><title>Gallery with a preloaded viewer</title></head>
+  <body>
+    <div aria-hidden="true" style="position:absolute;left:-1200px">
+      <iframe title="Preloaded image" src="/memory-openseadragon.html?type=custom&amp;item=hidden" width="600" height="600"></iframe>
+    </div>
+    <iframe title="Selected image" src="/memory-openseadragon.html?type=custom&amp;item=visible" width="600" height="600"></iframe>
+    <script>
+      const frames = [...document.querySelectorAll("iframe")];
+      const ready = new Set();
+      window.addEventListener("message", (event) => {
+        if (event.data !== "viewer-ready" || !frames.some((frame) => frame.contentWindow === event.source)) return;
+        ready.add(event.source);
+        if (ready.size === frames.length) document.documentElement.dataset.viewerReady = "true";
+      });
+    </script>
+  </body>
+</html>

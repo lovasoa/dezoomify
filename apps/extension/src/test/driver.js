@@ -174,6 +174,7 @@ function testTargetUrl(origin, scenario) {
   if (scenario === "loaded-image-viewer") return `${origin}/loaded-image.html?viewer`;
   if (scenario.startsWith("fixtures/")) return `${origin}/${scenario}/viewer.html`;
   if (scenario === "recursive-iframe") return `${origin}/recursive-iframe.html`;
+  if (scenario === "memory-openseadragon-gallery") return `${origin}/viewer-gallery.html`;
   if (scenario.startsWith("memory-openseadragon-"))
     return `${origin}/memory-openseadragon.html?type=${encodeURIComponent(scenario.slice("memory-openseadragon-".length))}`;
   if (scenario.startsWith("memory-openlayers-"))
