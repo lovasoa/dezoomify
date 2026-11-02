@@ -1036,6 +1036,9 @@ struct ParsedResponse {
     bytes: Arc<Vec<u8>>,
     final_uri: Option<String>,
     html: HtmlDocument,
+    /// Reconstructed viewer data stays below declared source catalogs, even
+    /// when another branch consumes it through a recognized metadata URL.
+    snapshot: bool,
 }
 
 mod search;

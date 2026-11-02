@@ -40,9 +40,15 @@ struct Pending {
     canonical: bool,
 }
 
+#[derive(Clone)]
+struct Supplied {
+    bytes: Arc<Vec<u8>>,
+    snapshot: bool,
+}
+
 #[derive(Default)]
 struct Resource {
-    supplied: Option<Arc<Vec<u8>>>,
+    supplied: Option<Supplied>,
     state: State,
     waiting: Vec<Pending>,
     root: Option<Priority>,
@@ -117,11 +123,16 @@ impl Search {
     ) {
         let request = Request::new(&input.url);
         let entry = self.resources.entry(request.clone()).or_default();
-        let changed = input
-            .contents
-            .as_ref()
-            .is_some_and(|bytes| entry.supplied.as_ref().is_none_or(|old| **old != *bytes))
-            && (refresh || entry.supplied.is_none());
+        let snapshot = matches!(
+            input.kind,
+            DiscoveryInputKind::ObservedMetadata | DiscoveryInputKind::ObservedViewer
+        );
+        let changed = input.contents.as_ref().is_some_and(|bytes| {
+            entry
+                .supplied
+                .as_ref()
+                .is_none_or(|old| *old.bytes != *bytes || (old.snapshot && !snapshot))
+        }) && (refresh || entry.supplied.is_none());
         let retry = refresh
             && input.contents.is_none()
             && matches!(entry.state, State::Complete(_))
@@ -138,7 +149,10 @@ impl Search {
         entry.root = Some(rank);
         if changed || retry {
             if changed {
-                entry.supplied = input.contents.map(Arc::new);
+                entry.supplied = input.contents.map(|bytes| Supplied {
+                    bytes: Arc::new(bytes),
+                    snapshot,
+                });
             }
             entry.state = State::Queued;
         }
@@ -268,6 +282,7 @@ impl Search {
             }
             Err(error) => Err(error),
         };
+        let snapshot = response.as_ref().is_ok_and(|response| response.snapshot);
         let record = ReadResource { request, response };
         let parsed = pending
             .branch
@@ -275,6 +290,12 @@ impl Search {
         pending.branch.history.push(record);
         match parsed {
             Ok(parsed) => {
+                // Reconstructed snapshots retain their evidence strength even
+                // when URL-matched consumers share their cached response.
+                if snapshot {
+                    pending.branch.priority.0 = pending.branch.priority.0.max(Specificity::Medium);
+                    pending.branch.observation = true;
+                }
                 pending.branch.parsed = parsed;
                 self.ready.push(pending.branch);
             }
@@ -533,6 +554,7 @@ fn selectors(specs: &[FormatSpec]) -> Vec<String> {
 async fn parse<P, PFut>(
     bytes: Arc<Vec<u8>>,
     final_uri: Option<String>,
+    snapshot: bool,
     selectors: Vec<String>,
     parse_html: &P,
 ) -> Result<Read, Error>
@@ -548,6 +570,7 @@ where
     Ok(Read::Response(Arc::new(ParsedResponse {
         bytes,
         final_uri,
+        snapshot,
         html,
     })))
 }
@@ -581,11 +604,18 @@ where
         search.advance()?;
         if let Some(request) = search.next(true) {
             if search.admit(&request, limits.resources) {
-                let bytes = search.resources[&request]
+                let supplied = search.resources[&request]
                     .supplied
                     .clone()
                     .expect("local bytes");
-                let result = parse(bytes, None, selectors.clone(), &parse_html).await;
+                let result = parse(
+                    supplied.bytes,
+                    None,
+                    supplied.snapshot,
+                    selectors.clone(),
+                    &parse_html,
+                )
+                .await;
                 search.complete(request, result, specs)?;
             }
             continue;
@@ -623,6 +653,7 @@ where
                             parse(
                                 Arc::new(response.bytes),
                                 response.final_uri,
+                                false,
                                 selectors,
                                 parse_html,
                             )

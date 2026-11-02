@@ -92,6 +92,8 @@ fn complete_format_metadata_keeps_loader_only_siblings_without_fetching() {
                 serde_json::to_vec(&observation()).unwrap(),
             )
             .with_kind(DiscoveryInputKind::ObservedViewer),
+            DiscoveryInput::new("https://museum.test/image/info.json")
+                .with_kind(DiscoveryInputKind::ObservedResource),
             DiscoveryInput::with_contents(
                 "https://museum.test/image/info.json",
                 include_bytes!("../../../fixtures/iiif/v3/info.json").to_vec(),
