@@ -98,9 +98,15 @@ async function acquireTile(page, source, grid, column, row) {
     { source, grid, column, row, width, height },
   );
   assert.equal(result.ok, true, JSON.stringify(result));
-  const decoded = await sharp(Buffer.from(result.data, "base64"))
-    .raw()
-    .toBuffer({ resolveWithObject: true });
+  const bytes = result.url
+    ? Buffer.from(
+        await page.evaluate(
+          async (url) => [...new Uint8Array(await (await fetch(url)).arrayBuffer())],
+          result.url,
+        ),
+      )
+    : Buffer.from(result.data, "base64");
+  const decoded = await sharp(bytes).raw().toBuffer({ resolveWithObject: true });
   assert.deepEqual([decoded.info.width, decoded.info.height], [width, height]);
   for (let offset = 0; offset < decoded.data.length; offset += 4)
     assert.deepEqual([...decoded.data.subarray(offset, offset + 4)], [23, 87, 151, 255]);
@@ -157,8 +163,12 @@ async function checkSession(page, input, mode) {
       (request) => ViewerScanner.readViewerTile(request, { width: 257, height: 257 }),
       request,
     );
-    assert.equal(failed.ok, false);
-    assert.equal(failed.error.kind, mode === "bounds" ? "internal" : "network-failure");
+    if (failed.url) {
+      assert.equal(await page.evaluate(async (url) => (await fetch(url)).status, failed.url), 503);
+    } else {
+      assert.equal(failed.ok, false);
+      assert.equal(failed.error.kind, mode === "bounds" ? "internal" : "network-failure");
+    }
   }
   await page.evaluate((handle) => ViewerScanner.releaseViewerTiles([handle]), source.handle);
   const retired = await page.evaluate(

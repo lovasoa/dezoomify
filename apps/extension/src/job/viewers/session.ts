@@ -20,13 +20,11 @@ import type { MetadataContext, ViewerEvidence } from "./types.ts";
 
 export type ViewerTileResult = { documentUrl: string } & (
   | { ok: true; bytes: number; data: string }
+  | { ok: true; url: string }
   | { ok: false; error: JobError }
 );
 type TileCall = { request: ViewerTileRequest; extent: Size; result?: Promise<ViewerTileResult> };
-export interface ViewerTile {
-  image: unknown;
-  owned?: boolean;
-}
+export type ViewerTile = { image: unknown; owned?: boolean } | { url: string };
 export type ViewerLoader = (
   level: number,
   column: number,
@@ -36,7 +34,8 @@ export type ViewerLoader = (
 
 /** Retain the loader in the page until release. Only the core computes tile
  * positions/crops; the adapter receives its native level and grid coordinates.
- * Release invalidates in-flight results and asks cooperative loaders to stop. */
+ * Loaders may return an ordinary image URL instead of pixels. Release
+ * invalidates in-flight results and asks cooperative loaders to stop. */
 export function registerViewer(
   levels: ViewerLevel[],
   context: MetadataContext,
@@ -77,16 +76,14 @@ export function registerViewer(
         throw new InvalidInputError("Viewer tile belongs to a different source document");
       lifetime.signal.throwIfAborted();
       const result = await loader(request.level, request.column, request.row, lifetime.signal);
+      if ("url" in result) {
+        lifetime.signal.throwIfAborted();
+        return { documentUrl, ok: true, url: result.url };
+      }
       operation = "encoding";
       const blob = await imageBlob(result.image, extent, result.owned);
       lifetime.signal.throwIfAborted();
-      if (blob.size > SOURCE_FETCH_BYTE_LIMIT) throw new SizeLimitError(SOURCE_FETCH_BYTE_LIMIT);
-      return {
-        documentUrl,
-        ok: true,
-        bytes: blob.size,
-        data: new Uint8Array(await blob.arrayBuffer()).toBase64(),
-      };
+      return { documentUrl, ok: true, ...(await encodedTile(blob)) };
     } catch (cause) {
       const error = lifetime.signal.aborted
         ? new CancelledError()
@@ -99,6 +96,11 @@ export function registerViewer(
       return { documentUrl, ok: false, error: errorPayload(error) };
     }
   }
+}
+
+async function encodedTile(blob: Blob): Promise<{ bytes: number; data: string }> {
+  if (blob.size > SOURCE_FETCH_BYTE_LIMIT) throw new SizeLimitError(SOURCE_FETCH_BYTE_LIMIT);
+  return { bytes: blob.size, data: new Uint8Array(await blob.arrayBuffer()).toBase64() };
 }
 
 /** Serialized into the main world: no runtime imports or external closures. */

@@ -8,9 +8,6 @@ export { readViewerTile, releaseViewerTiles } from "../viewers/session.ts";
 export function openTileSource(source: object, item: object): LiveViewerSource {
   return {
     levels: readLivePyramid(source),
-    load: async (level, x, y) => ({
-      image: await loadOpenSeadragonTile(source, item, level, x, y),
-      owned: true,
-    }),
+    load: (level, x, y, signal) => loadOpenSeadragonTile(source, item, level, x, y, signal),
   };
 }

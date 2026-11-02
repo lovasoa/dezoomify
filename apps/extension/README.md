@@ -48,9 +48,11 @@ single-image fallback as large DOM images, after tiled discovery is exhausted.
 The browser downloads that original directly rather than exporting page pixels.
 
 The shared [tile session](src/job/viewers/session.ts) retains page loaders in
-closures behind document-bound capabilities. Addresses never fall through to
-HTTP and are released on retirement. Rust computes placement/crops and owns
-retry decisions; adapters reuse the viewer's loading behavior. Cancellation
+closures behind document-bound capabilities, released on retirement. Ordinary
+OpenSeadragon image GETs return URLs lazily for the normal resource transport;
+blob URLs are read in their source page. Custom downloaders and AJAX sources
+retain the viewer's loader. Rust computes placement/crops and owns retry decisions.
+Viewer calls share their source page's pacing group. Cancellation
 detaches owned waits without clearing the viewer's render queue or cache.
 Cached drawables are borrowed; only transferred bitmaps are closed.
 

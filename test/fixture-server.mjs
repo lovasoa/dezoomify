@@ -175,6 +175,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       "write-address": { type: "string" },
       "parent-stdio": { type: "boolean" },
       quiet: { type: "boolean" },
+      "no-cors": { type: "boolean" },
     },
   });
   const options = {
@@ -185,6 +186,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     writeAddress: values["write-address"],
     parentStdio: values["parent-stdio"],
     quiet: values.quiet,
+    cors: !values["no-cors"],
   };
   const { server, origin } = await startFixtureServer(options);
   if (options.writeAddress) fs.writeFileSync(options.writeAddress, `${origin.slice(7)}\n`);

@@ -210,6 +210,27 @@ test("live tile capabilities stay bound to their exact viewer frame and are rele
     await source.scan();
     const result = await source.loadViewerTile(request, extent, new AbortController().signal);
     assert.deepEqual([...new Uint8Array(result)], [1]);
+    const resource = {
+      uri: "https://tiles.example/tile?signature=exact",
+      headers: [],
+      purpose: "tile",
+    };
+    tileReply = () => ({ documentUrl: viewerUrl, ok: true, url: resource.uri });
+    assert.deepEqual(
+      await source.loadViewerTile(request, extent, new AbortController().signal),
+      resource,
+    );
+    for (const invalid of [
+      "blob:https://gallery.example/page-owned",
+      "https://user:password@tiles.example/tile",
+      "javascript:void(0)",
+      null,
+    ]) {
+      tileReply = () => ({ documentUrl: viewerUrl, ok: true, url: invalid });
+      await assert.rejects(source.loadViewerTile(request, extent, new AbortController().signal), {
+        kind: "internal",
+      });
+    }
     const refusal = new HttpError({
       status: 503,
       transport: "browser-session",
