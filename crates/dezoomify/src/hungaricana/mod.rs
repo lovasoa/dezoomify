@@ -8,7 +8,7 @@ use serde::Deserialize;
 use url::Url;
 
 use crate::Vec2d;
-use crate::core::discovery::{metadata, url_matches, viewer};
+use crate::core::discovery::{Specificity::Low, metadata, url_matches, viewer};
 use crate::core::{
     DiscoveryError, DiscoveryResource, DiscoveryRoute, FormatSpec, ImagePlan, ParsedResource,
     Request, ResolvedLevel, image_title,
@@ -29,10 +29,8 @@ static FILES_ARRAY_RE: LazyLock<Regex> = LazyLock::new(|| {
 
 const ROUTES: &[DiscoveryRoute] = &[
     metadata(url_matches(is_ecw_url)).decode(decode),
-    metadata(url_matches(|uri| {
-        uri.contains("imagesize/") || uri.contains("/image/")
-    }))
-    .decode(decode),
+    metadata(url_matches(|uri| uri.contains("imagesize/"))).decode(decode),
+    metadata(url_matches(|uri| uri.contains("/image/")).specificity(Low)).decode(decode),
     viewer(url_matches(is_hungaricana_url)).decode(follow_layer),
 ];
 

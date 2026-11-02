@@ -94,14 +94,19 @@ fn complete_format_metadata_keeps_loader_only_siblings_without_fetching() {
             .with_kind(DiscoveryInputKind::ObservedViewer),
             DiscoveryInput::new("https://museum.test/image/info.json")
                 .with_kind(DiscoveryInputKind::ObservedResource),
+            DiscoveryInput::new("https://museum.test/image/0,0,256,256/256,256/0/default.png")
+                .with_kind(DiscoveryInputKind::ObservedResource),
+            DiscoveryInput::new("https://museum.test/image/256,0,256,256/256,256/0/default.png")
+                .with_kind(DiscoveryInputKind::ObservedResource),
             DiscoveryInput::with_contents(
                 "https://museum.test/image/info.json",
-                include_bytes!("../../../fixtures/iiif/v3/info.json").to_vec(),
+                include_str!("../../../fixtures/iiif/v3/info.json")
+                    .replace("{{origin}}/fixtures/iiif/v3", "https://museum.test/image"),
             )
             .with_kind(DiscoveryInputKind::ObservedMetadata),
         ],
         Default::default(),
-        |_| panic!("complete snapshots must not fetch"),
+        |uri| panic!("complete snapshots must not fetch: {uri}"),
     );
     let catalog = catalog.unwrap();
     assert_eq!(catalog.len(), 2);

@@ -1,11 +1,14 @@
 //! Pure discovery for text files containing deferred image URLs.
 
-use crate::core::discovery::{metadata, url_matches};
+use crate::core::discovery::{Specificity::Low, metadata, url_matches};
 use crate::core::{CatalogPlan, DeferredResource, DiscoveryError, FormatSpec, ParsedResource};
 
 pub const SPEC: FormatSpec = FormatSpec::new(
     "bulk_text",
-    &[metadata(url_matches(is_bulk_file)).decode(decode_catalog)],
+    &[
+        metadata(url_matches(is_bulk_file)).decode(decode_catalog),
+        metadata(url_matches(has_bulk_hint).specificity(Low)).decode(decode_catalog),
+    ],
 )
 .with_display_name("Bulk text");
 
@@ -39,12 +42,14 @@ fn catalog(uri: &str, bytes: &[u8]) -> Result<crate::core::DiscoveryCatalog, Dis
 }
 
 fn is_bulk_file(uri: &str) -> bool {
-    (uri.rsplit('.').next().is_some_and(|extension| {
+    uri.rsplit('.').next().is_some_and(|extension| {
         extension.eq_ignore_ascii_case("txt") || extension.eq_ignore_ascii_case("urls")
-    }) || uri.contains("bulk")
-        || uri.contains("list"))
-        && !uri.contains("{{")
+    }) && !uri.contains("{{")
         && !uri.contains("}}")
+}
+
+fn has_bulk_hint(uri: &str) -> bool {
+    (uri.contains("bulk") || uri.contains("list")) && !uri.contains("{{") && !uri.contains("}}")
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

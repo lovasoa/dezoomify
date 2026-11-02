@@ -7,7 +7,9 @@ use serde_json::Value;
 use url::Url;
 
 use crate::Vec2d;
-use crate::core::discovery::{Metadata, css, json_metadata, metadata, url_matches, viewer};
+use crate::core::discovery::{
+    Metadata, Specificity::Low, css, json_metadata, metadata, url_matches, viewer,
+};
 use crate::core::{
     DiscoveryError, DiscoveryResource, DiscoveryRoute, FormatSpec, ImagePlan, ParsedResource,
     Request, ResolvedLevel, resolve_url_template,
@@ -37,7 +39,7 @@ const ROUTES: &[DiscoveryRoute] = &[
         "https://images.memorix.nl/$server/topviewjson/memorix/$image",
     )
     .then_decode(decode),
-    metadata(url_matches(is_media_api)).decode(follow_media),
+    metadata(url_matches(is_media_api).specificity(Low)).decode(follow_media),
     json_metadata::<Document>(),
 ];
 

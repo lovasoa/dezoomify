@@ -278,7 +278,15 @@ impl Search {
             }
             Err(error) => Err(error),
         };
-        let snapshot = response.as_ref().is_ok_and(|response| response.snapshot);
+        let snapshot_order = response
+            .as_ref()
+            .is_ok_and(|response| response.snapshot)
+            .then(|| {
+                self.resources[&request]
+                    .root
+                    .expect("supplied snapshot root")
+                    .2
+            });
         let record = ReadResource { request, response };
         let parsed = pending
             .branch
@@ -286,10 +294,11 @@ impl Search {
         pending.branch.history.push(record);
         match parsed {
             Ok(parsed) => {
-                // Reconstructed snapshots retain their evidence strength even
-                // when URL-matched consumers share their cached response.
-                if snapshot {
+                // Every consumer of a reconstructed snapshot shares its
+                // evidence strength and catalog identity, including tile roots.
+                if let Some(order) = snapshot_order {
                     pending.branch.priority.0 = pending.branch.priority.0.max(Specificity::Medium);
+                    pending.branch.priority.2 = order;
                     pending.branch.observation = true;
                 }
                 pending.branch.parsed = parsed;

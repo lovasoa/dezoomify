@@ -591,6 +591,17 @@ fn local_paths_and_only_supported_iframe_sources_are_followed() {
 fn a_large_resource_inventory_is_ranked_before_spending_the_read_budget() {
     let metadata = "https://museum.test/proxy?filename=objectimages/painting.dzi";
     let mut inputs = vec![DiscoveryInput::with_contents(PAGE, "<html></html>")];
+    inputs.extend(
+        [
+            "https://analytics.test/playlist.js",
+            "https://analytics.test/bulk.js",
+            "https://analytics.test/event?source=page",
+            "https://analytics.test/media?event=view",
+            "https://analytics.test/image/icon.png",
+        ]
+        .into_iter()
+        .map(observed),
+    );
     inputs.extend((0..5000).map(|index| observed(&format!("https://analytics.test/{index}.js"))));
     inputs.extend((0..8).map(|index| {
         observed(&format!(
@@ -737,6 +748,7 @@ fn iframe_evidence_promotes_an_existing_resource() {
 fn generic_markers_yield_to_specific_metadata_references() {
     for marker in [
         "<url>/unrelated</url>",
+        "<script>const accessnumber = 'unrelated';</script>",
         r#"<div id="map" vls:ot_id="1" vls:width="512" vls:height="512"></div>
            <var id="zoomTileSize" value="256">"#,
     ] {
