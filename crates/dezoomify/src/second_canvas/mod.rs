@@ -7,7 +7,7 @@ use serde::{Deserialize, de::IntoDeserializer};
 use url::Url;
 
 use crate::Vec2d;
-use crate::core::discovery::{Metadata, css, html_matches, json_metadata, viewer};
+use crate::core::discovery::{Metadata, css, html_matches, json_metadata};
 use crate::core::{
     CatalogPlan, DiscoveryError, DiscoveryResource, DiscoveryRoute, FormatSpec, Grid, ImagePlan,
     ParsedResource, Positioned, Request, ResolvedLevel,
@@ -19,11 +19,8 @@ static VIEWER_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
 
 const ROUTES: &[DiscoveryRoute] = &[
     json_metadata::<Document>(),
-    viewer(html_matches(&VIEWER_RE)).decode(follow_viewer_config),
-    viewer(css(
-        "iframe[src*=\".s3.amazonaws.com/web/\" i][src*=\".html\" i]",
-    ))
-    .follow_attribute("src"),
+    html_matches(&VIEWER_RE).decode(follow_viewer_config),
+    css("iframe[src*=\".s3.amazonaws.com/web/\" i][src*=\".html\" i]").follow_attribute("src"),
 ];
 
 pub const SPEC: FormatSpec =

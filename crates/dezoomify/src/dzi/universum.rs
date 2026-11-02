@@ -10,7 +10,7 @@ use serde::Deserialize;
 use url::Url;
 
 use super::dzi_file::{DziFile, Size};
-use crate::core::discovery::{Metadata, js_matches, json_metadata, viewer};
+use crate::core::discovery::{Metadata, js_matches, json_metadata};
 use crate::core::{
     DiscoveredEntry, DiscoveryCatalog, DiscoveryError, DiscoveryResource, DiscoveryRoute,
     ParsedResource, resolve_relative,
@@ -18,7 +18,7 @@ use crate::core::{
 use crate::json_utils::number_or_string;
 
 pub(super) const VIEWER_ROUTE: DiscoveryRoute =
-    viewer(js_matches(&METADATA_TEMPLATE)).try_decode(viewer_metadata);
+    js_matches(&METADATA_TEMPLATE).try_decode(viewer_metadata);
 pub(super) const METADATA_ROUTE: DiscoveryRoute = json_metadata::<Image>();
 
 static METADATA_TEMPLATE: LazyLock<BytesRegex> = LazyLock::new(|| {

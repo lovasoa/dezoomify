@@ -710,3 +710,45 @@ fn observed_metadata_wins_without_reading_a_valid_but_lower_priority_frame() {
             .any(|uri| uri == "https://museum.test/art")
     );
 }
+
+#[test]
+fn iframe_evidence_promotes_an_existing_resource() {
+    let (catalog, requests) = support::discover_inputs(
+        default_registry(),
+        vec![
+            DiscoveryInput::with_contents(PAGE, FRAME),
+            observed("https://analytics.test/opaque"),
+            observed("https://museum.test/art"),
+        ],
+        Default::default(),
+        |uri| (uri == "https://museum.test/art").then(|| Ok((DZI.to_vec(), None))),
+    );
+    assert_eq!(support::ready_image(catalog.unwrap()).format, "deepzoom");
+    assert_eq!(
+        requests
+            .iter()
+            .map(|request| request.uri.as_str())
+            .collect::<Vec<_>>(),
+        ["https://museum.test/art"]
+    );
+}
+
+#[test]
+fn generic_markers_yield_to_specific_metadata_references() {
+    for marker in [
+        "<url>/unrelated</url>",
+        r#"<div id="map" vls:ot_id="1" vls:width="512" vls:height="512"></div>
+           <var id="zoomTileSize" value="256">"#,
+    ] {
+        image(
+            vec![DiscoveryInput::with_contents(
+                PAGE,
+                format!(
+                    "{marker}<script>const unrelated = '/config.xml'; Seadragon.embed('viewer', 'title', '/art');</script>"
+                ),
+            )],
+            &[("https://museum.test/art", DZI)],
+            "deepzoom",
+        );
+    }
+}

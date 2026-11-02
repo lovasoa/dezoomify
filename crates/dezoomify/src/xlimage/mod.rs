@@ -5,12 +5,12 @@ use std::sync::Arc;
 use serde::Deserialize;
 
 use crate::Vec2d;
-use crate::core::discovery::{metadata, url_matches};
+use crate::core::discovery::url_matches;
 use crate::core::{
     DiscoveryError, DiscoveryRoute, FormatSpec, ImagePlan, ParsedResource, Request, ResolvedLevel,
 };
 
-const ROUTES: &[DiscoveryRoute] = &[metadata(url_matches(is_xlimage_url)).decode(decode)];
+const ROUTES: &[DiscoveryRoute] = &[url_matches(is_xlimage_url).decode(decode)];
 
 pub const SPEC: FormatSpec = FormatSpec::new("xlimage", ROUTES).with_display_name("XLimage");
 

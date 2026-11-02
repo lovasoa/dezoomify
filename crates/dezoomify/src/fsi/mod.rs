@@ -5,7 +5,7 @@ use std::sync::LazyLock;
 use regex::{Regex, bytes::Regex as BytesRegex};
 
 use crate::Vec2d;
-use crate::core::discovery::{css, metadata, url_matches, viewer};
+use crate::core::discovery::{css, url_matches};
 use crate::core::{
     DiscoveryError, DiscoveryResource, DiscoveryRoute, FormatSpec, ImagePlan, ParsedResource,
     Request, ResolvedLevel, image_title,
@@ -21,11 +21,11 @@ static SERVER_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
     .expect("constant FSI server pattern")
 });
 const ROUTES: &[DiscoveryRoute] = &[
-    metadata(url_matches(is_server_url)).resolve_metadata(metadata_url),
-    viewer(css("[src*=\"/server\"][src*=\"source=\" i]")).follow_attribute("src"),
-    viewer(css("[href*=\"/server\"][href*=\"source=\" i]")).follow_attribute("href"),
+    url_matches(is_server_url).resolve_metadata(metadata_url),
+    css("[src*=\"/server\"][src*=\"source=\" i]").follow_attribute("src"),
+    css("[href*=\"/server\"][href*=\"source=\" i]").follow_attribute("href"),
     DiscoveryRoute::regex_link(&SERVER_RE, "$server"),
-    metadata(url_matches(|uri| SOURCE_RE.is_match(uri))).decode(decode),
+    url_matches(|uri| SOURCE_RE.is_match(uri)).decode(decode),
 ];
 
 pub const SPEC: FormatSpec = FormatSpec::new("fsi", ROUTES)

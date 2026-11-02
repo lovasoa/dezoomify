@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use serde::Deserialize;
 
 use crate::Vec2d;
-use crate::core::discovery::{metadata, url_matches};
+use crate::core::discovery::url_matches;
 use crate::core::{
     DiscoveryError, FormatSpec, ImagePlan, ParsedResource, Positioned, ProcessingRecipe, Request,
     ResolvedLevel, TileSourceError,
@@ -16,11 +16,9 @@ use crate::model::Header;
 mod tile_set;
 mod variable;
 
-pub const SPEC: FormatSpec = FormatSpec::new(
-    "custom",
-    &[metadata(url_matches(is_tiles_yaml)).decode(decode)],
-)
-.with_display_name("Custom tiles");
+pub const SPEC: FormatSpec =
+    FormatSpec::new("custom", &[url_matches(is_tiles_yaml).decode(decode)])
+        .with_display_name("Custom tiles");
 
 fn is_tiles_yaml(uri: &str) -> bool {
     uri.split(['?', '#'])

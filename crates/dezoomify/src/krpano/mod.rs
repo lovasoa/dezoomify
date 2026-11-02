@@ -14,7 +14,7 @@ use krpano_metadata::{KrpanoMetadata, XY, all_sides};
 
 use crate::Vec2d;
 use crate::core::discovery::{
-    any, html_matches, js_matches, metadata, url_matches, url_suffix, viewer,
+    Specificity::Low, any, html_matches, js_matches, url_matches, url_suffix,
 };
 use crate::core::resolve_relative;
 use crate::core::{
@@ -37,12 +37,14 @@ static HTML_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
 });
 
 const ROUTES: &[DiscoveryRoute] = &[
-    metadata(url_suffix("/tiles.xml")).decode(handle_xml),
-    metadata(url_suffix("/tour.xml")).decode(handle_xml),
-    metadata(any()).try_decode(try_xml),
-    viewer(html_matches(&HTML_RE)).decode(handle_html),
-    viewer(js_matches(&VIEWER_JS_RE)).decode(handle_viewer_js),
-    viewer(url_matches(is_javascript_uri)).decode(handle_viewer_js),
+    url_suffix("/tiles.xml").decode(handle_xml),
+    url_suffix("/tour.xml").decode(handle_xml),
+    any().try_decode(try_xml),
+    html_matches(&HTML_RE).decode(handle_html),
+    js_matches(&VIEWER_JS_RE).decode(handle_viewer_js),
+    url_matches(is_javascript_uri)
+        .specificity(Low)
+        .decode(handle_viewer_js),
 ];
 
 pub const SPEC: FormatSpec = FormatSpec::new("krpano", ROUTES)

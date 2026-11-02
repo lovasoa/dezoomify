@@ -3,10 +3,10 @@
 
 use std::sync::LazyLock;
 
-use crate::core::discovery::{js_matches, viewer};
+use crate::core::discovery::js_matches;
 use crate::core::{DiscoveryError, DiscoveryResource, DiscoveryRoute, ParsedResource};
 
-pub(super) const ROUTE: DiscoveryRoute = viewer(js_matches(&INITIALIZER)).try_decode(manifest);
+pub(super) const ROUTE: DiscoveryRoute = js_matches(&INITIALIZER).try_decode(manifest);
 
 static INITIALIZER: LazyLock<regex::bytes::Regex> = LazyLock::new(|| {
     regex::bytes::Regex::new(r"\bMirador\s*\(\s*\{").expect("constant Mirador initializer pattern")

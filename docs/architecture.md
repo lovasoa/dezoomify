@@ -33,6 +33,11 @@ For shared tiled-image discovery, inputs can describe a source, an observed
 document, or an observed resource.
 The core interprets this evidence, orders discovery, and bounds traversal; an
 extension scan supplies evidence rather than recognizing formats itself.
+Matcher specificity orders remote work. Supplied contents and accessible Host
+observations run before speculative reads; each distinct request occupies at
+most one network slot, shared by its decoder continuations. See
+[discovery](../crates/dezoomify/src/core/discovery.rs) and its
+[scheduler](../crates/dezoomify/src/core/discovery/search.rs).
 Declared source catalogs precede reconstructed format metadata, so a loaded
 canvas does not hide the rest of its manifest. Recognized metadata resources
 precede live page-loader fallback.

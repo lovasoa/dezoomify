@@ -6,13 +6,13 @@ use zif_tiff::{DataChunk, ParseState, Parser};
 
 use crate::Vec2d;
 use crate::core::discovery::{
-    DiscoveryError, DiscoveryResource, FormatSpec, ParsedResource, metadata, url_matches,
+    DiscoveryError, DiscoveryResource, FormatSpec, ParsedResource, url_matches,
 };
 use crate::core::{ImagePlan, Request, ResolvedLevel};
 
 pub const SPEC: FormatSpec = FormatSpec::new(
     "zif",
-    &[metadata(url_matches(is_zif))
+    &[url_matches(is_zif)
         .resolve_metadata(initial_request)
         .then_decode(decode)],
 )

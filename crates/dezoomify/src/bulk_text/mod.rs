@@ -1,11 +1,11 @@
 //! Pure discovery for text files containing deferred image URLs.
 
-use crate::core::discovery::{metadata, url_matches};
+use crate::core::discovery::url_matches;
 use crate::core::{CatalogPlan, DeferredResource, DiscoveryError, FormatSpec, ParsedResource};
 
 pub const SPEC: FormatSpec = FormatSpec::new(
     "bulk_text",
-    &[metadata(url_matches(is_bulk_file)).decode(decode_catalog)],
+    &[url_matches(is_bulk_file).decode(decode_catalog)],
 )
 .with_display_name("Bulk text");
 

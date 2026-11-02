@@ -7,7 +7,7 @@ use regex::{Regex, bytes::Regex as BytesRegex};
 
 use crate::Vec2d;
 use crate::core::discovery::{
-    Metadata, any, image_url, js_matches, metadata, url_matches, viewer, xml_metadata,
+    Metadata, Specificity::Low, any, js_matches, url_matches, xml_metadata,
 };
 use crate::core::{
     CatalogPlan, DiscoveryError, DiscoveryResource, DiscoveryRoute, FormatSpec, Grid, ImagePlan,
@@ -32,28 +32,28 @@ static WDL_MARKER_RE: LazyLock<BytesRegex> =
 const ROUTES: &[DiscoveryRoute] = &[
     universum::VIEWER_ROUTE,
     universum::METADATA_ROUTE,
-    image_url(is_tile_url)
+    url_matches(is_tile_url)
         .resolve_metadata(tile_metadata)
         .then_decode(decode_catalog),
-    viewer(url_matches(is_bl_viewer_url))
+    url_matches(is_bl_viewer_url)
         .resolve_metadata(bl_metadata)
         .then_decode(decode_catalog),
-    viewer(url_matches(is_nla_view_url))
+    url_matches(is_nla_view_url)
         .resolve_metadata(nla_metadata)
         .then_decode(decode_catalog),
-    viewer(url_matches(is_polona_item_url)).decode(follow_polona_json),
-    metadata(url_matches(is_polona_json_url))
+    url_matches(is_polona_item_url).decode(follow_polona_json),
+    url_matches(is_polona_json_url)
         .decode(follow_polona_dzi)
         .non_canonical(),
     paris::ARK_ROUTE,
     paris::MANIFEST_ROUTE.then_decode(decode_catalog),
-    viewer(js_matches(&SEADRAGON_EMBED)).decode(follow_seadragon_embed),
-    viewer(js_matches(&WDL_MARKER_RE)).decode(follow_wdl_template),
-    DiscoveryRoute::regex_link(&DZI_LINK_RE, "$url"),
+    js_matches(&SEADRAGON_EMBED).decode(follow_seadragon_embed),
+    js_matches(&WDL_MARKER_RE).decode(follow_wdl_template),
+    DiscoveryRoute::regex_link(&DZI_LINK_RE, "$url").specificity(Low),
     DiscoveryRoute::regex_link(&DZI_ATTR_RE, "$url").then_decode(decode_catalog),
-    metadata(url_matches(is_dzi_url)).decode(decode_catalog),
+    url_matches(is_dzi_url).decode(decode_catalog),
     xml_metadata::<DziFile>(),
-    metadata(any()).try_decode(embedded_metadata),
+    any().try_decode(embedded_metadata),
 ];
 
 pub const SPEC: FormatSpec =

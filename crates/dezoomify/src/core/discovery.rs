@@ -2,10 +2,7 @@
 
 use std::{
     borrow::Cow,
-    cell::{Cell, RefCell},
-    collections::{BTreeMap, BTreeSet, HashSet},
     fmt,
-    rc::Rc,
     sync::{Arc, LazyLock},
 };
 
@@ -71,7 +68,8 @@ pub struct DiscoveryLimits {
     /// failures and interactive retries. Cache hits and URL evidence are free;
     /// replacing supplied contents does not replenish the allowance.
     pub resources: usize,
-    /// Scheduling width, independent of the total resource allowance.
+    /// Concurrent distinct remote reads. Supplied bodies and decoder work do
+    /// not occupy network slots.
     pub concurrent: usize,
 }
 
@@ -288,8 +286,29 @@ type FailureHandler = for<'a> fn(
 type UrlMapper = fn(&str) -> Result<Request, DiscoveryError>;
 type UrlPredicate = fn(&str) -> bool;
 
+/// Strength of evidence for discovery work. Content matchers contribute only
+/// after matching available bytes; they never justify speculative reads.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Ord, PartialOrd)]
+pub enum Specificity {
+    High,
+    #[default]
+    Medium,
+    Low,
+}
+
+/// A matcher with a constructor-specific default strength. Override broad
+/// exceptions explicitly rather than inferring strength from selector syntax.
+/// Suffixes, CSS and content regexes default to High, custom predicates to
+/// Medium. Wildcards add no evidence; unknown URLs remain Low and successful
+/// schema decoders retain their caller's evidence.
 #[derive(Clone, Copy, Debug)]
-pub enum DiscoveryMatch {
+pub struct DiscoveryMatch {
+    pattern: MatchPattern,
+    specificity: Option<Specificity>,
+}
+
+#[derive(Clone, Copy, Debug)]
+enum MatchPattern {
     Any,
     UrlSuffix(&'static str),
     UrlPredicate(UrlPredicate),
@@ -301,74 +320,77 @@ pub enum DiscoveryMatch {
 }
 
 impl DiscoveryMatch {
+    const fn new(pattern: MatchPattern, specificity: Specificity) -> Self {
+        Self {
+            pattern,
+            specificity: Some(specificity),
+        }
+    }
+
+    #[must_use]
+    pub const fn specificity(mut self, specificity: Specificity) -> Self {
+        self.specificity = Some(specificity);
+        self
+    }
+
     fn matches_url(self, uri: &str) -> bool {
-        match self {
-            Self::Any => true,
-            Self::UrlSuffix(suffix) => uri
+        match self.pattern {
+            MatchPattern::Any => true,
+            MatchPattern::UrlSuffix(suffix) => uri
                 .split(['?', '#'])
                 .next()
                 .unwrap_or(uri)
                 .ends_with(suffix),
-            Self::UrlPredicate(predicate) => predicate(uri),
-            Self::Css(..)
-            | Self::ResourcePredicate(_)
-            | Self::ContentRegex(_)
-            | Self::MarkupRegex(_)
-            | Self::ScriptRegex(_) => false,
+            MatchPattern::UrlPredicate(predicate) => predicate(uri),
+            _ => false,
         }
     }
 
     fn url_match(self, uri: &str) -> Option<bool> {
-        matches!(self, Self::UrlSuffix(_) | Self::UrlPredicate(_)).then(|| self.matches_url(uri))
+        matches!(
+            self.pattern,
+            MatchPattern::UrlSuffix(_) | MatchPattern::UrlPredicate(_)
+        )
+        .then(|| self.matches_url(uri))
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
-enum RouteKind {
-    Metadata,
-    Image,
-    Viewer,
-}
-
-pub const fn metadata(matcher: DiscoveryMatch) -> RoutePattern {
-    RoutePattern::new(matcher, RouteKind::Metadata)
-}
-pub const fn viewer(matcher: DiscoveryMatch) -> RoutePattern {
-    RoutePattern::new(matcher, RouteKind::Viewer)
-}
-pub const fn image_url(predicate: UrlPredicate) -> RoutePattern {
-    RoutePattern::new(url_matches(predicate), RouteKind::Image)
-}
 pub const fn any() -> DiscoveryMatch {
-    DiscoveryMatch::Any
+    DiscoveryMatch {
+        pattern: MatchPattern::Any,
+        specificity: None,
+    }
 }
 pub const fn url_suffix(suffix: &'static str) -> DiscoveryMatch {
-    DiscoveryMatch::UrlSuffix(suffix)
+    DiscoveryMatch::new(MatchPattern::UrlSuffix(suffix), Specificity::High)
 }
 pub const fn url_matches(predicate: UrlPredicate) -> DiscoveryMatch {
-    DiscoveryMatch::UrlPredicate(predicate)
+    DiscoveryMatch::new(MatchPattern::UrlPredicate(predicate), Specificity::Medium)
 }
 /// Match a CSS selector and pass its first selected element to the decoder.
 pub const fn css(selector: &'static str) -> DiscoveryMatch {
     css_when(selector, |_| true)
 }
 pub const fn css_when(selector: &'static str, accept: fn(&HtmlElement) -> bool) -> DiscoveryMatch {
-    DiscoveryMatch::Css(selector, accept)
+    DiscoveryMatch::new(MatchPattern::Css(selector, accept), Specificity::High)
 }
 
 pub const fn resource_matches(
     predicate: for<'a> fn(DiscoveryResource<'a>) -> bool,
 ) -> DiscoveryMatch {
-    DiscoveryMatch::ResourcePredicate(predicate)
+    DiscoveryMatch::new(
+        MatchPattern::ResourcePredicate(predicate),
+        Specificity::Medium,
+    )
 }
 
 /// A permissive markup guard: XML and HTML need not be distinguished here.
 pub const fn html_matches(regex: &'static LazyLock<BytesRegex>) -> DiscoveryMatch {
-    DiscoveryMatch::MarkupRegex(regex)
+    DiscoveryMatch::new(MatchPattern::MarkupRegex(regex), Specificity::High)
 }
 
 pub const fn js_matches(regex: &'static LazyLock<BytesRegex>) -> DiscoveryMatch {
-    DiscoveryMatch::ScriptRegex(regex)
+    DiscoveryMatch::new(MatchPattern::ScriptRegex(regex), Specificity::High)
 }
 
 /// Parsed wire metadata converts directly into a format result.
@@ -378,7 +400,7 @@ pub trait Metadata: serde::de::DeserializeOwned {
 
 /// Schema failures are route misses; conversion errors retain their cause.
 pub const fn json_metadata<T: Metadata>() -> DiscoveryRoute {
-    metadata(any()).try_decode(|resource| {
+    any().try_decode(|resource| {
         serde_json::from_slice::<T>(resource.bytes())
             .ok()
             .map(|metadata| metadata.decode(resource))
@@ -386,25 +408,14 @@ pub const fn json_metadata<T: Metadata>() -> DiscoveryRoute {
 }
 
 pub const fn xml_metadata<T: Metadata>() -> DiscoveryRoute {
-    metadata(any()).try_decode(|resource| {
+    any().try_decode(|resource| {
         quick_xml::de::from_reader::<_, T>(resource.bytes())
             .ok()
             .map(|metadata| metadata.decode(resource))
     })
 }
 
-/// Semantic input pattern paired with a decoding or reference-resolution action.
-/// Decoding designates the matched resource as canonical unless opted out.
-pub struct RoutePattern {
-    matcher: DiscoveryMatch,
-    kind: RouteKind,
-}
-
-impl RoutePattern {
-    const fn new(matcher: DiscoveryMatch, kind: RouteKind) -> Self {
-        Self { matcher, kind }
-    }
-
+impl DiscoveryMatch {
     /// Compile a URL-only image plan without acquiring a document.
     #[must_use]
     pub const fn plan(
@@ -414,6 +425,7 @@ impl RoutePattern {
         self.route(RouteAction::Plan(decoder))
     }
     #[must_use]
+    /// Decode a matched resource, designating it as canonical unless opted out.
     pub const fn decode(self, decoder: Decoder) -> DiscoveryRoute {
         self.route(RouteAction::Decode(decoder))
     }
@@ -460,9 +472,8 @@ impl RoutePattern {
     }
     const fn route(self, handler: RouteAction) -> DiscoveryRoute {
         DiscoveryRoute {
-            matcher: self.matcher,
+            matcher: self,
             handler,
-            kind: self.kind,
             followed_decoder: None,
             followed_intermediate: false,
             canonical: true,
@@ -474,7 +485,6 @@ impl RoutePattern {
 pub struct DiscoveryRoute {
     matcher: DiscoveryMatch,
     handler: RouteAction,
-    kind: RouteKind,
     followed_decoder: Option<Decoder>,
     followed_intermediate: bool,
     canonical: bool,
@@ -484,13 +494,19 @@ impl DiscoveryRoute {
     /// Expand named regex captures into a metadata reference (`$name`).
     pub const fn regex_link(regex: &'static LazyLock<BytesRegex>, template: &'static str) -> Self {
         Self {
-            matcher: DiscoveryMatch::ContentRegex(regex),
-            kind: RouteKind::Viewer,
+            matcher: DiscoveryMatch::new(MatchPattern::ContentRegex(regex), Specificity::High),
             handler: RouteAction::RegexLink(regex, template, None),
             followed_decoder: None,
             followed_intermediate: false,
             canonical: true,
         }
+    }
+
+    /// Override the evidence strength of this route's matcher.
+    #[must_use]
+    pub const fn specificity(mut self, specificity: Specificity) -> Self {
+        self.matcher.specificity = Some(specificity);
+        self
     }
 
     /// Decode references produced by this route without running discovery again.
@@ -554,31 +570,33 @@ enum RouteAction {
     TextFile(&'static str),
 }
 
+/// Return the matched evidence alongside its action. A wildcard contributes no
+/// new evidence; its decoder may still recognize complete metadata.
 fn parse_resource(
     routes: &[DiscoveryRoute],
     resource: DiscoveryResource<'_>,
-) -> Result<ParsedResource, DiscoveryError> {
+) -> Result<(ParsedResource, Option<Specificity>), DiscoveryError> {
     for route in routes {
-        let selected = match route.matcher {
-            DiscoveryMatch::Css(selector, accept) => {
+        let selected = match route.matcher.pattern {
+            MatchPattern::Css(selector, accept) => {
                 resource.select(selector).find(|tag| accept(tag))
             }
             _ => None,
         };
-        let matched = match route.matcher {
-            DiscoveryMatch::Css(..) => selected.is_some(),
-            DiscoveryMatch::ResourcePredicate(predicate) => predicate(resource),
-            DiscoveryMatch::ContentRegex(regex) => regex.is_match(resource.bytes()),
-            DiscoveryMatch::MarkupRegex(regex) => {
+        let matched = match route.matcher.pattern {
+            MatchPattern::Css(..) => selected.is_some(),
+            MatchPattern::ResourcePredicate(predicate) => predicate(resource),
+            MatchPattern::ContentRegex(regex) => regex.is_match(resource.bytes()),
+            MatchPattern::MarkupRegex(regex) => {
                 resource.is_html() && regex.is_match(resource.bytes())
             }
-            DiscoveryMatch::ScriptRegex(regex) => {
+            MatchPattern::ScriptRegex(regex) => {
                 crate::web_page::script_bodies(resource).any(|bytes| regex.is_match(bytes))
             }
-            matcher => {
-                matcher.matches_url(resource.final_uri())
+            _ => {
+                route.matcher.matches_url(resource.final_uri())
                     || (resource.uri() != resource.final_uri()
-                        && matcher.matches_url(resource.uri()))
+                        && route.matcher.matches_url(resource.uri()))
             }
         };
         if !matched {
@@ -620,7 +638,12 @@ fn parse_resource(
             }
             RouteAction::MapUrl(_) | RouteAction::Plan(_) => continue,
         }
-        .map(|parsed| route.followed(parsed, resource.final_uri()));
+        .map(|parsed| {
+            (
+                route.followed(parsed, resource.final_uri()),
+                route.matcher.specificity,
+            )
+        });
     }
     Err(DiscoveryError::rejected(
         RejectionKind::DidNotMatchContent,
@@ -628,6 +651,9 @@ fn parse_resource(
     ))
 }
 
+/// Routes are tried in declaration order. Specificity schedules discovery work;
+/// it does not reorder parser fallback within a format. A `try_decode` miss
+/// continues to the next route; matched decoder errors retain their cause.
 #[derive(Clone, Copy, Debug)]
 pub struct FormatSpec {
     name: &'static str,
@@ -675,11 +701,11 @@ impl FormatSpec {
         self.display_name
     }
 
-    fn url_kind(&self, uri: &str) -> Option<RouteKind> {
+    fn url_specificity(&self, uri: &str) -> Option<Specificity> {
         self.routes
             .iter()
             .filter(|route| route.matcher.url_match(uri) == Some(true))
-            .map(|route| route.kind)
+            .filter_map(|route| route.matcher.specificity)
             .min()
     }
 
@@ -977,699 +1003,8 @@ struct ParsedResponse {
     html: HtmlDocument,
 }
 
-#[derive(Clone)]
-enum Read {
-    Response(Arc<ParsedResponse>),
-    NeedsAccess,
-}
-type SharedRead<'a> = futures_util::future::Shared<
-    futures_util::future::LocalBoxFuture<'a, Result<Read, crate::model::Error>>,
->;
-
-/// Earlier variants take precedence; distance and source order break ties.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-enum Evidence {
-    Source,
-    ObservedMetadata,
-    ObservedDocument,
-    KnownResource,
-    ObservedViewer,
-    ViewerPage,
-    Unknown,
-}
-
-impl Evidence {
-    fn is_observation(self) -> bool {
-        matches!(self, Self::ObservedMetadata | Self::ObservedViewer)
-    }
-}
-
-type Priority = (Evidence, usize, usize, usize);
-type Root = (Evidence, usize, usize, DiscoveryInput);
-type Candidate = (Priority, FormatSpec, String, bool);
-type BlockedCandidate = (Priority, FormatSpec, String);
-type Resolution = Result<Option<(usize, DiscoveryCatalog)>, DiscoveryError>;
-
-struct Resources<'a, F, P> {
-    fetch: &'a F,
-    parse_html: &'a P,
-    selectors: Vec<String>,
-    supplied: BTreeMap<Request, Arc<Vec<u8>>>,
-    reads: RefCell<Vec<(Request, bool, SharedRead<'a>)>>,
-    responses: Rc<RefCell<Vec<ReadResource>>>,
-    attempted: Cell<usize>,
-    depths: RefCell<BTreeMap<Request, usize>>,
-    limits: DiscoveryLimits,
-}
-
-impl<'a, F, Fut, P, PFut> Resources<'a, F, P>
-where
-    F: Fn(Request, crate::model::Interaction) -> Fut,
-    Fut: std::future::Future<Output = Result<crate::model::ResourceRead, crate::model::Error>> + 'a,
-    P: Fn(HtmlQuery) -> PFut,
-    PFut: std::future::Future<Output = Result<HtmlDocument, Error>> + 'a,
-{
-    /// Move document bodies into shared storage after computing root evidence.
-    fn new(
-        fetch: &'a F,
-        parse_html: &'a P,
-        roots: &mut [Root],
-        specs: &[FormatSpec],
-        limits: DiscoveryLimits,
-    ) -> Self {
-        Self {
-            fetch,
-            parse_html,
-            selectors: HtmlDocument::PAGE_QUERIES
-                .iter()
-                .copied()
-                .chain(
-                    specs
-                        .iter()
-                        .flat_map(|spec| spec.html_queries.iter().copied()),
-                )
-                .chain(specs.iter().flat_map(|spec| {
-                    spec.routes.iter().filter_map(|route| match route.matcher {
-                        DiscoveryMatch::Css(selector, _) => Some(selector),
-                        _ => None,
-                    })
-                }))
-                .map(str::to_owned)
-                .collect::<BTreeSet<_>>()
-                .into_iter()
-                .collect(),
-            supplied: roots
-                .iter_mut()
-                .rev()
-                .filter_map(|(_, _, _, input)| {
-                    input
-                        .contents
-                        .take()
-                        .map(|bytes| (Request::new(&input.url), Arc::new(bytes)))
-                })
-                .collect(),
-            reads: Default::default(),
-            responses: Default::default(),
-            attempted: Default::default(),
-            depths: Default::default(),
-            limits,
-        }
-    }
-
-    async fn resolve_tier(
-        &self,
-        candidates: Vec<Candidate>,
-        blocked: &mut Vec<BlockedCandidate>,
-        diagnostics: &mut Vec<CandidateDiagnostic>,
-    ) -> Result<Option<DiscoveryCatalog>, DiscoveryError> {
-        use futures_util::{StreamExt, stream};
-        let priorities: Vec<_> = candidates
-            .iter()
-            .map(|(rank, spec, uri, _)| {
-                let direct = spec.routes.iter().any(|route| {
-                    matches!(route.handler, RouteAction::Plan(_)) && route.matcher.matches_url(uri)
-                });
-                Cell::new((rank.0, rank.1 + usize::from(!direct), rank.2, rank.3))
-            })
-            .collect();
-        let mut finished = vec![false; candidates.len()];
-        let mut results = stream::iter(candidates.iter().enumerate().map(
-            |(index, (rank, spec, uri, metadata_only))| {
-                let priority = &priorities[index];
-                let resources = self;
-                async move {
-                    (
-                        index,
-                        *rank,
-                        *spec,
-                        uri.clone(),
-                        resources
-                            .resolve(*spec, uri, false, priority, *rank, *metadata_only)
-                            .await,
-                    )
-                }
-            },
-        ))
-        .buffer_unordered(self.limits.concurrent.max(1));
-        let mut winner: Option<(Priority, DiscoveryCatalog)> = None;
-        let mut metadata = Vec::new();
-        let mut exhausted = false;
-        loop {
-            let next = futures_util::future::poll_fn(|cx| {
-                use futures_util::Stream;
-                use std::task::Poll;
-                // Ordinary earlier reads keep their precedence. A branch that has
-                // followed a deeper link no longer delays a shallower result.
-                let settled = || preceding_settled(&winner, &priorities, &finished);
-                if settled() {
-                    return Poll::Ready(None);
-                }
-                let result = std::pin::Pin::new(&mut results).poll_next(cx);
-                if result.is_pending() && settled() {
-                    return Poll::Ready(None);
-                }
-                result
-            })
-            .await;
-            let Some((index, rank, spec, uri, result)) = next else {
-                break;
-            };
-            finished[index] = true;
-            if matches!(result, Err(DiscoveryError::ResourceLimitExceeded)) {
-                // Stop new reads without discarding an in-flight or cached win.
-                exhausted = true;
-                continue;
-            }
-            record_resolution(
-                (rank, spec, uri, result),
-                &mut winner,
-                &mut metadata,
-                blocked,
-                diagnostics,
-            )?;
-        }
-        drop(results);
-        if !metadata.is_empty() {
-            // All loaded images matter, rather than only the first viewer.
-            metadata.sort_by_key(|(rank, _)| *rank);
-            metadata.dedup_by_key(|(rank, _)| rank.2);
-            return Ok(Some(DiscoveryCatalog::new(
-                metadata
-                    .into_iter()
-                    .flat_map(|(_, catalog)| catalog.into_entries()),
-            )));
-        }
-        if winner.is_none() && exhausted {
-            return Err(DiscoveryError::ResourceLimitExceeded);
-        }
-        Ok(winner.map(|(_, catalog)| catalog))
-    }
-
-    fn follow_pages(
-        &self,
-        roots: &mut Vec<Root>,
-        visited: &mut HashSet<String>,
-        branch: &mut usize,
-    ) {
-        let reads = self.reads.borrow();
-        let responses = self.responses.borrow();
-        for (request, _, _) in reads.iter() {
-            let Some(resource) = responses
-                .iter()
-                .find(|resource| resource.request == *request)
-            else {
-                continue;
-            };
-            let Some(page) = resource.resource() else {
-                continue;
-            };
-            let base = page.final_uri();
-            visited.insert(resource.request.uri.clone());
-            visited.insert(base.to_owned());
-            let document_base = crate::web_page::page_base(page);
-            for source in crate::web_page::iframe_sources(page) {
-                let uri = resolve_relative(&document_base, source);
-                let supported = match url::Url::parse(&uri) {
-                    Ok(url) => matches!(url.scheme(), "http" | "https" | "file"),
-                    Err(url::ParseError::RelativeUrlWithoutBase) => url::Url::parse(base).is_err(),
-                    Err(_) => false,
-                };
-                if supported && visited.insert(uri.clone()) {
-                    let depth = self.depths.borrow().get(request).copied().unwrap_or(0) + 1;
-                    roots.push((
-                        Evidence::ViewerPage,
-                        depth,
-                        *branch,
-                        DiscoveryInput::new(uri),
-                    ));
-                    *branch += 1;
-                }
-            }
-        }
-    }
-
-    /// Consume changed contents and invalidate earlier reads. Compute the input's
-    /// evidence before calling; unchanged observations leave the cache intact.
-    fn supply(&mut self, input: &mut DiscoveryInput) -> bool {
-        let request = Request::new(&input.url);
-        if let Some(bytes) = &input.contents {
-            if self
-                .supplied
-                .get(&request)
-                .is_some_and(|old| **old == *bytes)
-            {
-                return false;
-            }
-            self.supplied.insert(
-                request.clone(),
-                Arc::new(input.contents.take().expect("supplied bytes")),
-            );
-        } else if self.supplied.contains_key(&request)
-            || !self
-                .reads
-                .borrow()
-                .iter()
-                .any(|(key, _, _)| *key == request)
-        {
-            return false;
-        }
-        // A live observation can improve earlier evidence, including a URL
-        // now readable through a newly permitted source's session.
-        self.reads
-            .borrow_mut()
-            .retain(|(key, _, _)| *key != request);
-        self.responses
-            .borrow_mut()
-            .retain(|read| read.request != request);
-        true
-    }
-
-    async fn resolve_blocked(
-        &self,
-        candidates: impl Iterator<Item = (Priority, FormatSpec, String)>,
-        diagnostics: &mut Vec<CandidateDiagnostic>,
-    ) -> Result<Option<DiscoveryCatalog>, DiscoveryError> {
-        let mut exhausted = false;
-        for (rank, spec, uri) in candidates {
-            match self
-                .resolve(
-                    spec,
-                    &uri,
-                    true,
-                    &Cell::new(rank),
-                    rank,
-                    rank.0.is_observation(),
-                )
-                .await
-            {
-                Ok(Some((_, catalog))) => return Ok(Some(catalog)),
-                Ok(None) => {}
-                Err(DiscoveryError::ResourceLimitExceeded) => exhausted = true,
-                Err(error) => record_diagnostic(diagnostics, spec, error)?,
-            }
-        }
-        if exhausted {
-            return Err(DiscoveryError::ResourceLimitExceeded);
-        }
-        Ok(None)
-    }
-
-    async fn read(&self, request: Request, interactive: bool) -> Result<Read, DiscoveryError> {
-        use futures_util::FutureExt;
-        let cached = self
-            .reads
-            .borrow()
-            .iter()
-            .find(|(key, allowed, _)| *key == request && *allowed == interactive)
-            .map(|(_, _, future)| future.clone());
-        let future = if let Some(cached) = cached {
-            cached
-        } else {
-            if self.attempted.get() >= self.limits.resources {
-                return Err(DiscoveryError::ResourceLimitExceeded);
-            }
-            self.attempted.set(self.attempted.get() + 1);
-            let supplied = self.supplied.get(&request).cloned();
-            let parse_html = self.parse_html;
-            let fetch = self.fetch;
-            let selectors = self.selectors.clone();
-            let responses = self.responses.clone();
-            let key = request.clone();
-            let future = async move {
-                let (bytes, final_uri) = if let Some(bytes) = supplied {
-                    (bytes, None)
-                } else {
-                    let interaction = if interactive {
-                        crate::model::Interaction::Allowed
-                    } else {
-                        crate::model::Interaction::Forbidden
-                    };
-                    match (fetch)(key.clone(), interaction).await? {
-                        crate::model::ResourceRead::NeedsAccess { .. } => {
-                            return Ok(Read::NeedsAccess);
-                        }
-                        crate::model::ResourceRead::Response { response } => {
-                            (Arc::new(response.bytes), response.final_uri)
-                        }
-                    }
-                };
-                let html = parse_html(HtmlQuery {
-                    source: String::from_utf8_lossy(&bytes).into_owned(),
-                    selectors,
-                })
-                .await?;
-                let response = Arc::new(ParsedResponse {
-                    bytes,
-                    final_uri,
-                    html,
-                });
-                responses.borrow_mut().push(ReadResource {
-                    request: key,
-                    response: Ok(response.clone()),
-                });
-                Ok(Read::Response(response))
-            }
-            .boxed_local()
-            .shared();
-            self.reads
-                .borrow_mut()
-                .push((request.clone(), interactive, future.clone()));
-            future
-        };
-        future
-            .await
-            .map_err(|error| DiscoveryError::Host(Box::new(error)))
-    }
-
-    async fn resolve(
-        &self,
-        spec: FormatSpec,
-        uri: &str,
-        interactive: bool,
-        priority: &Cell<Priority>,
-        base: Priority,
-        metadata_only: bool,
-    ) -> Result<Option<(usize, DiscoveryCatalog)>, DiscoveryError> {
-        let mut history = Vec::new();
-        let mut parsed = ParsedResource::Follow(Request::new(uri));
-        let mut canonical_uri = None;
-        loop {
-            parsed = strip_canonical_source(parsed, &mut canonical_uri);
-            if let ParsedResource::Follow(request) = parsed {
-                parsed = spec.follow(request)?;
-            }
-            parsed = strip_canonical_source(parsed, &mut canonical_uri);
-            let (request, decoder, canonical) = match parsed {
-                ParsedResource::Follow(request) => (request, None, false),
-                ParsedResource::FollowWith(request, decoder) => (request, Some(decoder), true),
-                ParsedResource::FollowIntermediate(request, decoder) => {
-                    (request, Some(decoder), false)
-                }
-                parsed => {
-                    return parsed.compile(spec.name).map(|catalog| {
-                        let catalog = match canonical_uri {
-                            Some(uri) => catalog.with_source_url(&uri),
-                            None => catalog,
-                        };
-                        Some((history.len(), catalog))
-                    });
-                }
-            };
-            if metadata_only && !self.supplied.contains_key(&request) {
-                return Ok(None);
-            }
-            let evidence = if history.is_empty() {
-                base.0
-            } else {
-                base.0.min(Evidence::KnownResource)
-            };
-            priority.set((evidence, base.1 + history.len() + 1, base.2, base.3));
-            self.depths
-                .borrow_mut()
-                .entry(request.clone())
-                .and_modify(|depth| *depth = (*depth).min(base.1 + history.len()))
-                .or_insert(base.1 + history.len());
-            let context = DiscoveryContext { history: &history };
-            if history
-                .iter()
-                .any(|previous: &ReadResource| previous.request == request)
-            {
-                return Err(DiscoveryError::rejected(
-                    RejectionKind::Failed,
-                    "discovery followed the same resource twice",
-                ));
-            }
-            let response = match self.read(request.clone(), false).await {
-                Ok(Read::NeedsAccess) if interactive => self.read(request.clone(), true).await,
-                result => result,
-            };
-            let record = match response {
-                Ok(Read::NeedsAccess) => return Ok(None),
-                Ok(Read::Response(response)) => ReadResource {
-                    request: request.clone(),
-                    response: Ok(response),
-                },
-                Err(DiscoveryError::Host(error))
-                    if error.is_terminal()
-                        || matches!(error.cause(), Error::ResourceLimit { .. }) =>
-                {
-                    return Err(DiscoveryError::Host(error));
-                }
-                Err(DiscoveryError::Host(error)) => {
-                    parsed = match spec.on_failure {
-                        Some(handler) => handler(&context, &request, &error)?,
-                        None => return Err(DiscoveryError::fetch_failed(*error)),
-                    };
-                    history.push(ReadResource {
-                        request,
-                        response: Err(*error),
-                    });
-                    continue;
-                }
-                Err(error) => return Err(error),
-            };
-            let resource = DiscoveryResource {
-                context,
-                ..record.resource().expect("read response")
-            };
-            if canonical_uri.as_deref() == Some(request.uri.as_str()) {
-                canonical_uri = Some(resource.final_uri().to_owned());
-            }
-            parsed = decode_resource(spec, resource, decoder, canonical)?;
-            history.push(record);
-        }
-    }
-}
-
-fn strip_canonical_source(
-    mut parsed: ParsedResource,
-    canonical_uri: &mut Option<String>,
-) -> ParsedResource {
-    while let ParsedResource::CanonicalSource { uri, parsed: inner } = parsed {
-        *canonical_uri = Some(uri);
-        parsed = *inner;
-    }
-    parsed
-}
-
-fn decode_resource(
-    spec: FormatSpec,
-    resource: DiscoveryResource<'_>,
-    decoder: Option<Decoder>,
-    canonical: bool,
-) -> Result<ParsedResource, DiscoveryError> {
-    match decoder {
-        Some(decode) => decode(resource).map(|parsed| {
-            if canonical {
-                ParsedResource::CanonicalSource {
-                    uri: resource.final_uri().to_owned(),
-                    parsed: Box::new(parsed),
-                }
-            } else {
-                parsed
-            }
-        }),
-        None => parse_resource(spec.routes, resource),
-    }
-}
-
-fn input_evidence(input: &DiscoveryInput, specs: &[FormatSpec]) -> Evidence {
-    match input.kind {
-        DiscoveryInputKind::ObservedMetadata if input.contents.is_some() => {
-            Evidence::ObservedMetadata
-        }
-        DiscoveryInputKind::ObservedViewer if input.contents.is_some() => Evidence::ObservedViewer,
-        DiscoveryInputKind::Source => Evidence::Source,
-        DiscoveryInputKind::ObservedDocument if input.contents.is_some() => {
-            Evidence::ObservedDocument
-        }
-        _ => match specs
-            .iter()
-            .filter_map(|spec| spec.url_kind(&input.url))
-            .min()
-        {
-            Some(RouteKind::Metadata | RouteKind::Image) => Evidence::KnownResource,
-            Some(RouteKind::Viewer) => Evidence::ViewerPage,
-            None => Evidence::Unknown,
-        },
-    }
-}
-
-/// Resolve formats through shared, bounded resource reads and Host observations.
-/// Declared source catalogs precede reconstructed format metadata. Complete
-/// snapshots retain loader-only siblings; otherwise recognized resource URLs
-/// precede live page-loader fallback. All precede speculative navigation.
-/// Hosts supply the available URL inventory so relevance is decided before
-/// spending the resource allowance. Hosts must bound individual response and
-/// supplied-document sizes; discovery does not estimate heap usage.
-pub async fn discover<F, Fut, P, PFut, O, OFut>(
-    inputs: Vec<DiscoveryInput>,
-    specs: &[FormatSpec],
-    limits: DiscoveryLimits,
-    fetch: F,
-    parse_html: P,
-    observe: O,
-) -> Result<DiscoveryCatalog, DiscoveryError>
-where
-    F: Fn(Request, crate::model::Interaction) -> Fut,
-    Fut: std::future::Future<Output = Result<crate::model::ResourceRead, crate::model::Error>>,
-    P: Fn(HtmlQuery) -> PFut,
-    PFut: std::future::Future<Output = Result<HtmlDocument, Error>>,
-    O: Fn(Interaction) -> OFut,
-    OFut: std::future::Future<Output = Result<Vec<DiscoveryInput>, Error>>,
-{
-    let mut roots: Vec<_> = inputs
-        .into_iter()
-        .enumerate()
-        .map(|(order, input)| (input_evidence(&input, specs), 0usize, order, input))
-        .collect();
-    roots.sort_by_key(|(evidence, depth, order, _)| (*evidence, *depth, *order));
-    let mut resources = Resources::new(&fetch, &parse_html, &mut roots, specs, limits);
-    let mut visited: HashSet<String> = roots
-        .iter()
-        .map(|(_, _, _, input)| input.url.clone())
-        .collect();
-    let mut diagnostics = Vec::new();
-    let mut blocked = Vec::new();
-    let mut branch = roots.len();
-    loop {
-        let candidates = tier_candidates(&mut roots, specs)?;
-        if let Some(catalog) = resources
-            .resolve_tier(candidates, &mut blocked, &mut diagnostics)
-            .await?
-        {
-            return Ok(catalog);
-        }
-        resources.follow_pages(&mut roots, &mut visited, &mut branch);
-        if !roots.is_empty() {
-            continue;
-        }
-        // A Host can supply another live document without restarting the job.
-        // Drain already-accessible observations before any interactive access.
-        let mut inputs = observe(Interaction::Forbidden)
-            .await
-            .map_err(|error| DiscoveryError::Host(Box::new(error)))?;
-        if inputs.is_empty() {
-            blocked.sort_by_key(|(rank, _, _)| *rank);
-            // Concrete source/metadata evidence precedes viewer access. Unrelated
-            // observed scripts and fonts must not prompt before a frame can win.
-            let concrete =
-                blocked.partition_point(|(rank, _, _)| rank.0 < Evidence::ObservedViewer);
-            if let Some(catalog) = resources
-                .resolve_blocked(blocked.drain(..concrete), &mut diagnostics)
-                .await?
-            {
-                return Ok(catalog);
-            }
-            inputs = observe(Interaction::Allowed)
-                .await
-                .map_err(|error| DiscoveryError::Host(Box::new(error)))?;
-            if inputs.is_empty() {
-                if let Some(catalog) = resources
-                    .resolve_blocked(blocked.drain(..), &mut diagnostics)
-                    .await?
-                {
-                    return Ok(catalog);
-                }
-                return Err(DiscoveryError::NoCandidateAccepted { diagnostics });
-            }
-        }
-        for mut input in inputs {
-            let evidence = input_evidence(&input, specs);
-            let supplied = resources.supply(&mut input);
-            if !visited.insert(input.url.clone()) && !supplied {
-                continue;
-            }
-            roots.push((evidence, 0, branch, input));
-            branch += 1;
-        }
-    }
-}
-
-fn tier_candidates(
-    roots: &mut Vec<Root>,
-    specs: &[FormatSpec],
-) -> Result<Vec<Candidate>, DiscoveryError> {
-    roots.sort_by_key(|(evidence, depth, order, _)| (*evidence, *depth, *order));
-    let mut candidates = Vec::new();
-    let tier = roots
-        .first()
-        .map(|(evidence, depth, _, _)| (*evidence, *depth));
-    // A complete format snapshot starts a catalog of all loaded images,
-    // including siblings that can only be read through their page loader.
-    let include_viewers = tier.is_some_and(|(evidence, _)| evidence == Evidence::ObservedMetadata);
-    for (evidence, depth, order, input) in std::mem::take(roots) {
-        if Some((evidence, depth)) != tier
-            && !(include_viewers && evidence == Evidence::ObservedViewer)
-        {
-            roots.push((evidence, depth, order, input));
-            continue;
-        }
-        let metadata_only = matches!(
-            input.kind,
-            DiscoveryInputKind::ObservedMetadata | DiscoveryInputKind::ObservedViewer
-        );
-        let mut formats = specs.to_vec();
-        formats.sort_by_key(|spec| {
-            let kind = spec.url_kind(&input.url);
-            (kind.is_none(), kind)
-        });
-        candidates.try_reserve(formats.len()).map_err(|error| {
-            DiscoveryError::Host(Box::new(Error::ResourceLimit(error.to_string().into())))
-        })?;
-        candidates.extend(formats.into_iter().enumerate().map(|(rank, spec)| {
-            (
-                (evidence, depth, order, rank),
-                spec,
-                input.url.clone(),
-                metadata_only,
-            )
-        }));
-    }
-    candidates.sort_by_key(|(_, spec, uri, _)| spec.url_kind(uri).is_none());
-    Ok(candidates)
-}
-
-fn preceding_settled(
-    winner: &Option<(Priority, DiscoveryCatalog)>,
-    priorities: &[Cell<Priority>],
-    finished: &[bool],
-) -> bool {
-    winner.as_ref().is_some_and(|(best, _)| {
-        priorities
-            .iter()
-            .zip(finished)
-            .all(|(rank, done)| *done || rank.get() >= *best)
-    })
-}
-
-fn record_resolution(
-    outcome: (Priority, FormatSpec, String, Resolution),
-    winner: &mut Option<(Priority, DiscoveryCatalog)>,
-    metadata: &mut Vec<(Priority, DiscoveryCatalog)>,
-    blocked: &mut Vec<BlockedCandidate>,
-    diagnostics: &mut Vec<CandidateDiagnostic>,
-) -> Result<(), DiscoveryError> {
-    let (rank, spec, uri, result) = outcome;
-    match result {
-        Ok(Some((distance, catalog))) => {
-            let evidence = if distance > 1 {
-                rank.0.min(Evidence::KnownResource)
-            } else {
-                rank.0
-            };
-            let rank = (evidence, rank.1 + distance, rank.2, rank.3);
-            if rank.0.is_observation() {
-                metadata.push((rank, catalog));
-            } else if winner.as_ref().is_none_or(|(best, _)| rank < *best) {
-                *winner = Some((rank, catalog));
-            }
-        }
-        Ok(None) => blocked.push((rank, spec, uri)),
-        Err(error) => record_diagnostic(diagnostics, spec, error)?,
-    }
-    Ok(())
-}
+mod search;
+pub use search::discover;
 
 fn record_diagnostic(
     diagnostics: &mut Vec<CandidateDiagnostic>,
@@ -1736,6 +1071,7 @@ mod tests {
             let catalog =
                 parse_resource(&[route], DiscoveryResource::new("memory://metadata", bytes))
                     .unwrap()
+                    .0
                     .compile("test")
                     .unwrap();
             let super::super::model::DiscoveredEntry::Ready(image) = &catalog.entries()[0] else {

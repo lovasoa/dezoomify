@@ -6,7 +6,7 @@ use regex::Regex;
 use url::Url;
 
 use crate::Vec2d;
-use crate::core::discovery::{css, metadata, url_matches, viewer};
+use crate::core::discovery::{Specificity::Low, css, url_matches};
 use crate::core::{DiscoveryError, FormatSpec, ImagePlan, ParsedResource, Request, ResolvedLevel};
 use crate::web_page::page_title;
 
@@ -20,8 +20,10 @@ static VIEW_PATH_RE: LazyLock<Regex> = LazyLock::new(|| {
 pub const SPEC: FormatSpec = FormatSpec::new(
     "vls",
     &[
-        viewer(url_matches(is_view_url)).resolve_metadata(normalize_url),
-        metadata(css("map[id=map i], div[id=map i]")).decode(decode),
+        url_matches(is_view_url).resolve_metadata(normalize_url),
+        css("map[id=map i], div[id=map i]")
+            .specificity(Low)
+            .decode(decode),
     ],
 )
 .with_display_name("VLS")

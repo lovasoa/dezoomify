@@ -5,7 +5,7 @@ use std::sync::Arc;
 use serde::Deserialize;
 
 use crate::Vec2d;
-use crate::core::discovery::{url_matches, viewer};
+use crate::core::discovery::url_matches;
 use crate::core::{
     AdaptiveSource, DiscoveryError, DiscoveryResource, DiscoveryRoute, FormatSpec, Grid, ImagePlan,
     ObservationResult, ParsedResource, Request, ResolvedGrid, ResolvedLevel, TileRole,
@@ -14,7 +14,7 @@ use crate::core::{
 use crate::web_page::page_title;
 
 const TILE_SIZE: u32 = 512;
-const ROUTES: &[DiscoveryRoute] = &[viewer(url_matches(is_pnav_url)).decode(follow_image_json)];
+const ROUTES: &[DiscoveryRoute] = &[url_matches(is_pnav_url).decode(follow_image_json)];
 
 pub const SPEC: FormatSpec = FormatSpec::new("pnav", ROUTES)
     .with_display_name("pnav")

@@ -1,5 +1,5 @@
 mod support;
-use core::discovery::{DiscoveryInput, DiscoveryLimits, url_suffix, viewer};
+use core::discovery::{DiscoveryInput, DiscoveryLimits, url_suffix};
 use dezoomify::{
     core::{
         self, DiscoveredEntry, DiscoveryCatalog, DiscoveryError, DiscoveryResource, FormatSpec,
@@ -23,13 +23,13 @@ fn catalog(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryE
 }
 const FIRST: FormatSpec = FormatSpec::new(
     "first",
-    &[viewer(url_suffix("/root"))
+    &[url_suffix("/root")
         .resolve_metadata(|_| Ok(Request::new("https://test/a")))
         .then_decode(catalog)],
 );
 const SECOND: FormatSpec = FormatSpec::new(
     "second",
-    &[viewer(url_suffix("/root"))
+    &[url_suffix("/root")
         .resolve_metadata(|_| Ok(Request::new("https://test/b")))
         .then_decode(catalog)],
 );
@@ -76,8 +76,7 @@ fn decoding_defaults_to_the_final_target_through_decoder_bound_references() {
             .follow_relative("image?token=exact%2Fvalue&size=full")
             .decode_with(catalog))
     }
-    const SPEC: FormatSpec =
-        FormatSpec::new("default", &[viewer(url_suffix("/root")).decode(page)]);
+    const SPEC: FormatSpec = FormatSpec::new("default", &[url_suffix("/root").decode(page)]);
     let mut registry = core::Registry::new();
     registry.register(SPEC);
     let result = futures::executor::block_on(registry.discover(
@@ -118,21 +117,20 @@ fn intermediate_decoding_retains_the_default_page_source() {
         assert_eq!(page.uri(), "https://test/root");
         catalog(resource)
     }
-    const ROUTE: core::DiscoveryRoute = viewer(url_suffix("/root")).decode(page);
+    const ROUTE: core::DiscoveryRoute = url_suffix("/root").decode(page);
     const UNMARKED: FormatSpec = FormatSpec::new("context", &[ROUTE.non_canonical()]);
     const DEFAULT: FormatSpec = FormatSpec::new("context", &[ROUTE]);
     const BOUND: FormatSpec = FormatSpec::new(
         "context",
-        &[viewer(url_suffix("/root"))
+        &[url_suffix("/root")
             .decode(|resource| Ok(resource.follow_relative("auxiliary")))
             .then_decode_intermediate(contextual_image)],
     );
     const ROUTED: FormatSpec = FormatSpec::new(
         "context",
         &[
-            viewer(url_suffix("/root"))
-                .decode(|resource| Ok(resource.follow_relative("auxiliary"))),
-            viewer(url_suffix("/auxiliary"))
+            url_suffix("/root").decode(|resource| Ok(resource.follow_relative("auxiliary"))),
+            url_suffix("/auxiliary")
                 .decode(contextual_image)
                 .non_canonical(),
         ],
@@ -166,13 +164,13 @@ fn a_successful_fetch_with_rejected_metadata_cannot_set_the_winners_source() {
     }
     const REJECTED: FormatSpec = FormatSpec::new(
         "rejected",
-        &[viewer(url_suffix("/root"))
+        &[url_suffix("/root")
             .resolve_metadata(|_| Ok(Request::new("https://test/a")))
             .then_decode(rejected)],
     );
     const UNMARKED: FormatSpec = FormatSpec::new(
         "unmarked",
-        &[viewer(url_suffix("/root"))
+        &[url_suffix("/root")
             .resolve_metadata(|_| Ok(Request::new("https://test/b")))
             .then_decode_intermediate(catalog)
             .non_canonical()],
@@ -409,7 +407,7 @@ fn declared_catalog_precedes_the_loaded_pages_snapshot() {
             })
         },
         support::parse_html,
-        |_| async { panic!("no additional source access is needed") },
+        |_| async { Ok(Vec::new()) },
     ))
     .unwrap();
     assert_eq!(catalog.len(), 1);
@@ -512,10 +510,7 @@ fn additional_rendered_documents_replace_inert_reads_and_continue_recursive_disc
         },
     )).unwrap();
     assert_eq!(support::ready_image(catalog).format, "deepzoom");
-    assert_eq!(
-        *reads.borrow(),
-        ["https://test/frame", "https://test/nested"]
-    );
+    assert_eq!(*reads.borrow(), ["https://test/nested"]);
     assert_eq!(
         *observations.borrow(),
         [
@@ -590,8 +585,8 @@ fn branch(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryEr
 }
 #[test]
 fn shared_reads_keep_branch_history_headers_and_redirected_bases() {
-    const A: FormatSpec = FormatSpec::new("first", &[viewer(url_suffix("/root")).decode(branch)]);
-    const B: FormatSpec = FormatSpec::new("second", &[viewer(url_suffix("/root")).decode(branch)]);
+    const A: FormatSpec = FormatSpec::new("first", &[url_suffix("/root").decode(branch)]);
+    const B: FormatSpec = FormatSpec::new("second", &[url_suffix("/root").decode(branch)]);
     let mut registry = core::Registry::new();
     registry.register(A);
     registry.register(B);
@@ -637,7 +632,7 @@ fn live_resource_concurrency_stays_within_the_declared_bound() {
     let peak = Rc::new(Cell::new(0));
     const THIRD: FormatSpec = FormatSpec::new(
         "third",
-        &[viewer(url_suffix("/root"))
+        &[url_suffix("/root")
             .resolve_metadata(|_| Ok(Request::new("https://test/c")))
             .then_decode(catalog)],
     );
@@ -675,6 +670,119 @@ fn live_resource_concurrency_stays_within_the_declared_bound() {
     ))
     .unwrap();
     assert!(peak.get() <= 2);
+}
+
+#[test]
+fn shared_format_reads_leave_room_for_other_resources() {
+    use dezoomify::model::DiscoveryInputKind;
+    let (release_first, first) = futures::channel::oneshot::channel();
+    let (release_second, second) = futures::channel::oneshot::channel();
+    let waits = RefCell::new(std::collections::BTreeMap::from([
+        ("https://test/first", first),
+        ("https://test/second", second),
+    ]));
+    let reads = RefCell::new(Vec::new());
+    let registry = core::default_registry();
+    let discovery = registry.discover(
+        ["https://test/first", "https://test/second"]
+            .into_iter()
+            .map(|url| DiscoveryInput::new(url).with_kind(DiscoveryInputKind::ObservedResource))
+            .collect(),
+        DiscoveryLimits {
+            concurrent: 2,
+            ..Default::default()
+        },
+        |request, _| {
+            reads.borrow_mut().push(request.uri.clone());
+            let wait = waits
+                .borrow_mut()
+                .remove(request.uri.as_str())
+                .expect("one read per URL");
+            async move { Ok(response(wait.await.unwrap())) }
+        },
+        support::parse_html,
+        |_| async { Ok(Vec::new()) },
+    );
+    let mut discovery = Box::pin(discovery);
+    assert!(discovery.as_mut().now_or_never().is_none());
+    assert_eq!(
+        *reads.borrow(),
+        ["https://test/first", "https://test/second"]
+    );
+    release_second
+        .send(include_str!("../../../fixtures/deepzoom/basic/image.dzi"))
+        .unwrap();
+    assert!(
+        discovery.as_mut().now_or_never().is_none(),
+        "input order remains deterministic"
+    );
+    release_first.send("unrelated").unwrap();
+    assert_eq!(
+        support::ready_image(futures::executor::block_on(discovery).unwrap()).format,
+        "deepzoom"
+    );
+}
+
+#[test]
+fn accessible_live_metadata_precedes_speculative_scripts() {
+    use dezoomify::model::DiscoveryInputKind;
+    let mut inputs = vec![DiscoveryInput::with_contents(
+        "https://test/page",
+        "<html></html>",
+    )];
+    inputs.extend((0..32).map(|n| {
+        DiscoveryInput::new(format!("https://analytics.test/{n}.js"))
+            .with_kind(DiscoveryInputKind::ObservedResource)
+    }));
+    let registry = core::default_registry();
+    let catalog =
+        futures::executor::block_on(registry.discover(
+            inputs,
+            Default::default(),
+            |request, _| async move {
+                panic!("live metadata needs no speculative fetch: {}", request.uri)
+            },
+            support::parse_html,
+            |interaction| async move {
+                assert_eq!(interaction, Interaction::Forbidden);
+                Ok(vec![
+                    DiscoveryInput::with_contents(
+                        "https://viewer.test/#loaded",
+                        include_bytes!("../../../fixtures/deepzoom/basic/image.dzi"),
+                    )
+                    .with_kind(DiscoveryInputKind::ObservedMetadata),
+                ])
+            },
+        ))
+        .unwrap();
+    assert_eq!(support::ready_image(catalog).format, "deepzoom");
+}
+
+#[test]
+fn unchanged_rejected_observations_finish_discovery() {
+    use dezoomify::model::DiscoveryInputKind;
+    let observations = Cell::new(0);
+    let error = futures::executor::block_on(core::default_registry().discover(
+        Vec::new(),
+        Default::default(),
+        |_, _| async { panic!("observed contents are already available") },
+        support::parse_html,
+        |_| {
+            observations.set(observations.get() + 1);
+            assert!(
+                observations.get() <= 4,
+                "unchanged rejected snapshots must not restart discovery"
+            );
+            async {
+                Ok(vec![
+                    DiscoveryInput::with_contents("https://test/#loaded", "<html></html>")
+                        .with_kind(DiscoveryInputKind::ObservedMetadata),
+                ])
+            }
+        },
+    ))
+    .unwrap_err();
+    assert!(matches!(error, DiscoveryError::NoCandidateAccepted { .. }));
 }
 
 #[test]

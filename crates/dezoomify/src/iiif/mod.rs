@@ -9,8 +9,7 @@ use url::Url;
 
 use crate::Vec2d;
 use crate::core::discovery::{
-    Metadata, any, html_matches, image_url, js_matches, json_metadata, metadata, url_matches,
-    url_suffix, viewer,
+    Metadata, any, html_matches, js_matches, json_metadata, url_matches, url_suffix,
 };
 use crate::core::{
     AdaptiveSource, CatalogPlan, DeferredResource, DiscoveryCatalog, DiscoveryError,
@@ -58,12 +57,12 @@ fn image_metadata<'de, D: serde::Deserializer<'de>>(
 }
 
 const ROUTES: &[DiscoveryRoute] = &[
-    image_url(|uri| image_request_info(uri).is_some())
+    url_matches(|uri| image_request_info(uri).is_some())
         .resolve_metadata(|uri| {
             Ok(image_request_info(uri).expect("route matched IIIF image request"))
         })
         .then_decode(decode),
-    viewer(url_matches(has_manifest_parameter))
+    url_matches(has_manifest_parameter)
         .resolve_metadata(manifest_parameter)
         .then_decode(decode),
     mirador::ROUTE.then_decode(decode),
@@ -76,15 +75,15 @@ const ROUTES: &[DiscoveryRoute] = &[
     national_gallery::ROUTES[1],
     philadelphia::ROUTE.then_decode(decode),
     emuseum::ROUTE,
-    metadata(url_suffix("/info.json")).decode(decode),
-    metadata(url_matches(has_iiif_info_query)).decode(decode),
-    metadata(url_suffix("/manifest.json")).decode(decode),
+    url_suffix("/info.json").decode(decode),
+    url_matches(has_iiif_info_query).decode(decode),
+    url_suffix("/manifest.json").decode(decode),
     json_metadata::<Document>(),
-    metadata(any()).try_decode(embedded_metadata),
-    viewer(html_matches(&ABS_INFO_JSON_RE)).decode(follow_info_json_url),
-    viewer(html_matches(&REL_INFO_JSON_RE)).decode(follow_info_json_url),
-    viewer(js_matches(&ABS_INFO_JSON_RE)).decode(follow_info_json_url),
-    viewer(js_matches(&REL_INFO_JSON_RE)).decode(follow_info_json_url),
+    any().try_decode(embedded_metadata),
+    html_matches(&ABS_INFO_JSON_RE).decode(follow_info_json_url),
+    html_matches(&REL_INFO_JSON_RE).decode(follow_info_json_url),
+    js_matches(&ABS_INFO_JSON_RE).decode(follow_info_json_url),
+    js_matches(&REL_INFO_JSON_RE).decode(follow_info_json_url),
 ];
 
 /// IIIF format. See <https://iiif.io/>.

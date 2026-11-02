@@ -6,13 +6,13 @@ use std::sync::LazyLock;
 
 use regex::bytes::Regex;
 
-use crate::core::discovery::{js_matches, viewer};
+use crate::core::discovery::js_matches;
 use crate::core::{DiscoveryError, DiscoveryResource, DiscoveryRoute, ParsedResource};
 use crate::web_page::{page_base, script_bodies};
 
 use super::tile_info::{ImageInfo, Profile, TileInfo};
 
-pub(super) const ROUTE: DiscoveryRoute = viewer(js_matches(&INITIALIZER)).decode(decode);
+pub(super) const ROUTE: DiscoveryRoute = js_matches(&INITIALIZER).decode(decode);
 
 static INITIALIZER: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(

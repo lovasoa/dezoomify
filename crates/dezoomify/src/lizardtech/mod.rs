@@ -6,7 +6,7 @@ use regex::Regex;
 use url::Url;
 
 use crate::Vec2d;
-use crate::core::discovery::{metadata, url_matches};
+use crate::core::discovery::url_matches;
 use crate::core::{
     DiscoveryError, FormatSpec, ImagePlan, ParsedResource, Request, ResolvedLevel, image_title,
 };
@@ -27,7 +27,7 @@ static PARAMETER_RE: LazyLock<Regex> = LazyLock::new(|| {
 });
 pub const SPEC: FormatSpec = FormatSpec::new(
     "lizardtech",
-    &[metadata(url_matches(is_lizardtech_url)).decode(decode)],
+    &[url_matches(is_lizardtech_url).decode(decode)],
 )
 .with_display_name("LizardTech ImageServer");
 
