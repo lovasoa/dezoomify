@@ -431,7 +431,7 @@ async function chromiumDriverPage(context, serviceWorker, options) {
     driverPage = await context.newPage();
     await driverPage.goto(driverUrl);
   }
-  await driverPage.goto(`${driverUrl}?scenario=${encodeURIComponent(options.scenario ?? "")}`);
+  await driverPage.goto(testDriverUrl(driverUrl, options));
   await driverPage.waitForFunction(
     () => typeof globalThis.__DEZOOMIFY_TEST_RUN__?.then === "function",
     { timeout: 15000 },
@@ -448,6 +448,14 @@ async function chromiumDriverPage(context, serviceWorker, options) {
     `Chromium test driver failed: ${JSON.stringify(driverResult)}`,
   );
   return driverPage;
+}
+
+function testDriverUrl(url, options) {
+  const target = new URL(url);
+  target.search = "";
+  target.searchParams.set("scenario", options.scenario ?? "");
+  if (options.fixtureInput) target.searchParams.set("input", options.fixtureInput);
+  return target.href;
 }
 
 async function restartChromiumWorker(context, serviceWorker, jobPage, driverPage) {
@@ -549,9 +557,7 @@ async function runFirefoxJob(base, work, { logFile = fixtureServer.logFile, ...r
           if (!fixtureStarted) {
             // Navigate the privileged page through WebDriver without injecting
             // script. The shared idle package starts exactly one fixture job.
-            const driverUrl = new URL(url);
-            driverUrl.search = `scenario=${encodeURIComponent(runOptions.scenario ?? "")}`;
-            await driver.get(driverUrl.href);
+            await driver.get(testDriverUrl(url, runOptions));
             fixtureStarted = true;
             return false;
           }
@@ -683,6 +689,13 @@ async function retireFirefoxFixture(driver, driverTab) {
   await driver.switchTo().window(driverTab);
 }
 
+function browserFixtureInput(fixture) {
+  const path = fixture.input.split(/[?#]/, 1)[0];
+  return /\.(?:zif|ya?ml)$/i.test(path) || fixture.input.includes("{{")
+    ? fixture.viewer
+    : fixture.input;
+}
+
 test("packaged browser format matrices", { concurrency: 2 }, async (matrix) => {
   // WXT is synchronous. Finish both builds before launching browsers so it
   // cannot block delivery of page/download events from a running fixture.
@@ -709,6 +722,7 @@ test("packaged browser format matrices", { concurrency: 2 }, async (matrix) => {
                 assertSavedPyramid(
                   await run(fixtureServer.base, work, {
                     scenario: `fixtures/${fixture.name}`,
+                    fixtureInput: browserFixtureInput(fixture),
                     choice: fixture.choice,
                   }),
                   fixture.tolerance,

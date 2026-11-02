@@ -44,16 +44,22 @@ globalThis.__DEZOOMIFY_TEST_RUN__ = (async () => {
       signalSourceReady();
   });
 
-  const targetUrl = testTargetUrl(origin, scenario);
+  const fixtureInput = new URLSearchParams(location.search).get("input");
+  const targetUrl = fixtureInput
+    ? new URL(fixtureInput, origin).href
+    : testTargetUrl(origin, scenario);
+  const directInput =
+    scenario.startsWith("fixtures/") && new URL(targetUrl).pathname !== `/${scenario}/viewer.html`;
   const target = await api.tabs.create({ url: targetUrl, active: true });
   if (typeof target?.id !== "number") throw new Error("extension E2E source tab did not open");
 
   await waitForTab(target.id, targetUrl);
-  // A completed page load does not imply its viewer's metadata fetch has
-  // settled. Wait for the fixture's explicit signal before the finite scan.
+  // Direct inputs are ready at load; viewer pages signal completion of their
+  // asynchronous setup before the finite scan.
   const results = await api.scripting.executeScript({
     target: { tabId: target.id, frameIds: [0] },
-    func: () => {
+    func: (directInput) => {
+      if (directInput) return true;
       // Direct metadata documents are ready at load; HTML viewers signal
       // completion of their asynchronous metadata request below.
       if (document.contentType !== "text/html" && document.contentType !== "application/xhtml+xml")
@@ -75,6 +81,7 @@ globalThis.__DEZOOMIFY_TEST_RUN__ = (async () => {
         });
       });
     },
+    args: [directInput],
   });
   const viewerReady = results.some((result) => result.result === true);
   if (!viewerReady) throw new Error("extension E2E viewer did not finish its metadata fetch");
