@@ -113,6 +113,40 @@ fn complete_format_metadata_keeps_loader_only_siblings_without_fetching() {
 }
 
 #[test]
+fn accessible_viewers_precede_weak_resource_reads() {
+    let registry = default_registry();
+    let catalog = futures::executor::block_on(registry.discover(
+        vec![
+            DiscoveryInput::with_contents("https://museum.test/page", "<html></html>"),
+            DiscoveryInput::new("https://analytics.test/script.js")
+                .with_kind(DiscoveryInputKind::ObservedResource),
+            DiscoveryInput::new("https://museum.test/opaque")
+                .with_kind(DiscoveryInputKind::ObservedResource),
+        ],
+        Default::default(),
+        |request, _| async move {
+            panic!(
+                "the live viewer should prevent speculative reads: {}",
+                request.uri
+            )
+        },
+        support::parse_html,
+        |interaction| async move {
+            assert_eq!(interaction, dezoomify::model::Interaction::Forbidden);
+            Ok(vec![
+                DiscoveryInput::with_contents(
+                    "https://museum.test/art#observed",
+                    serde_json::to_vec(&observation()).unwrap(),
+                )
+                .with_kind(DiscoveryInputKind::ObservedViewer),
+            ])
+        },
+    ))
+    .unwrap();
+    assert_eq!(support::ready_image(catalog).format, "viewer");
+}
+
+#[test]
 fn recognized_metadata_precedes_a_live_loader_and_failure_keeps_the_loader_available() {
     for (uri, available) in [
         ("https://museum.test/image/info.json", true),

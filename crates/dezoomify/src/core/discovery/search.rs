@@ -77,8 +77,24 @@ impl Search {
         specs: &[FormatSpec],
         refresh: bool,
     ) -> bool {
-        // Prefer an explicit source's body to a duplicate passive snapshot.
-        inputs.sort_by_key(input_specificity);
+        // Keep concrete metadata ahead of equally specific loader snapshots,
+        // and prefer an explicit source's body over duplicate passive content.
+        inputs.sort_by_cached_key(|input| {
+            let specificity = if input.kind == DiscoveryInputKind::ObservedResource {
+                specs
+                    .iter()
+                    .filter_map(|spec| spec.url_specificity(&input.url))
+                    .min()
+                    .unwrap_or(Specificity::Low)
+            } else {
+                input_specificity(input)
+            };
+            (
+                specificity,
+                input.kind != DiscoveryInputKind::Source,
+                input.kind == DiscoveryInputKind::ObservedViewer,
+            )
+        });
         let previous = self.ready.len();
         for input in inputs {
             let specificity = input_specificity(&input);
@@ -489,12 +505,10 @@ fn strip_canonical_source(
 fn input_specificity(input: &DiscoveryInput) -> Specificity {
     match input.kind {
         DiscoveryInputKind::Source => Specificity::High,
-        DiscoveryInputKind::ObservedMetadata | DiscoveryInputKind::ObservedDocument => {
-            Specificity::Medium
-        }
-        DiscoveryInputKind::ObservedViewer | DiscoveryInputKind::ObservedResource => {
-            Specificity::Low
-        }
+        DiscoveryInputKind::ObservedMetadata
+        | DiscoveryInputKind::ObservedDocument
+        | DiscoveryInputKind::ObservedViewer => Specificity::Medium,
+        DiscoveryInputKind::ObservedResource => Specificity::Low,
     }
 }
 
