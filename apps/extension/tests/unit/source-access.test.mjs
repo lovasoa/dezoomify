@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { errorPayload, HttpError } from "@dezoomify/browser-runtime";
+import { findLoadedImage } from "../../src/job/loaded-image.ts";
 import { createSourceAccess } from "../../src/job/source-access.ts";
 import {
   cancelSourceFetch,
@@ -447,6 +448,55 @@ test("memory injection failure preserves its cause and falls back to document di
     assert.deepEqual(scan.inputs, snapshot().inputs);
     assert.equal(scan.memory.unavailable, true);
     assert.equal(scan.memory.detail, "page MAIN world unavailable");
+  } finally {
+    source.dispose();
+  }
+});
+
+test("single-image recovery validates viewer originals and rejects replaced frame documents", async () => {
+  const viewerUrl = "https://viewer.example/page";
+  const image = { url: "https://images.example/original.jpg", width: 5132, height: 2772 };
+  const fake = fakeBrowser(async (injection) => {
+    const frameId = injection.target.frameIds[0];
+    const documentUrl = frameId === 8 ? viewerUrl : SOURCE_URL;
+    if (injection.files)
+      return {
+        ok: true,
+        documentUrl,
+        inputs: [],
+        images:
+          frameId === 8
+            ? [image, { ...image, width: -1 }, { ...image, url: "javascript:bad" }]
+            : [],
+      };
+    if (injection.func === findLoadedImage) {
+      const images = injection.args[0];
+      assert.ok(images.length <= 1);
+      return { documentUrl, image: images[0] };
+    }
+    return snapshot(documentUrl);
+  });
+  const frames = [
+    { frameId: 0, documentUrl: SOURCE_URL, token: "root", frames: [viewerUrl] },
+    { frameId: 8, documentUrl: viewerUrl, token: "viewer" },
+  ];
+  fake.setFrames(frames);
+  const source = createSourceAccess(fake.api, { tabId: 9, documentUrl: SOURCE_URL });
+  const signal = new AbortController().signal;
+  try {
+    await source.scan(signal);
+    const observe = source.observations({
+      hasPermission: async () => true,
+      ensurePermission: async () => {},
+      scanned: () => {},
+      failed: (_frame, error) => {
+        throw error;
+      },
+    });
+    await observe("forbidden", signal);
+    assert.deepEqual(await source.loadedImage(signal), image);
+    fake.setFrames([frames[0], { ...frames[1], token: "replacement" }]);
+    assert.equal(await source.loadedImage(signal), undefined);
   } finally {
     source.dispose();
   }

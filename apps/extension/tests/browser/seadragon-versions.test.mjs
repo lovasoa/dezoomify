@@ -38,7 +38,7 @@ async function tileResponse(route) {
   if (url.pathname.startsWith("/failure/"))
     return route.fulfill({ status: 503, body: "tile failure" });
   if (url.pathname.startsWith("/img/")) return route.fulfill({ status: 404, body: "" });
-  if (/^\/(iiif|zoomify)\//.test(url.pathname))
+  if (/^\/(iiif|zoomify|image)\//.test(url.pathname))
     return route.fulfill({ contentType: "image/png", body: ordinaryTile });
   const tilePath =
     url.pathname === "/imageproxy.aspx"
@@ -108,6 +108,14 @@ async function acquireTile(page, source, grid, column, row) {
 
 async function checkObservation(page, runtime, mode) {
   const result = await page.evaluate(() => ViewerScanner.scanViewers());
+  if (mode === "image") {
+    assert.deepEqual(result.inputs, []);
+    assert.deepEqual(result.handles, []);
+    assert.deepEqual(result.images, [
+      { url: "https://viewer.fixture.test/image/original.png", width: 256, height: 256 },
+    ]);
+    return;
+  }
   assert.equal(
     result.inputs.length,
     expectedImages(runtime, mode),
@@ -218,7 +226,7 @@ for (const [name, engine] of [
           "bounds",
           "failure",
         ];
-        if (runtime.world) modes.push("multi", "ajax", "iiif", "zoomify");
+        if (runtime.world) modes.push("multi", "ajax", "iiif", "zoomify", "image");
         if (runtime.classic) modes.push("query");
         for (const mode of modes)
           await t.test(

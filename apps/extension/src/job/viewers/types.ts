@@ -1,9 +1,7 @@
 import type { ObservedInput } from "@dezoomify/wasm-bindings";
+import type { LoadedImage } from "../loaded-image.ts";
 
-export interface ViewerEvidence {
-  input: ObservedInput;
-  handle?: string;
-}
+export type ViewerEvidence = { input: ObservedInput; handle?: string } | { image: LoadedImage };
 
 export interface SourceGeometry {
   width: number;
@@ -79,6 +77,7 @@ export interface ScanResult {
   ok: true;
   documentUrl: string;
   inputs: ObservedInput[];
+  images: LoadedImage[];
   handles: string[];
   diagnostics: ScanDiagnostics;
 }

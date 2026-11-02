@@ -43,6 +43,9 @@ Adapters extract source facts; Rust owns format interpretation and grid
 validation. Known OpenSeadragon formats supply metadata. Custom OpenSeadragon
 sources and finite OpenLayers image grids use the Rust-defined
 `ViewerObservation` contract.
+Ordinary OpenSeadragon image sources contribute their original URL to the same
+single-image fallback as large DOM images, after tiled discovery is exhausted.
+The browser downloads that original directly rather than exporting page pixels.
 
 The shared [tile session](src/job/viewers/session.ts) retains page loaders in
 closures behind document-bound capabilities. Addresses never fall through to

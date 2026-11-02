@@ -729,6 +729,8 @@ for (const [browser, run, scenario] of [
   ["firefox", runFirefoxJob, "loaded-image-data"],
   ["chromium", runChromiumJob, "loaded-image-link"],
   ["firefox", runFirefoxJob, "loaded-image-link"],
+  ["chromium", runChromiumJob, "loaded-image-viewer"],
+  ["firefox", runFirefoxJob, "loaded-image-viewer"],
 ]) {
   test(`${browser}: ${scenario} is saved after tiled discovery fails`, {
     timeout: 180000,

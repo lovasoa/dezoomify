@@ -1,4 +1,5 @@
 import type { ObservedInput } from "@dezoomify/wasm-bindings";
+import type { LoadedImage } from "../loaded-image.ts";
 import type { ScanDiagnostics, ScanResult, StopReason, ViewerEvidence } from "./types.ts";
 
 export const scanLimits = {
@@ -25,6 +26,7 @@ function yieldTask(): Promise<void> {
 
 export class ScanState {
   readonly inputs: ObservedInput[] = [];
+  readonly images: LoadedImage[] = [];
   readonly handles = new Set<string>();
   readonly diagnostics: ScanDiagnostics = {
     documents: 0,
@@ -62,7 +64,7 @@ export class ScanState {
       this.truncate("reference-limit");
       return true;
     }
-    if (this.inputs.length >= scanLimits.images) {
+    if (this.inputs.length + this.images.length >= scanLimits.images) {
       this.truncate("image-limit");
       return true;
     }
@@ -80,7 +82,13 @@ export class ScanState {
     if (++this.steps % scanLimits.sliceSteps === 0) await yieldTask();
   }
 
-  collect({ input, handle }: ViewerEvidence): "added" | "duplicate" | "full" {
+  collect(evidence: ViewerEvidence): "added" | "duplicate" | "full" {
+    if ("image" in evidence) {
+      if (this.images.some(({ url }) => url === evidence.image.url)) return "duplicate";
+      this.images.push(evidence.image);
+      return "added";
+    }
+    const { input, handle } = evidence;
     if (this.seenImages.has(input.contents)) return "duplicate";
     const bytes = new TextEncoder().encode(input.contents).byteLength;
     if (this.diagnostics.bytes + bytes > scanLimits.bytes) {
@@ -100,6 +108,7 @@ export class ScanState {
       ok: true,
       documentUrl: this.documentUrl,
       inputs: this.inputs,
+      images: this.images,
       handles: [...this.handles],
       diagnostics: this.diagnostics,
     };

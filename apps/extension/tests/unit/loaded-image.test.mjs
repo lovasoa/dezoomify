@@ -60,3 +60,30 @@ test("only an unambiguous explicit image download is used as a link fallback", (
     undefined,
   );
 });
+
+test("viewer originals outrank large DOM images without inheriting thumbnail thresholds", (t) => {
+  const previous = { location: globalThis.location, document: globalThis.document };
+  t.after(() => Object.assign(globalThis, previous));
+  globalThis.location = { href: "https://gallery.example/" };
+  globalThis.document = {
+    images: [
+      {
+        complete: true,
+        naturalWidth: 4000,
+        naturalHeight: 3000,
+        src: "https://gallery.example/banner.jpg",
+      },
+    ],
+  };
+  const original = { url: "https://images.example/original.jpg", width: 800, height: 600 };
+  assert.deepEqual(
+    findLoadedImage([
+      { ...original, url: "javascript:bad", width: 9000 },
+      { ...original, width: 0 },
+      { ...original, width: 400 },
+      original,
+      original,
+    ]).image,
+    original,
+  );
+});

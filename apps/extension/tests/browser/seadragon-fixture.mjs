@@ -33,6 +33,7 @@ export function seadragonLibrary(runtime) {
 export async function createSeadragonViewer({ runtime, mode }) {
   const library = runtime.classic ? window.Seadragon : window.OpenSeadragon;
   function fixtureSource() {
+    if (mode === "image") return { type: "image", url: `${location.origin}/image/original.png` };
     if (mode === "iiif")
       return new library.IIIFTileSource({
         "@context": "http://iiif.io/api/image/2/context.json",

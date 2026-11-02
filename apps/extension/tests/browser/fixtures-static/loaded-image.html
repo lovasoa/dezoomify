@@ -2,11 +2,25 @@
 <html lang="en">
   <head><meta charset="utf-8"><title>Loaded image</title></head>
   <body>
+    <script src="/openseadragon-fixture.js"></script>
     <img id="artwork" style="width:100px;height:100px;object-fit:cover" alt="Blue rectangle"
       onload="document.documentElement.dataset.viewerReady = 'true'">
     <script>
       const artwork = document.getElementById('artwork');
-      if (location.search === '?link') {
+      if (location.search === '?viewer') {
+        artwork.remove();
+        const element = document.body.appendChild(document.createElement('div'));
+        element.id = 'viewer';
+        element.style = 'width:600px;height:400px';
+        const original = new URL('/loaded-image.png', location.href);
+        original.hostname = location.hostname === 'localhost' ? '127.0.0.1' : 'localhost';
+        const viewer = OpenSeadragon({
+          id: 'viewer', showNavigationControl: false,
+          tileSources: { type: 'image', url: original.href },
+        });
+        viewer.addOnceHandler('open', () => document.documentElement.dataset.viewerReady = 'true');
+        delete window.OpenSeadragon;
+      } else if (location.search === '?link') {
         artwork.remove();
         const link = document.createElement('a');
         link.href = '/loaded-image.png';

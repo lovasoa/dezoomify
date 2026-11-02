@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { openSeadragonImages } from "../../src/job/openseadragon/images.ts";
 import { readTileSource } from "../../src/job/openseadragon/metadata.ts";
 import { projectMetadata } from "../../src/job/viewers/metadata.ts";
 import { PageObject } from "../../src/job/viewers/page-object.ts";
@@ -14,6 +15,21 @@ const dzi = () => ({
   tileOverlap: 1,
   minLevel: 0,
   maxLevel: 10,
+});
+
+test("ordinary image sources expose their original and reject missing or non-HTTP URLs", () => {
+  const source = { type: "image", width: 5132, height: 2772, url: "./original.jpg" };
+  const read = () =>
+    openSeadragonImages(PageObject.from({ source }))[0].read(context, context.documentUrl);
+  assert.deepEqual(read().image, {
+    url: "https://viewer.example/original.jpg",
+    width: 5132,
+    height: 2772,
+  });
+  for (const url of ["", "javascript:bad"]) {
+    source.url = url;
+    assert.throws(read);
+  }
 });
 
 test("metadata projection uses a detached snapshot and preserves the source document's URL", () => {
