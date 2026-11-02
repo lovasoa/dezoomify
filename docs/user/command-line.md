@@ -19,8 +19,10 @@ second names the output; omit it for automatic naming. Existing files are
 preserved unless you request `--overwrite`.
 
 With no arguments, a terminal prompts for input; without a terminal it prints
-help. Interactive runs can ask you to choose an image and level. Scripts use
-the first image and automatic level unless you supply selectors.
+help. Interactive runs list available images and resolutions before asking for
+a choice, then show a download progress bar. Scripts use the first image and
+automatic level unless you supply selectors. `--json` never prompts; it emits
+machine-readable events without a progress bar.
 
 ## Useful options
 

@@ -1,9 +1,94 @@
 //! Normalized human/machine reporting: stdout = JSON events with --json,
 //! stderr = human progress. Never mixed.
 
-use dezoomify::model::DiagnosticLevel;
+use dezoomify::model::{DiagnosticLevel, Progress, ProgressPhase};
 use dezoomify_native::diagnostics::Diagnostics;
+use indicatif::{ProgressBar, ProgressStyle};
+use std::cell::Cell;
 use std::collections::BTreeMap;
+
+/// One job's terminal display. Drop clears it after native settlement, including
+/// failure paths; publication and the final result remain the caller's concern.
+pub struct InteractiveProgress {
+    bar: ProgressBar,
+    phase: Cell<Option<(ProgressPhase, bool)>>,
+}
+
+impl InteractiveProgress {
+    pub fn new(enabled: bool) -> Self {
+        let bar = if enabled {
+            ProgressBar::new_spinner().with_message("Discovering images…")
+        } else {
+            ProgressBar::hidden()
+        };
+        if enabled {
+            bar.enable_steady_tick(std::time::Duration::from_millis(100));
+        }
+        Self {
+            bar,
+            phase: Cell::new(None),
+        }
+    }
+
+    pub fn update(&self, progress: &Progress) {
+        let counted = progress.phase == ProgressPhase::Acquisition
+            && progress.total.is_some_and(|total| total > 0);
+        if self.phase.replace(Some((progress.phase, counted))) != Some((progress.phase, counted)) {
+            let style = if counted {
+                ProgressStyle::default_bar()
+            } else {
+                ProgressStyle::default_spinner()
+            };
+            // These templates are authored here, not user input.
+            let template = if counted {
+                "{spinner} [{elapsed_precise}] [{wide_bar}] {pos}/{len} tiles ({eta} remaining)"
+            } else {
+                "{spinner} {msg} [{elapsed_precise}]"
+            };
+            self.bar.set_style(
+                style
+                    .template(template)
+                    .unwrap_or_else(|_| ProgressStyle::default_spinner()),
+            );
+            self.bar.reset_elapsed();
+        }
+        if counted {
+            self.bar.set_length(progress.total.unwrap_or(0));
+            self.bar.set_position(progress.completed);
+        } else {
+            self.bar.unset_length();
+            self.bar.set_message(match progress.phase {
+                ProgressPhase::Discovery => "Discovering images…",
+                ProgressPhase::Planning => "Planning download…",
+                ProgressPhase::Acquisition => "Downloading tiles…",
+                ProgressPhase::Output => "Saving image…",
+            });
+        }
+    }
+
+    /// Clear the bar while reading a selection, before acquisitions start.
+    pub fn without_display<T>(&self, action: impl FnOnce() -> T) -> T {
+        self.bar.suspend(action)
+    }
+}
+
+impl Drop for InteractiveProgress {
+    fn drop(&mut self) {
+        self.bar.finish_and_clear();
+    }
+}
+
+pub fn human_progress(progress: &Progress) -> String {
+    match progress.phase {
+        ProgressPhase::Discovery => "Discovering images…".to_string(),
+        ProgressPhase::Planning => "Planning download…".to_string(),
+        ProgressPhase::Acquisition => match progress.total {
+            Some(total) => format!("Downloading tiles: {}/{total}", progress.completed),
+            None => format!("Downloading tiles: {} completed", progress.completed),
+        },
+        ProgressPhase::Output => "Saving image…".to_string(),
+    }
+}
 
 #[derive(Default)]
 pub struct ProgressGate {
@@ -155,9 +240,10 @@ pub fn log_level_rank(level: &str) -> u8 {
     }
 }
 
-pub fn job_diagnostics(level: &str) -> Diagnostics {
+pub fn job_diagnostics(level: &str, progress: &InteractiveProgress) -> Diagnostics {
     let diagnostics = Diagnostics::new("cli", crate::arguments::APP_VERSION);
     let threshold = log_level_rank(level);
+    let bar = progress.bar.clone();
     diagnostics.set_sink(move |record| {
         let rank = match record.level {
             DiagnosticLevel::Error => 0,
@@ -170,17 +256,25 @@ pub fn job_diagnostics(level: &str) -> Diagnostics {
         if rank > threshold
             || matches!(
                 record.event.as_str(),
-                "start" | "phase" | "completed" | "failed" | "runtime-failed" | "validation-failed"
+                "start"
+                    | "phase"
+                    | "completed"
+                    | "cancelled"
+                    | "failed"
+                    | "runtime-failed"
+                    | "validation-failed"
             )
         {
             return;
         }
-        eprintln!(
-            "+{:.3}s {} {}",
-            record.elapsed_ms / 1000.0,
-            record.event,
-            serde_json::to_string(&record.fields).unwrap_or_default()
-        );
+        bar.suspend(|| {
+            eprintln!(
+                "+{:.3}s {} {}",
+                record.elapsed_ms / 1000.0,
+                record.event,
+                serde_json::to_string(&record.fields).unwrap_or_default()
+            );
+        });
     });
     diagnostics
 }
@@ -198,9 +292,8 @@ pub fn show_success(level: &str) -> bool {
     log_level_rank(level) >= 2
 }
 
-/// Progress events (`started`, `discovery`, `downloading`, `encoding`) show at
-/// info and above; error/warn suppress them. Machine `--json` events are
-/// never filtered.
+/// Human progress shows at info and above; error/warn suppress it.
+/// Machine `--json` events are never filtered.
 #[must_use]
 pub fn show_progress(level: &str) -> bool {
     log_level_rank(level) >= 2
@@ -209,6 +302,29 @@ pub fn show_progress(level: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn download_counts_become_a_saving_spinner_and_clear_on_drop() {
+        let bar = {
+            let display = InteractiveProgress::new(false);
+            let mut progress = Progress {
+                phase: ProgressPhase::Acquisition,
+                completed: 3,
+                total: Some(10),
+                ..Default::default()
+            };
+            display.update(&progress);
+            assert_eq!(display.bar.position(), 3);
+            assert_eq!(display.bar.length(), Some(10));
+            progress.phase = ProgressPhase::Output;
+            display.update(&progress);
+            assert_eq!(display.bar.length(), None);
+            assert_eq!(display.bar.message(), "Saving image…");
+            assert!(!display.bar.is_finished());
+            display.bar.clone()
+        };
+        assert!(bar.is_finished());
+    }
 
     #[test]
     fn log_levels_gate_human_output() {
