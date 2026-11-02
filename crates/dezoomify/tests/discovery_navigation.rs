@@ -553,6 +553,9 @@ fn unknown_inventory_urls_need_supplied_contents_or_an_explicit_source() {
             "https://analytics.test/media?q=1",
             "https://analytics.test/image/opaque",
             "https://analytics.test/random.js",
+            "https://analytics.test/collect?dl=https%3A%2F%2Fartsandculture.google.com%2Fasset%2Ftest",
+            "https://analytics.test/collect?dl=https%3A%2F%2Fhungaricana.hu%2Fimages%2Ftest",
+            "https://analytics.test/collect#hungaricana.hu",
         ]
         .into_iter()
         .map(observed)

@@ -37,7 +37,11 @@ pub const SPEC: FormatSpec =
     FormatSpec::new("hungaricana", ROUTES).with_display_name("Hungaricana");
 
 fn is_hungaricana_url(uri: &str) -> bool {
-    let lower = uri.to_ascii_lowercase();
+    let lower = uri
+        .split(['?', '#'])
+        .next()
+        .unwrap_or(uri)
+        .to_ascii_lowercase();
     lower.contains("hungaricana") || is_ecw_url(uri)
 }
 

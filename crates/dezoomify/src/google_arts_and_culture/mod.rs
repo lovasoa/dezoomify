@@ -18,6 +18,7 @@ pub const SPEC: FormatSpec =
     FormatSpec::new("google_arts_and_culture", ROUTES).with_display_name("Arts & Culture");
 
 fn is_google_arts_url(uri: &str) -> bool {
+    let uri = uri.split(['?', '#']).next().unwrap_or(uri);
     uri.contains("artsandculture.google.com") || uri.contains("g.co/arts/")
 }
 
@@ -203,6 +204,8 @@ mod tests {
         for input in [
             "https://example.com/test",
             "https://lh3.googleusercontent.com/image-id=g",
+            "https://analytics.test/collect?dl=https%3A%2F%2Fartsandculture.google.com%2Fasset%2Ftest",
+            "https://analytics.test/#https://g.co/arts/test",
         ] {
             let (result, requests) = crate::test_support::discover(SPEC, input, &[]);
             assert!(
