@@ -740,15 +740,27 @@ fn generic_markers_yield_to_specific_metadata_references() {
         r#"<div id="map" vls:ot_id="1" vls:width="512" vls:height="512"></div>
            <var id="zoomTileSize" value="256">"#,
     ] {
-        image(
-            vec![DiscoveryInput::with_contents(
-                PAGE,
-                format!(
-                    "{marker}<script>const unrelated = '/config.xml'; Seadragon.embed('viewer', 'title', '/art');</script>"
-                ),
-            )],
-            &[("https://museum.test/art", DZI)],
-            "deepzoom",
-        );
+        for (reference, target) in [
+            ("Seadragon.embed('viewer', 'title', '/art');", "/art"),
+            ("const image = '/art.dzi';", "/art.dzi"),
+            ("openDzi('/art.xml');", "/art.xml"),
+        ] {
+            let target = format!("https://museum.test{target}");
+            let (catalog, _) = support::discover_inputs(
+                default_registry(),
+                vec![DiscoveryInput::with_contents(
+                    PAGE,
+                    format!(
+                        "{marker}<script>const unrelated = '/config.xml'; {reference}</script>"
+                    ),
+                )],
+                Default::default(),
+                |uri| {
+                    assert_eq!(uri, target, "specific evidence must precede generic links");
+                    Some(Ok((DZI.to_vec(), None)))
+                },
+            );
+            assert_eq!(support::ready_image(catalog.unwrap()).format, "deepzoom");
+        }
     }
 }

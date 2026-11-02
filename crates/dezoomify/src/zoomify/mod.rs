@@ -13,7 +13,8 @@ use regex::{Regex, bytes::Regex as BytesRegex};
 
 use crate::Vec2d;
 use crate::core::discovery::{
-    Specificity::Low, any, css, js_matches, resource_matches, url_matches, url_suffix,
+    Specificity::Low, any, css, image_url, js_matches, metadata, resource_matches, url_matches,
+    url_suffix, viewer,
 };
 use crate::core::{
     CatalogPlan, DiscoveryError, DiscoveryRoute, FormatSpec, ImagePlan, ParsedResource, Request,
@@ -23,16 +24,16 @@ use crate::core::{
 mod image_properties;
 
 const ROUTES: &[DiscoveryRoute] = &[
-    url_suffix("ImageProperties.xml").decode(image_properties),
-    url_matches(is_tile_url).resolve_metadata(tile_metadata),
-    css("imagefile[format=\"zoomify\" i]").text_file("ImageProperties.xml"),
-    any().try_decode(inline_catalog),
-    resource_matches(contains_zoomify_declaration).decode(extract_image_properties_url),
-    js_matches(&FLUID_ACCESS_RE).decode(extract_fluid_catalog),
-    url_matches(is_unibe_page).regex_file(&UNIBE_URL_RE, "ImageProperties.xml"),
-    css(".ete-openlayers-src").text_file("ImageProperties.xml"),
+    metadata(url_suffix("ImageProperties.xml")).decode(image_properties),
+    image_url(is_tile_url).resolve_metadata(tile_metadata),
+    metadata(css("imagefile[format=\"zoomify\" i]")).text_file("ImageProperties.xml"),
+    viewer(any()).try_decode(inline_catalog),
+    viewer(resource_matches(contains_zoomify_declaration)).decode(extract_image_properties_url),
+    viewer(js_matches(&FLUID_ACCESS_RE)).decode(extract_fluid_catalog),
+    viewer(url_matches(is_unibe_page)).regex_file(&UNIBE_URL_RE, "ImageProperties.xml"),
+    viewer(css(".ete-openlayers-src")).text_file("ImageProperties.xml"),
     ngv::ROUTE,
-    css("url").specificity(Low).text_file("ImageProperties.xml"),
+    viewer(css("url").specificity(Low)).text_file("ImageProperties.xml"),
 ];
 
 pub const SPEC: FormatSpec = FormatSpec::new("zoomify", ROUTES).with_display_name("Zoomify");

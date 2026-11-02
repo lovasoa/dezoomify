@@ -2,7 +2,7 @@ use std::sync::LazyLock;
 
 use regex::bytes::Regex as BytesRegex;
 
-use crate::core::discovery::url_matches;
+use crate::core::discovery::{url_matches, viewer};
 use crate::core::{DiscoveryError, DiscoveryRoute, Request};
 
 static DEEPZOOM_MANIFEST: LazyLock<BytesRegex> = LazyLock::new(|| {
@@ -12,7 +12,7 @@ static DEEPZOOM_MANIFEST: LazyLock<BytesRegex> = LazyLock::new(|| {
     .expect("constant Paris Deep Zoom manifest pattern")
 });
 
-pub(super) const ARK_ROUTE: DiscoveryRoute = url_matches(is_ark).resolve_metadata(reader);
+pub(super) const ARK_ROUTE: DiscoveryRoute = viewer(url_matches(is_ark)).resolve_metadata(reader);
 pub(super) const MANIFEST_ROUTE: DiscoveryRoute =
     DiscoveryRoute::regex_link(&DEEPZOOM_MANIFEST, "$metadata");
 

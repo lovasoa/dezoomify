@@ -9,9 +9,9 @@ static IMAGE_PATH: LazyLock<BytesRegex> = LazyLock::new(|| {
         .expect("constant NGV Zoomify path pattern")
 });
 
-use crate::core::discovery::url_matches;
+use crate::core::discovery::{url_matches, viewer};
 pub(super) const ROUTE: DiscoveryRoute =
-    url_matches(is_work_page).regex_file(&IMAGE_PATH, "ImageProperties.xml");
+    viewer(url_matches(is_work_page)).regex_file(&IMAGE_PATH, "ImageProperties.xml");
 
 pub(super) fn is_work_page(uri: &str) -> bool {
     uri.contains("ngv.vic.gov.au/explore/collection/work")

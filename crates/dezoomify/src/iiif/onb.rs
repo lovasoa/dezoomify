@@ -1,9 +1,9 @@
 use url::Url;
 
-use crate::core::discovery::url_matches;
+use crate::core::discovery::{url_matches, viewer};
 use crate::core::{DiscoveryError, DiscoveryRoute, Request};
 
-pub(super) const ROUTE: DiscoveryRoute = url_matches(is_entry).resolve_metadata(manifest);
+pub(super) const ROUTE: DiscoveryRoute = viewer(url_matches(is_entry)).resolve_metadata(manifest);
 
 pub(super) fn is_entry(uri: &str) -> bool {
     let Ok(url) = Url::parse(uri) else {

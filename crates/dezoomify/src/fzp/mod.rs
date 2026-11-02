@@ -35,12 +35,12 @@ mod metadata;
 mod tests;
 mod viewer;
 
-use crate::core::discovery::{Metadata, resource_matches, xml_metadata};
+use crate::core::discovery::{Metadata, resource_matches, viewer as viewer_route, xml_metadata};
 use crate::core::{DiscoveryError, DiscoveryResource, DiscoveryRoute, FormatSpec, ParsedResource};
 
 const ROUTES: &[DiscoveryRoute] = &[
     xml_metadata::<metadata::Document>(),
-    resource_matches(viewer::recognizes).decode(viewer::decode),
+    viewer_route(resource_matches(viewer::recognizes)).decode(viewer::decode),
 ];
 pub const SPEC: FormatSpec = FormatSpec::new("fzp", ROUTES)
     .with_display_name("FreezoomPack")

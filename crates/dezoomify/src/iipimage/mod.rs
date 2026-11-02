@@ -4,7 +4,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use crate::Vec2d;
-use crate::core::discovery::url_matches;
+use crate::core::discovery::{image_url, metadata, url_matches};
 use crate::core::{DiscoveryError, FormatSpec, ImagePlan, ParsedResource, Request, ResolvedLevel};
 
 const META: &str = "&OBJ=Max-size&OBJ=Tile-size&OBJ=Resolution-number";
@@ -12,8 +12,8 @@ const META: &str = "&OBJ=Max-size&OBJ=Tile-size&OBJ=Resolution-number";
 pub const SPEC: FormatSpec = FormatSpec::new(
     "iipimage",
     &[
-        url_matches(needs_metadata).resolve_metadata(metadata_url),
-        url_matches(is_iip).decode(decode),
+        image_url(needs_metadata).resolve_metadata(metadata_url),
+        metadata(url_matches(is_iip)).decode(decode),
     ],
 )
 .with_display_name("IIPImage");

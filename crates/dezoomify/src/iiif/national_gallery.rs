@@ -1,5 +1,5 @@
 use crate::core::DiscoveryRoute;
-use crate::core::discovery::css;
+use crate::core::discovery::{css, viewer};
 use regex::bytes::Regex as BytesRegex;
 use std::sync::LazyLock;
 static IMAGE: LazyLock<BytesRegex> = LazyLock::new(|| {
@@ -9,6 +9,6 @@ static IMAGE: LazyLock<BytesRegex> = LazyLock::new(|| {
     .expect("constant National Gallery IIIF image pattern")
 });
 pub(super) const ROUTES: &[DiscoveryRoute] = &[
-    css("[src*=\"?IIIF=\" i][src*=\"/full/\" i]").follow_attribute("src"),
+    viewer(css("[src*=\"?IIIF=\" i][src*=\"/full/\" i]")).follow_attribute("src"),
     DiscoveryRoute::regex_link(&IMAGE, "$image"),
 ];

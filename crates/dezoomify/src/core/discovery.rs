@@ -298,9 +298,9 @@ pub enum Specificity {
 
 /// A matcher with a constructor-specific default strength. Override broad
 /// exceptions explicitly rather than inferring strength from selector syntax.
-/// Suffixes, CSS and content regexes default to High, custom predicates to
-/// Medium. Wildcards add no evidence; unknown URLs remain Low and successful
-/// schema decoders retain their caller's evidence.
+/// URL evidence defaults to High for metadata/images and Medium for viewers.
+/// CSS/content regexes default to High and custom content predicates to Medium.
+/// Wildcards add no evidence; successful schema decoders retain caller evidence.
 #[derive(Clone, Copy, Debug)]
 pub struct DiscoveryMatch {
     pattern: MatchPattern,
@@ -320,10 +320,10 @@ enum MatchPattern {
 }
 
 impl DiscoveryMatch {
-    const fn new(pattern: MatchPattern, specificity: Specificity) -> Self {
+    const fn new(pattern: MatchPattern) -> Self {
         Self {
             pattern,
-            specificity: Some(specificity),
+            specificity: None,
         }
     }
 
@@ -355,42 +355,52 @@ impl DiscoveryMatch {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
+enum RouteKind {
+    Metadata,
+    Image,
+    Viewer,
+}
+
+pub const fn metadata(matcher: DiscoveryMatch) -> RoutePattern {
+    RoutePattern::new(matcher, RouteKind::Metadata)
+}
+pub const fn viewer(matcher: DiscoveryMatch) -> RoutePattern {
+    RoutePattern::new(matcher, RouteKind::Viewer)
+}
+pub const fn image_url(predicate: UrlPredicate) -> RoutePattern {
+    RoutePattern::new(url_matches(predicate), RouteKind::Image)
+}
 pub const fn any() -> DiscoveryMatch {
-    DiscoveryMatch {
-        pattern: MatchPattern::Any,
-        specificity: None,
-    }
+    DiscoveryMatch::new(MatchPattern::Any)
 }
 pub const fn url_suffix(suffix: &'static str) -> DiscoveryMatch {
-    DiscoveryMatch::new(MatchPattern::UrlSuffix(suffix), Specificity::High)
+    DiscoveryMatch::new(MatchPattern::UrlSuffix(suffix))
 }
 pub const fn url_matches(predicate: UrlPredicate) -> DiscoveryMatch {
-    DiscoveryMatch::new(MatchPattern::UrlPredicate(predicate), Specificity::Medium)
+    DiscoveryMatch::new(MatchPattern::UrlPredicate(predicate))
 }
 /// Match a CSS selector and pass its first selected element to the decoder.
 pub const fn css(selector: &'static str) -> DiscoveryMatch {
     css_when(selector, |_| true)
 }
 pub const fn css_when(selector: &'static str, accept: fn(&HtmlElement) -> bool) -> DiscoveryMatch {
-    DiscoveryMatch::new(MatchPattern::Css(selector, accept), Specificity::High)
+    DiscoveryMatch::new(MatchPattern::Css(selector, accept))
 }
 
 pub const fn resource_matches(
     predicate: for<'a> fn(DiscoveryResource<'a>) -> bool,
 ) -> DiscoveryMatch {
-    DiscoveryMatch::new(
-        MatchPattern::ResourcePredicate(predicate),
-        Specificity::Medium,
-    )
+    DiscoveryMatch::new(MatchPattern::ResourcePredicate(predicate))
 }
 
 /// A permissive markup guard: XML and HTML need not be distinguished here.
 pub const fn html_matches(regex: &'static LazyLock<BytesRegex>) -> DiscoveryMatch {
-    DiscoveryMatch::new(MatchPattern::MarkupRegex(regex), Specificity::High)
+    DiscoveryMatch::new(MatchPattern::MarkupRegex(regex))
 }
 
 pub const fn js_matches(regex: &'static LazyLock<BytesRegex>) -> DiscoveryMatch {
-    DiscoveryMatch::new(MatchPattern::ScriptRegex(regex), Specificity::High)
+    DiscoveryMatch::new(MatchPattern::ScriptRegex(regex))
 }
 
 /// Parsed wire metadata converts directly into a format result.
@@ -400,7 +410,7 @@ pub trait Metadata: serde::de::DeserializeOwned {
 
 /// Schema failures are route misses; conversion errors retain their cause.
 pub const fn json_metadata<T: Metadata>() -> DiscoveryRoute {
-    any().try_decode(|resource| {
+    metadata(any()).try_decode(|resource| {
         serde_json::from_slice::<T>(resource.bytes())
             .ok()
             .map(|metadata| metadata.decode(resource))
@@ -408,14 +418,25 @@ pub const fn json_metadata<T: Metadata>() -> DiscoveryRoute {
 }
 
 pub const fn xml_metadata<T: Metadata>() -> DiscoveryRoute {
-    any().try_decode(|resource| {
+    metadata(any()).try_decode(|resource| {
         quick_xml::de::from_reader::<_, T>(resource.bytes())
             .ok()
             .map(|metadata| metadata.decode(resource))
     })
 }
 
-impl DiscoveryMatch {
+/// Semantic input pattern paired with a decoding or reference-resolution action.
+/// Decoding designates the matched resource as canonical unless opted out.
+pub struct RoutePattern {
+    matcher: DiscoveryMatch,
+    kind: RouteKind,
+}
+
+impl RoutePattern {
+    const fn new(matcher: DiscoveryMatch, kind: RouteKind) -> Self {
+        Self { matcher, kind }
+    }
+
     /// Compile a URL-only image plan without acquiring a document.
     #[must_use]
     pub const fn plan(
@@ -425,7 +446,6 @@ impl DiscoveryMatch {
         self.route(RouteAction::Plan(decoder))
     }
     #[must_use]
-    /// Decode a matched resource, designating it as canonical unless opted out.
     pub const fn decode(self, decoder: Decoder) -> DiscoveryRoute {
         self.route(RouteAction::Decode(decoder))
     }
@@ -472,8 +492,9 @@ impl DiscoveryMatch {
     }
     const fn route(self, handler: RouteAction) -> DiscoveryRoute {
         DiscoveryRoute {
-            matcher: self,
+            matcher: self.matcher,
             handler,
+            kind: self.kind,
             followed_decoder: None,
             followed_intermediate: false,
             canonical: true,
@@ -485,16 +506,30 @@ impl DiscoveryMatch {
 pub struct DiscoveryRoute {
     matcher: DiscoveryMatch,
     handler: RouteAction,
+    kind: RouteKind,
     followed_decoder: Option<Decoder>,
     followed_intermediate: bool,
     canonical: bool,
 }
 
 impl DiscoveryRoute {
+    fn evidence(self) -> Option<Specificity> {
+        self.matcher.specificity.or(match self.matcher.pattern {
+            MatchPattern::Any => None,
+            MatchPattern::UrlSuffix(_) | MatchPattern::UrlPredicate(_) => Some(match self.kind {
+                RouteKind::Metadata | RouteKind::Image => Specificity::High,
+                RouteKind::Viewer => Specificity::Medium,
+            }),
+            MatchPattern::ResourcePredicate(_) => Some(Specificity::Medium),
+            _ => Some(Specificity::High),
+        })
+    }
+
     /// Expand named regex captures into a metadata reference (`$name`).
     pub const fn regex_link(regex: &'static LazyLock<BytesRegex>, template: &'static str) -> Self {
         Self {
-            matcher: DiscoveryMatch::new(MatchPattern::ContentRegex(regex), Specificity::High),
+            matcher: DiscoveryMatch::new(MatchPattern::ContentRegex(regex)),
+            kind: RouteKind::Viewer,
             handler: RouteAction::RegexLink(regex, template, None),
             followed_decoder: None,
             followed_intermediate: false,
@@ -641,7 +676,7 @@ fn parse_resource(
         .map(|parsed| {
             (
                 route.followed(parsed, resource.final_uri()),
-                route.matcher.specificity,
+                route.evidence(),
             )
         });
     }
@@ -705,7 +740,7 @@ impl FormatSpec {
         self.routes
             .iter()
             .filter(|route| route.matcher.url_match(uri) == Some(true))
-            .filter_map(|route| route.matcher.specificity)
+            .filter_map(|route| route.evidence())
             .min()
     }
 

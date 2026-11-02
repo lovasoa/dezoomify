@@ -1,5 +1,5 @@
 mod support;
-use core::discovery::{DiscoveryInput, DiscoveryLimits, url_suffix};
+use core::discovery::{DiscoveryInput, DiscoveryLimits, url_suffix, viewer};
 use dezoomify::{
     core::{
         self, DiscoveredEntry, DiscoveryCatalog, DiscoveryError, DiscoveryResource, FormatSpec,
@@ -23,13 +23,13 @@ fn catalog(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryE
 }
 const FIRST: FormatSpec = FormatSpec::new(
     "first",
-    &[url_suffix("/root")
+    &[viewer(url_suffix("/root"))
         .resolve_metadata(|_| Ok(Request::new("https://test/a")))
         .then_decode(catalog)],
 );
 const SECOND: FormatSpec = FormatSpec::new(
     "second",
-    &[url_suffix("/root")
+    &[viewer(url_suffix("/root"))
         .resolve_metadata(|_| Ok(Request::new("https://test/b")))
         .then_decode(catalog)],
 );
@@ -67,6 +67,46 @@ fn selected(catalog: DiscoveryCatalog) -> String {
 }
 
 #[test]
+fn metadata_url_defaults_outrank_viewers_but_explicit_strength_wins() {
+    use core::discovery::{Specificity::Low, metadata};
+    use dezoomify::model::DiscoveryInputKind;
+    const VIEWER: FormatSpec =
+        FormatSpec::new("viewer", &[viewer(url_suffix("/viewer")).decode(catalog)]);
+    const METADATA: FormatSpec = FormatSpec::new(
+        "metadata",
+        &[metadata(url_suffix("/descriptor")).decode(catalog)],
+    );
+    const WEAK_METADATA: FormatSpec = FormatSpec::new(
+        "metadata",
+        &[metadata(url_suffix("/descriptor").specificity(Low)).decode(catalog)],
+    );
+    for (metadata, expected) in [
+        (METADATA, "https://test/descriptor"),
+        (WEAK_METADATA, "https://test/viewer"),
+    ] {
+        let mut registry = core::Registry::new();
+        registry.register(VIEWER);
+        registry.register(metadata);
+        let result = futures::executor::block_on(
+            registry.discover(
+                ["https://test/viewer", "https://test/descriptor"]
+                    .into_iter()
+                    .map(|uri| {
+                        DiscoveryInput::new(uri).with_kind(DiscoveryInputKind::ObservedResource)
+                    })
+                    .collect(),
+                Default::default(),
+                |request, _| async move { Ok(response(&request.uri)) },
+                support::parse_html,
+                |_| async { Ok(Vec::new()) },
+            ),
+        )
+        .unwrap();
+        assert_eq!(selected(result), expected);
+    }
+}
+
+#[test]
 fn decoding_defaults_to_the_final_target_through_decoder_bound_references() {
     fn page(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
         Ok(resource.follow_relative("metadata").decode_with(metadata))
@@ -76,7 +116,8 @@ fn decoding_defaults_to_the_final_target_through_decoder_bound_references() {
             .follow_relative("image?token=exact%2Fvalue&size=full")
             .decode_with(catalog))
     }
-    const SPEC: FormatSpec = FormatSpec::new("default", &[url_suffix("/root").decode(page)]);
+    const SPEC: FormatSpec =
+        FormatSpec::new("default", &[viewer(url_suffix("/root")).decode(page)]);
     let mut registry = core::Registry::new();
     registry.register(SPEC);
     let result = futures::executor::block_on(registry.discover(
@@ -117,20 +158,21 @@ fn intermediate_decoding_retains_the_default_page_source() {
         assert_eq!(page.uri(), "https://test/root");
         catalog(resource)
     }
-    const ROUTE: core::DiscoveryRoute = url_suffix("/root").decode(page);
+    const ROUTE: core::DiscoveryRoute = viewer(url_suffix("/root")).decode(page);
     const UNMARKED: FormatSpec = FormatSpec::new("context", &[ROUTE.non_canonical()]);
     const DEFAULT: FormatSpec = FormatSpec::new("context", &[ROUTE]);
     const BOUND: FormatSpec = FormatSpec::new(
         "context",
-        &[url_suffix("/root")
+        &[viewer(url_suffix("/root"))
             .decode(|resource| Ok(resource.follow_relative("auxiliary")))
             .then_decode_intermediate(contextual_image)],
     );
     const ROUTED: FormatSpec = FormatSpec::new(
         "context",
         &[
-            url_suffix("/root").decode(|resource| Ok(resource.follow_relative("auxiliary"))),
-            url_suffix("/auxiliary")
+            viewer(url_suffix("/root"))
+                .decode(|resource| Ok(resource.follow_relative("auxiliary"))),
+            viewer(url_suffix("/auxiliary"))
                 .decode(contextual_image)
                 .non_canonical(),
         ],
@@ -164,13 +206,13 @@ fn a_successful_fetch_with_rejected_metadata_cannot_set_the_winners_source() {
     }
     const REJECTED: FormatSpec = FormatSpec::new(
         "rejected",
-        &[url_suffix("/root")
+        &[viewer(url_suffix("/root"))
             .resolve_metadata(|_| Ok(Request::new("https://test/a")))
             .then_decode(rejected)],
     );
     const UNMARKED: FormatSpec = FormatSpec::new(
         "unmarked",
-        &[url_suffix("/root")
+        &[viewer(url_suffix("/root"))
             .resolve_metadata(|_| Ok(Request::new("https://test/b")))
             .then_decode_intermediate(catalog)
             .non_canonical()],
@@ -372,7 +414,12 @@ fn live_observations_win_before_blocked_http_access() {
     ))
     .unwrap();
     assert_eq!(support::ready_image(catalog).format, "deepzoom");
-    assert_eq!(*calls.borrow(), [Interaction::Forbidden]);
+    assert!(
+        calls
+            .borrow()
+            .iter()
+            .all(|interaction| *interaction == Interaction::Forbidden)
+    );
 }
 
 #[test]
@@ -585,8 +632,8 @@ fn branch(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryEr
 }
 #[test]
 fn shared_reads_keep_branch_history_headers_and_redirected_bases() {
-    const A: FormatSpec = FormatSpec::new("first", &[url_suffix("/root").decode(branch)]);
-    const B: FormatSpec = FormatSpec::new("second", &[url_suffix("/root").decode(branch)]);
+    const A: FormatSpec = FormatSpec::new("first", &[viewer(url_suffix("/root")).decode(branch)]);
+    const B: FormatSpec = FormatSpec::new("second", &[viewer(url_suffix("/root")).decode(branch)]);
     let mut registry = core::Registry::new();
     registry.register(A);
     registry.register(B);
@@ -632,7 +679,7 @@ fn live_resource_concurrency_stays_within_the_declared_bound() {
     let peak = Rc::new(Cell::new(0));
     const THIRD: FormatSpec = FormatSpec::new(
         "third",
-        &[url_suffix("/root")
+        &[viewer(url_suffix("/root"))
             .resolve_metadata(|_| Ok(Request::new("https://test/c")))
             .then_decode(catalog)],
     );

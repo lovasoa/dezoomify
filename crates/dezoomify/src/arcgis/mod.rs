@@ -6,7 +6,7 @@ use serde::Deserialize;
 use url::Url;
 
 use crate::Vec2d;
-use crate::core::discovery::url_matches;
+use crate::core::discovery::{metadata, url_matches};
 use crate::core::{
     DiscoveryError, FormatSpec, ImagePlan, ParsedResource, Request, ResolvedLevel, floor_index,
 };
@@ -14,8 +14,8 @@ use crate::core::{
 pub const SPEC: FormatSpec = FormatSpec::new(
     "arcgis",
     &[
-        url_matches(is_arcgis_url).resolve_metadata(metadata_url),
-        url_matches(is_arcgis_url).decode(decode),
+        metadata(url_matches(is_arcgis_url)).resolve_metadata(metadata_url),
+        metadata(url_matches(is_arcgis_url)).decode(decode),
     ],
 )
 .with_display_name("ArcGIS MapServer");

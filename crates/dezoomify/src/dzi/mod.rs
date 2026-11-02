@@ -7,7 +7,8 @@ use regex::{Regex, bytes::Regex as BytesRegex};
 
 use crate::Vec2d;
 use crate::core::discovery::{
-    Metadata, Specificity::Low, any, js_matches, url_matches, xml_metadata,
+    Metadata, Specificity::Low, any, image_url, js_matches, metadata, url_matches, viewer,
+    xml_metadata,
 };
 use crate::core::{
     CatalogPlan, DiscoveryError, DiscoveryResource, DiscoveryRoute, FormatSpec, Grid, ImagePlan,
@@ -32,28 +33,30 @@ static WDL_MARKER_RE: LazyLock<BytesRegex> =
 const ROUTES: &[DiscoveryRoute] = &[
     universum::VIEWER_ROUTE,
     universum::METADATA_ROUTE,
-    url_matches(is_tile_url)
+    image_url(is_tile_url)
         .resolve_metadata(tile_metadata)
         .then_decode(decode_catalog),
-    url_matches(is_bl_viewer_url)
+    viewer(url_matches(is_bl_viewer_url))
         .resolve_metadata(bl_metadata)
         .then_decode(decode_catalog),
-    url_matches(is_nla_view_url)
+    viewer(url_matches(is_nla_view_url))
         .resolve_metadata(nla_metadata)
         .then_decode(decode_catalog),
-    url_matches(is_polona_item_url).decode(follow_polona_json),
-    url_matches(is_polona_json_url)
+    viewer(url_matches(is_polona_item_url)).decode(follow_polona_json),
+    metadata(url_matches(is_polona_json_url))
         .decode(follow_polona_dzi)
         .non_canonical(),
     paris::ARK_ROUTE,
     paris::MANIFEST_ROUTE.then_decode(decode_catalog),
-    js_matches(&SEADRAGON_EMBED).decode(follow_seadragon_embed),
-    js_matches(&WDL_MARKER_RE).decode(follow_wdl_template),
-    DiscoveryRoute::regex_link(&DZI_LINK_RE, "$url").specificity(Low),
+    viewer(js_matches(&SEADRAGON_EMBED)).decode(follow_seadragon_embed),
+    viewer(js_matches(&WDL_MARKER_RE)).decode(follow_wdl_template),
+    DiscoveryRoute::regex_link(&DZI_LINK_RE, "$url"),
+    DiscoveryRoute::regex_link(&OPEN_DZI_XML_RE, "$url"),
     DiscoveryRoute::regex_link(&DZI_ATTR_RE, "$url").then_decode(decode_catalog),
-    url_matches(is_dzi_url).decode(decode_catalog),
+    DiscoveryRoute::regex_link(&XML_LINK_RE, "$url").specificity(Low),
+    metadata(url_matches(is_dzi_url)).decode(decode_catalog),
     xml_metadata::<DziFile>(),
-    any().try_decode(embedded_metadata),
+    metadata(any()).try_decode(embedded_metadata),
 ];
 
 pub const SPEC: FormatSpec =
@@ -78,8 +81,20 @@ static POLONA_ITEM_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"polona\.pl/item/\d+/").expect("constant Polona item pattern"));
 
 static DZI_LINK_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
-    BytesRegex::new(r#"(?i)(?:[:=\[,]\s*|\bopenDzi\s*\(\s*)["'](?P<url>[^"'<>]+\.(?:xml|dzi)(?:[?#][^"'<>]*)?)["']"#)
-        .expect("constant DZI link pattern")
+    BytesRegex::new(
+        r#"(?i)(?:[:=\[,]\s*|\bopenDzi\s*\(\s*)["'](?P<url>[^"'<>]+\.dzi(?:[?#][^"'<>]*)?)["']"#,
+    )
+    .expect("constant DZI link pattern")
+});
+
+static OPEN_DZI_XML_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
+    BytesRegex::new(r#"(?i)\bopenDzi\s*\(\s*["'](?P<url>[^"'<>]+\.xml(?:[?#][^"'<>]*)?)["']"#)
+        .expect("constant DZI XML call pattern")
+});
+
+static XML_LINK_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
+    BytesRegex::new(r#"(?i)[:=\[,]\s*["'](?P<url>[^"'<>]+\.xml(?:[?#][^"'<>]*)?)["']"#)
+        .expect("constant generic XML link pattern")
 });
 
 static DZI_ATTR_RE: LazyLock<BytesRegex> = LazyLock::new(|| {

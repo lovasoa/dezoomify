@@ -415,11 +415,6 @@ impl Branch {
         );
         parsed = strip_canonical_source(parsed, &mut self.canonical_uri);
         if let ParsedResource::Follow(request) = parsed {
-            self.priority.0 = self.priority.0.min(
-                self.spec
-                    .url_specificity(&request.uri)
-                    .unwrap_or(Specificity::Low),
-            );
             parsed = self.spec.follow(request)?;
         }
         parsed = strip_canonical_source(parsed, &mut self.canonical_uri);

@@ -7,10 +7,12 @@ Follow [Caller contracts](code-quality.md): state parser input assumptions,
 URL/base handling, pixel/grid coordinate conventions, and malformed-input behavior
 at the owning declarations. Reuse shared geometry contracts where they apply.
 
-Declare routes by composing a matcher with its action, such as
-`url_suffix("ImageProperties.xml").decode(properties)`. Matchers provide
-[specificity defaults](../crates/dezoomify/src/core/discovery.rs); mark broad
-exceptions, such as generic JavaScript URLs or ordinary element IDs, as `Low`.
+Declare each route's semantic role, matcher and action, such as
+`metadata(url_suffix("ImageProperties.xml")).decode(properties)`. Keep viewer
+entry points distinct from metadata resources and direct image URLs. Roles and
+matchers provide [specificity defaults](../crates/dezoomify/src/core/discovery.rs);
+explicit matcher overrides take precedence. Mark broad exceptions, such as
+generic JavaScript URLs or ordinary element IDs, as `Low`.
 Routes run in declaration order, so place broad fallbacks after specific routes.
 Content matchers strengthen evidence only after matching available bytes;
 they do not justify fetching arbitrary resources to try them. Wildcard/schema

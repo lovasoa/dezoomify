@@ -113,7 +113,7 @@ pub fn registry_for(name: &str) -> Option<Registry> {
 mod tests {
     use super::*;
     use crate::Vec2d;
-    use crate::core::discovery::{ParsedResource, css};
+    use crate::core::discovery::{ParsedResource, css, metadata};
     use crate::core::{DiscoveredEntry, ImagePlan, Request, ResolvedLevel, TileSource};
     use crate::test_support::grid_tile_uri;
 
@@ -137,7 +137,7 @@ mod tests {
 
         const TOY: FormatSpec = FormatSpec::new(
             "toy",
-            &[css(".viewer > a[data-width]:first-child").decode(decode)],
+            &[metadata(css(".viewer > a[data-width]:first-child")).decode(decode)],
         );
         let mut registry = Registry::new();
         registry.register(TOY);
