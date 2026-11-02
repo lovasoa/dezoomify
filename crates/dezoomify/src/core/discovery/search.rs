@@ -156,10 +156,6 @@ impl Search {
             }
             entry.state = State::Queued;
         }
-        let observation = matches!(
-            input.kind,
-            DiscoveryInputKind::ObservedMetadata | DiscoveryInputKind::ObservedViewer
-        );
         let recognized = specs
             .iter()
             .filter_map(|spec| spec.url_specificity(&input.url))
@@ -180,7 +176,7 @@ impl Search {
                 parsed: ParsedResource::Follow(request.clone()),
                 history: Vec::new(),
                 canonical_uri: None,
-                observation,
+                observation: snapshot,
             });
         }
     }
