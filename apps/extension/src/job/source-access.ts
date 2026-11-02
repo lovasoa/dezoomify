@@ -58,6 +58,33 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
+/** Page replies may name only an ordinary image GET. Credentials and arbitrary
+ * headers stay with page loaders; transports still enforce origin permissions. */
+function viewerResource(uri: unknown): ResourceRequest {
+  if (typeof uri !== "string" || uri.length > MAX_URL_LENGTH || !isPublicHttpUrl(uri))
+    throw new InternalError("Invalid viewer tile URL");
+  const url = new URL(uri);
+  if (url.username || url.password) throw new InternalError("Viewer tile URL contains credentials");
+  return { uri, headers: [], purpose: "tile" };
+}
+
+function viewerBytes(result: Record<string, unknown>): ArrayBuffer {
+  if (
+    result.ok !== true ||
+    typeof result.data !== "string" ||
+    result.data.length > MAX_BASE64_CHARS ||
+    !Number.isSafeInteger(result.bytes) ||
+    typeof result.bytes !== "number" ||
+    result.bytes < 0 ||
+    result.bytes > SOURCE_FETCH_BYTE_LIMIT
+  )
+    throw new InternalError("Invalid viewer tile byte payload");
+  const bytes = decodeBase64Payload(result.data, SOURCE_FETCH_BYTE_LIMIT);
+  if (!bytes || bytes.byteLength !== result.bytes)
+    throw new InternalError("Invalid viewer tile byte count");
+  return bytes.buffer as ArrayBuffer;
+}
+
 function sameDocumentUrl(a: string, b: string): boolean {
   try {
     const left = new URL(a);
@@ -789,7 +816,7 @@ export function createSourceAccess(
     request: ViewerTileRequest,
     extent: Size,
     signal: AbortSignal,
-  ): Promise<ArrayBuffer> {
+  ): Promise<ArrayBuffer | ResourceRequest> {
     assertLive();
     signal.throwIfAborted();
     const frame = tileFrames.get(request.handle);
@@ -813,20 +840,8 @@ export function createSourceAccess(
     )
       throw new InternalError("Invalid viewer tile response document");
     if (result.ok === false && isJobError(result.error)) throw errorFromPayload(result.error);
-    if (
-      result.ok !== true ||
-      typeof result.data !== "string" ||
-      result.data.length > MAX_BASE64_CHARS ||
-      !Number.isSafeInteger(result.bytes) ||
-      typeof result.bytes !== "number" ||
-      result.bytes < 0 ||
-      result.bytes > SOURCE_FETCH_BYTE_LIMIT
-    )
-      throw new InternalError("Invalid viewer tile byte payload");
-    const bytes = decodeBase64Payload(result.data, SOURCE_FETCH_BYTE_LIMIT);
-    if (!bytes || bytes.byteLength !== result.bytes)
-      throw new InternalError("Invalid viewer tile byte count");
-    return bytes.buffer as ArrayBuffer;
+    if (result.ok === true && "url" in result) return viewerResource(result.url);
+    return viewerBytes(result);
   }
 
   function dispose() {

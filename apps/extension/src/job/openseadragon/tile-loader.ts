@@ -7,11 +7,13 @@ import {
   unknownDetail,
 } from "@dezoomify/browser-runtime";
 import type { Error as JobError } from "@dezoomify/wasm-bindings";
+import type { ViewerTile } from "../viewers/session.ts";
 
 interface TileSource {
   getTileUrl(level: number, x: number, y: number): string | (() => string);
   getTilePostData?(level: number, x: number, y: number): unknown;
   getTileAjaxHeaders?(level: number, x: number, y: number): Record<string, string>;
+  downloadTileStart?: unknown;
 }
 
 interface ImageLoader {
@@ -50,7 +52,8 @@ function loadFailure(error: unknown, response: unknown, url: string): JobError {
   return new NetworkError(unknownDetail(error), { transport: "browser-session" }, { cause: error });
 }
 
-/** Use the viewer's loader, including its version-specific job API and retry policy.
+/** Resolve ordinary image URLs lazily; custom downloaders and AJAX sources keep
+ * the viewer's loader, including its version-specific job API and retry policy.
  * Cancellation bounds the extension's wait; it does not clear the viewer's queue.
  * No OpenSeadragon global is needed: bundled viewers often hide their namespace.
  */
@@ -60,16 +63,19 @@ export async function loadOpenSeadragonTile(
   level: number,
   x: number,
   y: number,
-) {
+  signal: AbortSignal,
+): Promise<ViewerTile> {
   const native = source as TileSource;
   const image = item as TiledImage;
+  const tile = { level, x, y };
+  const url = native.getTileUrl(level, x, y);
+  const src = typeof url === "function" ? url.call(tile) : url;
+  const resolved = await resolveImage(native, image, src, signal);
+  if (resolved) return resolved;
   const loader = image._imageLoader ?? image.imageLoader ?? image.drawer?.imageLoader;
   const legacyDrawer = image.drawer;
   if (!loader && !legacyDrawer?.loadImage)
     throw new Error("OpenSeadragon image loader is unavailable");
-  const tile = { level, x, y };
-  const url = native.getTileUrl(level, x, y);
-  const src = typeof url === "function" ? url.call(tile) : url;
   const data = await new Promise<unknown>((resolve, reject) => {
     const callback = (result: unknown, error?: unknown, response?: unknown) => {
       if (result) resolve(result);
@@ -96,5 +102,44 @@ export async function loadOpenSeadragonTile(
       callback,
     });
   });
-  return data;
+  return { image: data, owned: true };
+}
+
+/** Find the library's base TileSource through its geometry API, even when its
+ * namespace is bundled away. Inherited custom downloaders must stay in-page. */
+function usesDefaultDownload(source: TileSource): boolean {
+  let prototype = Object.getPrototypeOf(source);
+  let base: TileSource | undefined;
+  for (let depth = 0; prototype && depth < 16; depth++) {
+    if (Object.hasOwn(prototype, "getNumTiles") && Object.hasOwn(prototype, "getLevelScale"))
+      base = prototype;
+    prototype = Object.getPrototypeOf(prototype);
+  }
+  return base !== undefined && source.downloadTileStart === base.downloadTileStart;
+}
+
+async function resolveImage(
+  source: TileSource,
+  image: TiledImage,
+  src: string,
+  signal: AbortSignal,
+): Promise<ViewerTile | undefined> {
+  if (
+    image.loadTilesWithAjax ||
+    image.ajaxWithCredentials ||
+    image.crossOriginPolicy === "use-credentials" ||
+    !usesDefaultDownload(source)
+  )
+    return undefined;
+  const url = new URL(src, document.baseURI);
+  if (url.protocol === "http:" || url.protocol === "https:") return { url: url.href };
+  if (url.protocol !== "blob:") return undefined;
+  // Blob URLs belong to the page's storage partition. Read them here without
+  // revoking page-owned URLs or downloading their original resource again.
+  try {
+    const response = await fetch(url, { signal });
+    return { image: await response.blob() };
+  } catch (error) {
+    throw loadFailure(error, undefined, src);
+  }
 }

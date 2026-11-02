@@ -43,20 +43,31 @@ async function loadFixture(mode) {
   source.getTileAjaxHeaders = () => ({ "X-Tile": "256", "X-Override": "tile" });
   const item = {
     _imageLoader: new OpenSeadragon.ImageLoader({ timeout: 1000 }),
-    loadTilesWithAjax: mode !== "image",
+    loadTilesWithAjax: !["image", "blob-url", "custom-image"].includes(mode),
     ajaxHeaders: { "X-Item": "item", "X-Override": "item" },
     crossOriginPolicy: false,
   };
   let bitmap;
+  let blobUrl;
+  if (mode === "blob-url") {
+    const response = await fetch(`${source.tilesUrl}8/0_0.png?mode=blob-url`);
+    blobUrl = URL.createObjectURL(await response.blob());
+    source.getTileUrl = () => blobUrl;
+  }
   if (mode.startsWith("custom")) {
     source.downloadTileStart = function (job) {
       if (job.src !== "cache:8/0/0") throw new Error("custom cache token changed");
       const { level, x, y } = job.tile;
-      void fetch(`${this.tilesUrl}${level}/${x}_${y}.png?mode=${mode}`, {
-        method: "POST",
-        body: job.postData,
-        headers: job.ajaxHeaders,
-      })
+      void fetch(
+        `${this.tilesUrl}${level}/${x}_${y}.png?mode=${mode}`,
+        mode === "custom-image"
+          ? undefined
+          : {
+              method: "POST",
+              body: job.postData,
+              headers: job.ajaxHeaders,
+            },
+      )
         .then(async (response) => {
           const data = await response.blob();
           if (mode === "custom-blob") {
@@ -81,6 +92,12 @@ async function loadFixture(mode) {
         })
         .catch((error) => job.fail(error));
     };
+    if (mode === "custom-image") {
+      const inherited = Object.create(Object.getPrototypeOf(source));
+      inherited.downloadTileStart = source.downloadTileStart;
+      Object.setPrototypeOf(source, inherited);
+      delete source.downloadTileStart;
+    }
   } else if (mode === "failure")
     source.downloadTileStart = (job) => job.fail("original tile failure");
   else if (mode === "exception")
@@ -114,6 +131,7 @@ async function loadFixture(mode) {
   const retired = await TileSession.readViewerTile(request, extent);
   if (retired.ok) throw new Error("retired source still loads tiles");
   if (!result.ok) return result.error;
+  if (result.url) return { url: result.url, addedGlobals };
   const bytes = Uint8Array.fromBase64(result.data);
   const decoded = await createImageBitmap(new Blob([bytes]));
   const canvas = document.createElement("canvas");
@@ -122,6 +140,8 @@ async function loadFixture(mode) {
   const context = canvas.getContext("2d");
   context.drawImage(decoded, 0, 0);
   decoded.close();
+  const blobStillReadable = !blobUrl || (await fetch(blobUrl)).ok;
+  if (blobUrl) URL.revokeObjectURL(blobUrl);
   return {
     width: canvas.width,
     height: canvas.height,
@@ -129,6 +149,7 @@ async function loadFixture(mode) {
     bytes: [...bytes],
     closedBitmap: mode !== "custom-bitmap" || bitmap.width === 0,
     addedGlobals,
+    blobStillReadable,
   };
 }
 
@@ -173,26 +194,57 @@ for (const [name, engine] of [
       await page.evaluate(() => {
         Object.defineProperty(window, "__dezoomifyOpenSeadragon", { value: "page-owned" });
       });
-      for (const mode of ["ajax", "image", "custom-context", "custom-bitmap", "custom-blob"]) {
+      const ordinary = await page.evaluate(loadFixture, "image");
+      assert.deepEqual(ordinary, {
+        url: "https://tiles.fixture.invalid/tiles/8/0_0.png?mode=image",
+        addedGlobals: [],
+      });
+      assert.ok(
+        !requests.some((request) => request.url().includes("mode=image")),
+        "resolving a URL does not download it",
+      );
+      for (const mode of [
+        "ajax",
+        "blob-url",
+        "custom-image",
+        "custom-context",
+        "custom-bitmap",
+        "custom-blob",
+      ]) {
         const result = await page.evaluate(loadFixture, mode);
         assert.deepEqual(
-          [result.width, result.height, result.pixel, result.closedBitmap, result.addedGlobals],
-          [256, 256, [196, 48, 48, 255], true, []],
-          mode,
+          [
+            result.width,
+            result.height,
+            result.pixel,
+            result.closedBitmap,
+            result.addedGlobals,
+            result.blobStillReadable,
+          ],
+          [256, 256, [196, 48, 48, 255], true, [], true],
+          `${mode}: ${JSON.stringify(result)}`,
         );
-        if (mode === "ajax" || mode === "custom-blob")
+        if (["ajax", "custom-blob", "blob-url"].includes(mode))
           assert.deepEqual(Buffer.from(result.bytes), tile, `${mode}: preserve encoded bytes`);
         const request = requests.find(
           (request) => new URL(request.url()).searchParams.get("mode") === mode,
         );
-        assert.equal(request.method(), mode === "image" ? "GET" : "POST");
-        if (mode !== "image") {
+        assert.equal(
+          request.method(),
+          ["blob-url", "custom-image"].includes(mode) ? "GET" : "POST",
+        );
+        if (!["blob-url", "custom-image"].includes(mode)) {
           assert.equal(request.postData(), "image=256&tile=8/0/0");
           assert.equal(request.headers()["x-item"], "item");
           assert.equal(request.headers()["x-tile"], "256");
           assert.equal(request.headers()["x-override"], "tile");
         }
       }
+      assert.equal(
+        requests.filter((request) => request.url().includes("mode=blob-url")).length,
+        1,
+        "reading a blob does not repeat the original download",
+      );
       const error = await page.evaluate(loadFixture, "failure");
       assert.equal(error.kind, "network-failure");
       assert.match(error.detail, /original tile failure/);

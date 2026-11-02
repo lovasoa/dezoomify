@@ -54,14 +54,14 @@ export interface BrowserHostDependencies {
     interaction: Interaction,
   ): Promise<ResourceRead>;
   loadDisplayImage?(url: string, signal: AbortSignal): Promise<TileImageLike>;
-  /** Return owned encoded bytes for one attempt using a handle retained until
-   * job settlement. Honor cancellation without clearing the viewer's queue.
+  /** Return owned encoded bytes or a validated HTTP request for one attempt.
+   * Retain the handle until settlement. Honor cancellation without clearing the viewer's queue.
    * Preserve typed load failures; never route handles through URL transports. */
   loadViewerTile?(
     request: ViewerTileRequest,
     extent: Size,
     signal: AbortSignal,
-  ): Promise<ArrayBuffer>;
+  ): Promise<ArrayBuffer | ResourceRequest>;
   onProgress(progress: Progress): void;
   chooseImage(catalog: Catalog, signal: AbortSignal): Promise<number>;
   approveRetry(request: TileAcquisition, signal: AbortSignal): Promise<void>;
@@ -308,7 +308,8 @@ export class BrowserHost implements Host {
     }
   }
 
-  /** Dispatch once: viewer calls cannot enter resource transports or fallback. */
+  /** Resolve viewer handles in their source document; only returned resource
+   * requests enter URL transports. Rendered viewer pixels remain readable bytes. */
   private async loadTile(tile: Tile): Promise<ArrayBuffer | TileImageLike> {
     const source = tile.source;
     if (source.kind === "viewer") {
@@ -318,7 +319,10 @@ export class BrowserHost implements Host {
         throw new InvalidInputError("Live viewer tiles require their browser extension session");
       if (!extent) throw new InternalError("Viewer tile plan has no expected pixel dimensions");
       try {
-        return await load(source, extent, this.signal);
+        const result = await load(source, extent, this.signal);
+        if (result instanceof ArrayBuffer) return result;
+        this.signal.throwIfAborted();
+        return await this.loadResourceTile(result, tile.placement.processing === "none");
       } catch (error) {
         if (isJobError(error)) throw errorFromPayload(error);
         throw new InternalError(

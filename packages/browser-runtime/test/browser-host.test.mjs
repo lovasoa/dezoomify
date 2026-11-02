@@ -3,7 +3,7 @@ import test from "node:test";
 import { createDiagnosticRecorder } from "../../shared-ui/src/diagnostics.ts";
 import { createCanvasAssembly } from "../src/assembly.ts";
 import { BrowserHost } from "../src/browser-host.ts";
-import { errorPayload, NetworkError } from "../src/errors.ts";
+import { errorPayload, HttpError, NetworkError } from "../src/errors.ts";
 import { MAXIMUM_SELECTION_LIMITS } from "../src/limits.ts";
 import { createTileDecoder } from "../src/tile-decode.ts";
 
@@ -74,6 +74,42 @@ test("acquisition decodes and paints readable bytes before returning", async () 
   assert.deepEqual([...new Uint8Array(h.painted[0][2])], [1, 2]);
   assert.equal(h.painted[0][0], 0);
   assert.equal(h.painted[0][1], tile.placement);
+});
+
+test("viewer tile URLs use ordinary resource acquisition", async () => {
+  const requests = [];
+  const request = { ...tile.source, uri: "https://tiles.test/signed?exact=signature" };
+  const h = setup({
+    loadViewerTile: async () => request,
+    fetchResource: async (actual, _signal, interaction) => {
+      requests.push({ actual, interaction });
+      return { kind: "response", response: { bytes: [3, 4] } };
+    },
+  });
+  const viewerTile = {
+    ...tile,
+    source: {
+      kind: "viewer",
+      handle: "page-source",
+      source_url: "https://gallery.test/viewer",
+      level: 8,
+      column: 0,
+      row: 0,
+    },
+    placement: { ...tile.placement, expected_size: { width: 256, height: 256 } },
+  };
+  await h.host.acquireTile(acquisition(viewerTile));
+  assert.deepEqual(requests, [{ actual: request, interaction: "allowed" }]);
+  assert.deepEqual([...new Uint8Array(h.painted[0][2])], [3, 4]);
+  h.deps.fetchResource = async () => {
+    throw new HttpError({ status: 503, transport: "browser-session", request: request.uri });
+  };
+  await assert.rejects(h.host.acquireTile(acquisition(viewerTile)), {
+    kind: "resource",
+    request: request.uri,
+    source: { kind: "http-error", status: 503, transport: "browser-session", request: request.uri },
+  });
+  await h.host.settle();
 });
 
 test("untyped errors become network failures only at the readable-fetch boundary", async () => {

@@ -95,7 +95,8 @@ export interface ImageRequest {
 
 /**
  * A tile is either a readable resource or a call into a job-owned live viewer.
- * Only resource variants may enter URL transports or ordinary-image fallback.
+ * Handles never enter URL transports. A Host may resolve a viewer call to an
+ * ordinary resource request before acquisition.
  */
 export type TileSource = ({ kind: "resource" } & ResourceRequest) | ({ kind: "viewer" } & ViewerTileRequest);
 

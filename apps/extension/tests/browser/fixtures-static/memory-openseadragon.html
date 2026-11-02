@@ -5,12 +5,22 @@
     <div id="viewer" style="width:600px;height:600px"></div>
     <script src="/openseadragon-fixture.js"></script>
     <script>
-      (() => {
+      (async () => {
         const OpenSeadragon = window.OpenSeadragon;
         const type = new URLSearchParams(location.search).get("type");
         const base = location.origin;
-        const source = type === "custom"
-          ? {
+        const tileOrigin = new URL(base);
+        tileOrigin.hostname = "localhost";
+        const blobs = new Map();
+        if (type === "blob-url") {
+          for (const x of [0, 1]) for (const y of [0, 1]) {
+            const response = await fetch(`${base}/memory-tiles/9/${x}_${y}.png`);
+            blobs.set(`${x}/${y}`, URL.createObjectURL(await response.blob()));
+          }
+        }
+        const source = tileSource();
+        function tileSource() {
+          if (type === "custom") return {
             width: 512, height: 512, tileSize: 256, tileOverlap: 0,
             getTileUrl(level, x, y) { return `private:${level}/${x}/${y}`; },
             downloadTileStart(job) {
@@ -28,14 +38,19 @@
               image.src = `${base}/memory-tiles/9/${x}_${y}.png`;
             },
             downloadTileAbort(job) { job.userData.image.src = ""; },
-          }
-          : type === "iiif"
-          ? { "@context": "http://iiif.io/api/image/3/context.json", id: `${base}/memory-iiif`, protocol: "http://iiif.io/api/image", type: "ImageService3", profile: "level2", width: 512, height: 512, tileFormat: "png", tiles: [{ width: 256, scaleFactors: [1, 2] }] }
-          : type === "zoomify"
-            ? { type: "zoomifytileservice", width: 512, height: 512, tileSize: 256, tilesUrl: `${base}/memory-zoomify/` }
-            : type === "iip"
-              ? { iipsrv: `${base}/memory-iip`, image: "private.tif" }
-              : { Image: { xmlns: "http://schemas.microsoft.com/deepzoom/2008", Url: `${base}/memory-tiles/`, Format: "png", Overlap: 0, TileSize: 256, Size: { Width: 512, Height: 512 } } };
+          };
+          if (["url", "blob-url"].includes(type)) return {
+            width: 512, height: 512, tileSize: 256, tileOverlap: 0,
+            getTileUrl(level, x, y) {
+              return type === "blob-url" ? blobs.get(`${x}/${y}`)
+                : `${tileOrigin.origin}/memory-tiles/${level}/${x}_${y}.png?signature=fixture`;
+            },
+          };
+          if (type === "iiif") return { "@context": "http://iiif.io/api/image/3/context.json", id: `${base}/memory-iiif`, protocol: "http://iiif.io/api/image", type: "ImageService3", profile: "level2", width: 512, height: 512, tileFormat: "png", tiles: [{ width: 256, scaleFactors: [1, 2] }] };
+          if (type === "zoomify") return { type: "zoomifytileservice", width: 512, height: 512, tileSize: 256, tilesUrl: `${base}/memory-zoomify/` };
+          if (type === "iip") return { iipsrv: `${base}/memory-iip`, image: "private.tif" };
+          return { Image: { xmlns: "http://schemas.microsoft.com/deepzoom/2008", Url: `${base}/memory-tiles/`, Format: "png", Overlap: 0, TileSize: 256, Size: { Width: 512, Height: 512 } } };
+        }
         const viewer = OpenSeadragon({ id: "viewer", tileSources: source, showNavigationControl: false });
         const ready = () => {
           document.documentElement.dataset.viewerReady = "true";

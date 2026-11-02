@@ -46,12 +46,16 @@ The core owns deferred resolution, retry classification, scheduling, retry budge
 and backoff. Hosts make individual acquisition attempts and report structured
 failures; they must not add a second retry policy. The extension's
 [live viewer adapters](../apps/extension/src/job/viewers/session.ts) reuse
-page loaders, retaining their built-in retries. Cancellation stops waiting
+page loaders when needed, retaining their built-in retries. Ordinary image sources
+resolve tile URLs lazily and use the Host's resource transport; page-local blob
+URLs are read in their source document. Cancellation stops waiting
 without clearing the viewer's queue or cache. Rust validates the observed finite
 grids and plans tile placement through its existing grid geometry. Tile sources
-distinguish resource requests from calls through job-owned viewer handles; viewer
-calls never enter URL transports or ordinary-image fallback. GUI Hosts await Retry or Cancel
-inside optional acquisitions, pausing new work while in-flight operations settle.
+distinguish resource requests from calls through job-owned viewer handles. Only
+validated resource requests returned by a viewer call enter URL transports;
+handles never do. Viewer calls retain their source-page pacing group.
+GUI Hosts await Retry or Cancel inside optional acquisitions, pausing new work
+while in-flight operations settle.
 Retry approval retains successful tiles. Every required tile must succeed before
 finalization; permanent tile and output failures stop the job. Exact policies
 live in [acquisition](../crates/dezoomify/src/acquisition.rs) and its

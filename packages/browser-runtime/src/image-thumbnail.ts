@@ -18,7 +18,7 @@ export async function imageThumbnail(
       request: ViewerTileRequest,
       extent: Size,
       signal: AbortSignal,
-    ): Promise<ArrayBuffer>;
+    ): Promise<ArrayBuffer | ResourceRequest>;
     process(recipe: Tile["placement"]["processing"], bytes: ArrayBuffer): ArrayBuffer;
     decoder: TileDecoder;
     canvas(): HTMLCanvasElement;
@@ -26,12 +26,15 @@ export async function imageThumbnail(
 ): Promise<Blob | undefined> {
   const size = tile.placement.canvas;
   if (!size || size.width > 1024 || size.height > 1024) return;
-  let bytes: ArrayBuffer;
+  let resource: ArrayBuffer | ResourceRequest;
   if (tile.source.kind === "viewer") {
     if (!deps.loadViewerTile || !tile.placement.expected_size) return;
-    bytes = await deps.loadViewerTile(tile.source, tile.placement.expected_size, signal);
-  } else {
-    const result = await deps.fetch(tile.source, signal);
+    resource = await deps.loadViewerTile(tile.source, tile.placement.expected_size, signal);
+  } else resource = tile.source;
+  let bytes: ArrayBuffer;
+  if (resource instanceof ArrayBuffer) bytes = resource;
+  else {
+    const result = await deps.fetch(resource, signal);
     if (result.kind !== "response") return;
     bytes = new Uint8Array(result.response.bytes).buffer;
   }

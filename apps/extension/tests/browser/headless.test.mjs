@@ -111,7 +111,7 @@ function stagePackage(
   return zip;
 }
 
-async function startFixtureServer(workDir) {
+async function startFixtureServer(workDir, { cors = true } = {}) {
   const staticDir = path.join(workDir, "static");
   cpSync(STATIC_DIR, staticDir, { recursive: true });
   await sharp({
@@ -142,6 +142,7 @@ async function startFixtureServer(workDir) {
     staticDir,
     "--request-log",
     path.join(workDir, "fixture-requests.jsonl"),
+    ...(cors ? [] : ["--no-cors"]),
   ]);
   let base = null;
   for (let i = 0; i < 100 && !base; i += 1) {
@@ -261,7 +262,7 @@ async function chromiumJobContext(base, work, options) {
   return context;
 }
 
-async function runChromiumJob(base, work, options = {}) {
+async function runChromiumJob(base, work, { logFile = fixtureServer.logFile, ...options } = {}) {
   const shared = options.scenario?.startsWith("fixtures/");
   const context = await chromiumJobContext(base, work, options);
   // Browser-level events also see downloads from job tabs before Playwright
@@ -349,8 +350,8 @@ async function runChromiumJob(base, work, options = {}) {
         .locator("body")
         .textContent()
         .catch(() => "<unavailable>");
-      const fixtureLog = existsSync(fixtureServer.logFile)
-        ? readFileSync(fixtureServer.logFile, "utf8").trim()
+      const fixtureLog = existsSync(logFile)
+        ? readFileSync(logFile, "utf8").trim()
         : "<unavailable>";
       assert.fail(
         `the job tab did not save the assembled image in time\njob page: ${jobText}\nbrowser diagnostics: ${diagnostics.join("\n") || "<none>"}\nfixture requests: ${fixtureLog || "<none>"}`,
@@ -506,10 +507,8 @@ function findFirefoxBinary() {
   return null;
 }
 
-async function runFirefoxJob(base, work, runOptions = {}) {
-  const logOffset = existsSync(fixtureServer.logFile)
-    ? readFileSync(fixtureServer.logFile, "utf8").length
-    : 0;
+async function runFirefoxJob(base, work, { logFile = fixtureServer.logFile, ...runOptions } = {}) {
+  const logOffset = existsSync(logFile) ? readFileSync(logFile, "utf8").length : 0;
   const shared = runOptions.scenario?.startsWith("fixtures/");
   const sessionWork = shared ? path.join(fixtureWork, "firefox") : work;
   const binary = findFirefoxBinary();
@@ -600,7 +599,7 @@ async function runFirefoxJob(base, work, runOptions = {}) {
     );
     if (runOptions.scenario === "cookie-session") {
       await waitForFixtureEvent(
-        fixtureServer.logFile,
+        logFile,
         logOffset,
         (event) => event.path === "/__source-access-proof" && event.status === 200,
         "the authenticated direct job-page fetch",
@@ -608,7 +607,7 @@ async function runFirefoxJob(base, work, runOptions = {}) {
     }
     if (!shared) {
       await waitForFixtureEvent(
-        fixtureServer.logFile,
+        logFile,
         logOffset,
         (event) => event.path === "/target.html" && event.query === "after-navigation=1",
         "the source-tab navigation invalidation",
@@ -939,19 +938,24 @@ for (const [browser, runJob] of [
       rmSync(work, { recursive: true, force: true });
     }
   });
-  test(`${browser}: private OpenSeadragon sources save through metadata or the page loader`, {
+  test(`${browser}: private OpenSeadragon sources save through metadata, tile URLs or the page loader`, {
     timeout: 240000,
   }, async () => {
     const work = mkdtempSync(path.join(tmpdir(), "dezoomify-e2e-memory-openseadragon-"));
+    const server = await startFixtureServer(work, { cors: false });
     try {
-      for (const type of ["deepzoom", "iiif", "zoomify", "iip", "custom"]) {
+      for (const type of ["deepzoom", "iiif", "zoomify", "iip", "custom", "url", "blob-url"]) {
         const caseWork = path.join(work, type);
         mkdirSync(caseWork);
-        const offset = readFileSync(fixtureServer.logFile, "utf8").length;
+        const offset = readFileSync(server.logFile, "utf8").length;
         assertPng(
-          await runJob(fixtureServer.base, caseWork, { scenario: `memory-openseadragon-${type}` }),
+          await runJob(server.base, caseWork, {
+            scenario: `memory-openseadragon-${type}`,
+            grantAccess: type === "url",
+            logFile: server.logFile,
+          }),
         );
-        const events = newFixtureEvents(fixtureServer.logFile, offset);
+        const events = newFixtureEvents(server.logFile, offset);
         assert.equal(
           events.filter(
             (e) =>
@@ -969,6 +973,7 @@ for (const [browser, runJob] of [
           );
       }
     } finally {
+      server.proc.kill();
       rmSync(work, { recursive: true, force: true });
     }
   });
