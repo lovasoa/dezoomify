@@ -11,8 +11,9 @@ Declare each route's semantic role, matcher and action, such as
 `metadata(url_suffix("ImageProperties.xml")).decode(properties)`. Keep viewer
 entry points distinct from metadata resources and direct image URLs. Roles and
 matchers provide [specificity defaults](../crates/dezoomify/src/core/discovery.rs);
-explicit matcher overrides take precedence. Mark broad exceptions, such as
-generic JavaScript URLs or ordinary element IDs, as `Low`.
+explicit matcher overrides take precedence. Mark weak evidence, such as ordinary
+element IDs, as `Low`. Resource inventory alone initiates a read only with Medium
+or High URL evidence; avoid URL matchers for generic extensions or API paths.
 Routes run in declaration order, so place broad fallbacks after specific routes.
 Content matchers strengthen evidence only after matching available bytes;
 they do not justify fetching arbitrary resources to try them. Wildcard/schema

@@ -8,7 +8,7 @@ use serde::Deserialize;
 use url::Url;
 
 use crate::Vec2d;
-use crate::core::discovery::{Specificity::Low, metadata, url_matches, viewer};
+use crate::core::discovery::{metadata, url_matches, viewer};
 use crate::core::{
     DiscoveryError, DiscoveryResource, DiscoveryRoute, FormatSpec, ImagePlan, ParsedResource,
     Request, ResolvedLevel, image_title,
@@ -30,7 +30,6 @@ static FILES_ARRAY_RE: LazyLock<Regex> = LazyLock::new(|| {
 const ROUTES: &[DiscoveryRoute] = &[
     metadata(url_matches(is_ecw_url)).decode(decode),
     metadata(url_matches(|uri| uri.contains("imagesize/"))).decode(decode),
-    metadata(url_matches(|uri| uri.contains("/image/")).specificity(Low)).decode(decode),
     viewer(url_matches(is_hungaricana_url)).decode(follow_layer),
 ];
 
@@ -73,9 +72,10 @@ fn follow_file_array(
     let file = files.get(image_index(page_uri)).ok_or_else(|| {
         DiscoveryError::InvalidMetadata("Hungaricana file index is out of range".into())
     })?;
-    Ok(ParsedResource::Follow(Request::new(layer_file_url(
-        page, file,
-    )?)))
+    Ok(ParsedResource::FollowWith(
+        Request::new(layer_file_url(page, file)?),
+        decode,
+    ))
 }
 
 fn layer_file_url(page: &str, file: &str) -> Result<String, DiscoveryError> {

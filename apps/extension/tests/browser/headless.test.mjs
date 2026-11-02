@@ -293,6 +293,7 @@ async function runChromiumJob(base, work, { logFile = fixtureServer.logFile, ...
   const onPage = observe;
   context.on("page", onPage);
   try {
+    await options.beforeStart?.(context);
     downloadSession = await context.browser().newBrowserCDPSession();
     downloadSession.on("Browser.downloadWillBegin", onDownload);
     await downloadSession.send("Browser.setDownloadBehavior", {
@@ -731,14 +732,28 @@ for (const [browser, run, scenario] of [
   ["chromium", runChromiumJob, "loaded-image-viewer"],
   ["firefox", runFirefoxJob, "loaded-image-viewer"],
 ]) {
-  test(`${browser}: ${scenario} is saved after tiled discovery fails`, {
+  test(`${browser}: ${scenario} is saved before speculative discovery or permissions`, {
     timeout: 180000,
   }, async () => {
     const work = mkdtempSync(path.join(tmpdir(), "dezoomify-loaded-image-"));
+    const offset = readFileSync(fixtureServer.logFile, "utf8").length;
+    const speculativeReads = [];
     try {
       const bytes = await run(fixtureServer.base, work, {
         scenario,
+        sourceHostOnly: true,
+        async beforeStart(context) {
+          await context.route(
+            /\/(?:loaded-image-noise|openseadragon-fixture)\.js/,
+            async (route) => {
+              if (route.request().resourceType() === "script") return route.continue();
+              speculativeReads.push(route.request().url());
+              await route.abort("blockedbyclient");
+            },
+          );
+        },
         async afterSave(page) {
+          assert.equal(await page.locator("[data-dz-allow-access=true]").count(), 0);
           assert.match(
             await page.locator(".dz-completed-section").textContent(),
             /image available on this page/,
@@ -754,6 +769,12 @@ for (const [browser, run, scenario] of [
           assert.doesNotMatch(draft.searchParams.get("body"), /attempt failed/);
         },
       });
+      assert.deepEqual(speculativeReads, [], "the original needs no speculative metadata reads");
+      const inventory = newFixtureEvents(fixtureServer.logFile, offset).filter(
+        (event) => event.path === "/loaded-image-noise.js",
+      );
+      assert.equal(inventory.length, 8, "only the page loads its unrelated scripts");
+      assert.equal(new Set(inventory.map((event) => event.url)).size, 8);
       assert.deepEqual(bytes, readFileSync(path.join(fixtureWork, "static", "loaded-image.png")));
       const pixels = decodePngPixels(bytes);
       assert.deepEqual([pixels.width, pixels.height], [1800, 1200]);
@@ -763,6 +784,28 @@ for (const [browser, run, scenario] of [
     }
   });
 }
+
+test("chromium: recognized tiled metadata precedes a loaded original", {
+  timeout: 180000,
+}, async () => {
+  const work = mkdtempSync(path.join(tmpdir(), "dezoomify-loaded-image-tiled-"));
+  try {
+    assertPng(
+      await runChromiumJob(fixtureServer.base, work, {
+        scenario: "loaded-image-tiled",
+        sourceHostOnly: true,
+        async afterSave(page) {
+          assert.doesNotMatch(
+            await page.locator(".dz-completed-section").textContent(),
+            /image available on this page/,
+          );
+        },
+      }),
+    );
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+});
 
 test("chromium: packaged extension runs the job-tab flow", { timeout: 180000 }, async () => {
   const work = mkdtempSync(path.join(tmpdir(), "dezoomify-e2e-chromium-"));

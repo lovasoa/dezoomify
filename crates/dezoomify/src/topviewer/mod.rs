@@ -7,9 +7,7 @@ use serde_json::Value;
 use url::Url;
 
 use crate::Vec2d;
-use crate::core::discovery::{
-    Metadata, Specificity::Low, css, json_metadata, metadata, url_matches, viewer,
-};
+use crate::core::discovery::{Metadata, css, json_metadata, metadata, url_matches, viewer};
 use crate::core::{
     DiscoveryError, DiscoveryResource, DiscoveryRoute, FormatSpec, ImagePlan, ParsedResource,
     Request, ResolvedLevel, resolve_url_template,
@@ -39,7 +37,7 @@ const ROUTES: &[DiscoveryRoute] = &[
         "https://images.memorix.nl/$server/topviewjson/memorix/$image",
     )
     .then_decode(decode),
-    metadata(url_matches(is_media_api).specificity(Low)).decode(follow_media),
+    metadata(url_matches(is_topview_url)).decode(decode),
     json_metadata::<Document>(),
 ];
 
@@ -134,10 +132,14 @@ fn follow_mediabank(resource: DiscoveryResource<'_>) -> Result<ParsedResource, D
     ))
 }
 
-fn is_media_api(uri: &str) -> bool {
+fn is_topview_url(uri: &str) -> bool {
     Url::parse(uri).is_ok_and(|url| {
-        let path = url.path().trim_end_matches('/');
-        path.ends_with("/media") || (path.contains("/media/") && url.query().is_some())
+        url.host_str() == Some("images.memorix.nl")
+            && matches!(
+                url.path_segments().map(Iterator::collect::<Vec<_>>).as_deref(),
+                Some([server, "topviewjson", "memorix", image])
+                    if !server.is_empty() && !image.is_empty()
+            )
     })
 }
 

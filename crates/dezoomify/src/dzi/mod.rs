@@ -7,7 +7,7 @@ use regex::{Regex, bytes::Regex as BytesRegex};
 
 use crate::Vec2d;
 use crate::core::discovery::{
-    Metadata, Specificity::Low, any, image_url, js_matches, metadata, url_matches, viewer,
+    Metadata, Specificity::Low, any, css, image_url, js_matches, metadata, url_matches, viewer,
     xml_metadata,
 };
 use crate::core::{
@@ -52,7 +52,10 @@ const ROUTES: &[DiscoveryRoute] = &[
     viewer(js_matches(&WDL_MARKER_RE)).decode(follow_wdl_template),
     DiscoveryRoute::regex_link(&DZI_LINK_RE, "$url"),
     DiscoveryRoute::regex_link(&OPEN_DZI_XML_RE, "$url"),
-    DiscoveryRoute::regex_link(&DZI_ATTR_RE, "$url").then_decode(decode_catalog),
+    viewer(css("[dzi]"))
+        .follow_attribute("dzi")
+        .then_decode(decode_catalog),
+    viewer(js_matches(&DZI_MARKER_RE)).try_decode(follow_dzi_attribute),
     DiscoveryRoute::regex_link(&XML_LINK_RE, "$url").specificity(Low),
     metadata(url_matches(is_dzi_url)).decode(decode_catalog),
     xml_metadata::<DziFile>(),
@@ -97,10 +100,25 @@ static XML_LINK_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
         .expect("constant generic XML link pattern")
 });
 
-static DZI_ATTR_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
-    BytesRegex::new(r#"(?i)\bdzi["']?\s*[:=]\s*["'](?P<url>[^<"']+)["']"#)
-        .expect("constant DZI attribute pattern")
+static DZI_MARKER_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
+    BytesRegex::new(r#"\bdzi["']?\s*[:=]"#).expect("constant DZI property marker")
 });
+
+static DZI_ATTR_RE: LazyLock<Regex> = LazyLock::new(|| {
+    crate::javascript::literal_regex(r#"(?:\bdzi|'dzi'|"dzi")\s*[:=]\s*(?:'([^']*)'|"([^"]*)")"#)
+});
+
+fn follow_dzi_attribute(
+    resource: DiscoveryResource<'_>,
+) -> Option<Result<ParsedResource, DiscoveryError>> {
+    let reference = crate::web_page::script_bodies(resource).find_map(|body| {
+        let visible = crate::javascript::mask(std::str::from_utf8(body).ok()?);
+        crate::javascript::captured(&DZI_ATTR_RE, &visible)
+    })?;
+    Some(Ok(resource
+        .follow_relative(&reference)
+        .decode_with(decode_catalog)))
+}
 
 static WDL_TEMPLATE_RE: LazyLock<BytesRegex> =
     LazyLock::new(|| BytesRegex::new(r#""([^"]+\.dzi)""#).expect("constant WDL template pattern"));

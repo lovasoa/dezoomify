@@ -172,6 +172,7 @@ function testTargetUrl(origin, scenario) {
   if (scenario === "loaded-image-data") return `${origin}/loaded-image.html?data`;
   if (scenario === "loaded-image-link") return `${origin}/loaded-image.html?link`;
   if (scenario === "loaded-image-viewer") return `${origin}/loaded-image.html?viewer`;
+  if (scenario === "loaded-image-tiled") return `${origin}/loaded-image.html?tiled`;
   if (scenario.startsWith("fixtures/")) return `${origin}/${scenario}/viewer.html`;
   if (scenario === "recursive-iframe") return `${origin}/recursive-iframe.html`;
   if (scenario === "memory-openseadragon-gallery") return `${origin}/viewer-gallery.html`;

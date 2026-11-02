@@ -208,11 +208,14 @@ pub(crate) fn contains_position(text: &str, body: &str, position: usize) -> bool
     (start..start + body.len()).contains(&position)
 }
 
+/// Mask comments and regex literals while preserving byte offsets and strings.
+/// Lexical context is tracked in one pass, including regexes after conditions.
 pub(crate) fn mask(text: &str) -> String {
     let bytes = text.as_bytes();
     let mut out = bytes.to_vec();
     let mut position = 0;
     let mut quote = None;
+    let mut context = RegexContext::new();
     while position < bytes.len() {
         let byte = bytes[position];
         if let Some(delimiter) = quote {
@@ -225,45 +228,108 @@ pub(crate) fn mask(text: &str) -> String {
             }
         } else if matches!(byte, b'\'' | b'"' | b'`') {
             quote = Some(byte);
-        } else if bytes.get(position..position + 2) == Some(b"//")
-            || bytes[position..].starts_with(b"<!--")
-            || (bytes[position..].starts_with(b"-->")
-                && text[..position]
-                    .rsplit(['\n', '\r'])
-                    .next()
-                    .unwrap_or_default()
-                    .trim()
-                    .is_empty())
-        {
-            while position < bytes.len() && bytes[position] != b'\n' {
-                out[position] = b' ';
-                position += 1;
-            }
-            continue;
-        } else if bytes.get(position..position + 2) == Some(b"/*") {
-            out[position..position + 2].fill(b' ');
-            position += 2;
-            while position < bytes.len() {
-                if bytes.get(position..position + 2) == Some(b"*/") {
-                    out[position..position + 2].fill(b' ');
-                    position += 2;
-                    break;
-                }
-                out[position] = b' ';
-                position += 1;
-            }
+            context.value();
+        } else if let Some(end) = comment_end(text, position) {
+            out[position..end].fill(b' ');
+            position = end;
             continue;
         } else if byte == b'/'
-            && regex_start(std::str::from_utf8(&out[..position]).expect("masked UTF-8"))
+            && context.allowed
             && let Some(end) = regex_end(bytes, position)
         {
             out[position..=end].fill(b' ');
             position = end + 1;
+            context.value();
+            continue;
+        } else {
+            position += context.token(&text[position..]);
             continue;
         }
         position += 1;
     }
     String::from_utf8(out).expect("comment removal preserves UTF-8")
+}
+
+/// Whether the next slash begins a regex, retaining only the preceding token
+/// and whether each open parenthesis belongs to a control statement.
+struct RegexContext {
+    allowed: bool,
+    control: bool,
+    parentheses: Vec<bool>,
+}
+
+impl RegexContext {
+    fn new() -> Self {
+        Self {
+            allowed: true,
+            control: false,
+            parentheses: Vec::new(),
+        }
+    }
+
+    fn value(&mut self) {
+        self.allowed = false;
+        self.control = false;
+    }
+
+    fn token(&mut self, text: &str) -> usize {
+        let character = text.chars().next().unwrap();
+        if character.is_whitespace() {
+            return character.len_utf8();
+        }
+        if character.is_alphanumeric() || matches!(character, '_' | '$') {
+            let end = text
+                .char_indices()
+                .find(|(_, c)| !c.is_alphanumeric() && !matches!(c, '_' | '$'))
+                .map_or(text.len(), |(offset, _)| offset);
+            let word = &text[..end];
+            self.allowed = matches!(
+                word,
+                "return" | "throw" | "case" | "yield" | "typeof" | "void" | "delete"
+            );
+            self.control = matches!(word, "if" | "while" | "for" | "with" | "switch" | "catch");
+            return end;
+        }
+        self.allowed = match character {
+            '(' => {
+                self.parentheses.push(self.control);
+                true
+            }
+            ')' => self.parentheses.pop().unwrap_or(false),
+            _ => "=[{,:;!?&|+-*%~^<>".contains(character),
+        };
+        self.control = false;
+        character.len_utf8()
+    }
+}
+
+fn comment_end(text: &str, position: usize) -> Option<usize> {
+    let tail = &text.as_bytes()[position..];
+    if tail.starts_with(b"//")
+        || tail.starts_with(b"<!--")
+        || (tail.starts_with(b"-->")
+            && text[..position]
+                .rsplit(['\n', '\r'])
+                .next()
+                .unwrap_or_default()
+                .trim()
+                .is_empty())
+    {
+        return Some(
+            position
+                + tail
+                    .iter()
+                    .position(|byte| *byte == b'\n')
+                    .unwrap_or(tail.len()),
+        );
+    }
+    tail.starts_with(b"/*").then(|| {
+        position
+            + tail[2..]
+                .windows(2)
+                .position(|pair| pair == b"*/")
+                .map_or(tail.len(), |end| end + 4)
+    })
 }
 
 fn regex_end(bytes: &[u8], position: usize) -> Option<usize> {
@@ -282,63 +348,21 @@ fn regex_end(bytes: &[u8], position: usize) -> Option<usize> {
     (bytes.get(end) == Some(&b'/')).then_some(end)
 }
 
-fn regex_start(prefix: &str) -> bool {
-    let prefix = prefix.trim_end();
-    prefix.is_empty()
-        || prefix.ends_with([
-            '=', '(', '[', '{', ',', ':', ';', '!', '?', '&', '|', '+', '-', '*', '%', '~', '^',
-            '<', '>',
-        ])
-        || control_statement(prefix)
-        || matches!(
-            prefix
-                .rsplit(|c: char| !c.is_alphanumeric() && c != '_')
-                .next(),
-            Some("return" | "throw" | "case" | "yield" | "typeof" | "void" | "delete")
-        )
-}
-
-// A slash after a control condition starts a statement, unlike a function call.
-fn control_statement(prefix: &str) -> bool {
-    if !prefix.ends_with(')') {
-        return false;
-    }
-    let mut opens = Vec::new();
-    let mut quote = None;
-    let mut escaped = false;
-    let mut condition = None;
-    for (i, byte) in prefix.bytes().enumerate() {
-        if let Some(delimiter) = quote {
-            if escaped {
-                escaped = false;
-            } else if byte == b'\\' {
-                escaped = true;
-            } else if byte == delimiter {
-                quote = None;
-            }
-        } else {
-            match byte {
-                b'\'' | b'"' | b'`' => quote = Some(byte),
-                b'(' => opens.push(i),
-                b')' => condition = opens.pop(),
-                _ => {}
-            }
-        }
-    }
-    condition.is_some_and(|i| {
-        matches!(
-            prefix[..i]
-                .trim_end()
-                .rsplit(|c: char| !c.is_alphanumeric() && c != '_')
-                .next(),
-            Some("if" | "while" | "for" | "with" | "switch" | "catch")
-        )
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn library_code_preserves_division_and_masks_regexes_after_nested_conditions() {
+        let library =
+            r#"function scale(x){return value(x) / 2;} if (ready(")", "é")) /[/'"]/.test(value);"#;
+        let source = format!("{} path='image.dzi';", library.repeat(1024));
+        let visible = mask(&source);
+        assert!(visible.starts_with("function scale(x){return value(x) / 2;}"));
+        assert!(!visible.contains("/[/'\"]/.test"));
+        assert!(visible.ends_with("path='image.dzi';"));
+        assert_eq!(visible.len(), source.len());
+    }
 
     #[test]
     fn literal_strings_properties_and_inactive_source() {

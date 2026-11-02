@@ -4,8 +4,20 @@
   <body>
     <script src="/openseadragon-fixture.js"></script>
     <img id="artwork" style="width:100px;height:100px;object-fit:cover" alt="Blue rectangle"
-      onload="document.documentElement.dataset.viewerReady = 'true'">
+      onload="ready()">
     <script>
+      const inventory = Promise.all(Array.from({ length: 8 }, (_, index) => new Promise(resolve => {
+        const script = document.createElement('script');
+        const url = new URL(`/loaded-image-noise.js?asset=${index}`, location.href);
+        if (index % 2) url.hostname = 'localhost';
+        script.src = url.href;
+        script.onload = script.onerror = resolve;
+        document.head.append(script);
+      })));
+      async function ready() {
+        await inventory;
+        document.documentElement.dataset.viewerReady = 'true';
+      }
       const artwork = document.getElementById('artwork');
       if (location.search === '?viewer') {
         artwork.remove();
@@ -18,7 +30,7 @@
           id: 'viewer', showNavigationControl: false,
           tileSources: { type: 'image', url: original.href },
         });
-        viewer.addOnceHandler('open', () => document.documentElement.dataset.viewerReady = 'true');
+        viewer.addOnceHandler('open', ready);
         delete window.OpenSeadragon;
       } else if (location.search === '?link') {
         artwork.remove();
@@ -27,8 +39,15 @@
         link.download = '';
         link.textContent = 'Download image';
         document.body.append(link);
-        document.documentElement.dataset.viewerReady = 'true';
-      } else if (!location.search) artwork.src = '/loaded-image.png';
+        ready();
+      } else if (!location.search || location.search === '?tiled') {
+        if (location.search === '?tiled') {
+          const metadata = document.createElement('script');
+          metadata.textContent = `const dzi = ${JSON.stringify('/fixtures/deepzoom/basic/image' + '.dzi')};`;
+          document.body.append(metadata);
+        }
+        artwork.src = '/loaded-image.png';
+      }
       // RSL-style viewer: retain the HTTP resource behind an embedded data URL.
       else fetch('/loaded-image.png').then(response => response.blob()).then(blob => {
         const reader = new FileReader();

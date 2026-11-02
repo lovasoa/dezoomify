@@ -288,6 +288,8 @@ type UrlPredicate = fn(&str) -> bool;
 
 /// Strength of evidence for discovery work. Content matchers contribute only
 /// after matching available bytes; they never justify speculative reads.
+/// URL-only resource inventory needs Medium or High URL evidence to initiate
+/// a read. Explicit sources and format-directed references remain readable.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Ord, PartialOrd)]
 pub enum Specificity {
     High,
