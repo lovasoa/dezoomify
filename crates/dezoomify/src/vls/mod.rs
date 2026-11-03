@@ -20,7 +20,7 @@ static VIEW_PATH_RE: LazyLock<Regex> = LazyLock::new(|| {
 pub const SPEC: FormatSpec = FormatSpec::new(
     "vls",
     &[
-        viewer(url_matches(is_view_url)).resolve_metadata(normalize_url),
+        viewer(url_matches(is_view_url).specificity(Low)).resolve_metadata(normalize_url),
         metadata(css("map[id=map i], div[id=map i]").specificity(Low)).decode(decode),
     ],
 )
