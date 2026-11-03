@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use serde::Deserialize;
 
 use crate::Vec2d;
-use crate::core::discovery::{metadata, url_suffix};
+use crate::core::discovery::{file_name, metadata};
 use crate::core::{
     DiscoveryError, FormatSpec, ImagePlan, ParsedResource, Positioned, ProcessingRecipe, Request,
     ResolvedLevel, TileSourceError,
@@ -18,11 +18,9 @@ mod variable;
 
 pub const SPEC: FormatSpec = FormatSpec::new(
     "custom",
-    &[metadata(url_suffix("tiles.yaml")).decode(decode)],
+    &[metadata(file_name("tiles.yaml")).decode(decode)],
 )
-.with_display_name("Custom tiles")
-.with_file_extensions(&["yaml"])
-.with_file_help("Custom tile descriptions must be named tiles.yaml.");
+.with_display_name("Custom tiles");
 
 fn decode(resource: crate::core::DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
     decode_yaml(resource.bytes()).map(ParsedResource::Image)

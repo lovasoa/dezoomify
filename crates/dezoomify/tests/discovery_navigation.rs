@@ -65,6 +65,57 @@ fn image(inputs: Vec<DiscoveryInput>, replies: &[(&str, &[u8])], format: &str) {
 }
 
 #[test]
+fn fixed_filename_routes_supply_picker_filters_and_reject_lookalikes() {
+    for (format, filename, extension, bytes) in [
+        (
+            "custom",
+            "tiles.yaml",
+            "yaml",
+            include_bytes!("../../../testdata/scenarios/rs-core/formats/payloads/tiles.yaml")
+                .as_slice(),
+        ),
+        ("zoomify", "ImageProperties.xml", "xml", ZOOMIFY),
+    ] {
+        let registry = registry_for(format).unwrap();
+        let spec = registry.file_formats().next().unwrap();
+        assert_eq!(spec.file_names().collect::<Vec<_>>(), [filename]);
+        assert_eq!(
+            spec.file_filter_extensions().collect::<Vec<_>>(),
+            [extension]
+        );
+        assert_eq!(spec.file_help(), None);
+        let input = format!("file:///My%20collection/{filename}");
+        let catalog = lookup(
+            registry.clone(),
+            vec![DiscoveryInput::with_contents(&input, bytes)],
+            &[],
+            Default::default(),
+            None,
+        )
+        .unwrap();
+        assert!(matches!(catalog.entries(), [DiscoveredEntry::Ready(_)]));
+        for wrong_name in [
+            format!("not{filename}"),
+            format!("{filename}.bak"),
+            filename.to_ascii_uppercase(),
+        ] {
+            let input = format!("file:///My%20collection/{wrong_name}");
+            assert!(
+                lookup(
+                    registry.clone(),
+                    vec![DiscoveryInput::with_contents(&input, bytes)],
+                    &[],
+                    Default::default(),
+                    None,
+                )
+                .is_err(),
+                "{input}"
+            );
+        }
+    }
+}
+
+#[test]
 fn unrelated_content_is_a_route_miss_but_declared_metadata_keeps_its_error() {
     for bytes in [
         br#"<html><script>const settings = {theme: 'dark'};</script><body>Welcome</body></html>"#

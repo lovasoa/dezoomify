@@ -314,6 +314,7 @@ pub struct DiscoveryMatch {
 enum MatchPattern {
     Any,
     UrlSuffix(&'static str),
+    FileName(&'static str),
     UrlPredicate(UrlPredicate),
     Css(&'static str, fn(&HtmlElement) -> bool),
     ResourcePredicate(for<'a> fn(DiscoveryResource<'a>) -> bool),
@@ -342,6 +343,8 @@ impl DiscoveryMatch {
             MatchPattern::UrlSuffix(suffix) => {
                 super::uri::parse_uri(uri).is_ok_and(|url| url.path().ends_with(suffix))
             }
+            MatchPattern::FileName(name) => super::uri::parse_uri(uri)
+                .is_ok_and(|url| url.path().rsplit('/').next() == Some(name)),
             MatchPattern::UrlPredicate(predicate) => predicate(uri),
             _ => false,
         }
@@ -350,7 +353,7 @@ impl DiscoveryMatch {
     fn url_match(self, uri: &str) -> Option<bool> {
         matches!(
             self.pattern,
-            MatchPattern::UrlSuffix(_) | MatchPattern::UrlPredicate(_)
+            MatchPattern::UrlSuffix(_) | MatchPattern::FileName(_) | MatchPattern::UrlPredicate(_)
         )
         .then(|| self.matches_url(uri))
     }
@@ -379,6 +382,12 @@ pub const fn any() -> DiscoveryMatch {
 /// and fragment. Requests retain the original reference.
 pub const fn url_suffix(suffix: &'static str) -> DiscoveryMatch {
     DiscoveryMatch::new(MatchPattern::UrlSuffix(suffix))
+}
+/// Match an exact, case-sensitive basename in a URL path or local resource
+/// name, ignoring query and fragment. Source-file pickers reuse this declaration;
+/// requests retain the original reference.
+pub const fn file_name(name: &'static str) -> DiscoveryMatch {
+    DiscoveryMatch::new(MatchPattern::FileName(name))
 }
 pub const fn url_matches(predicate: UrlPredicate) -> DiscoveryMatch {
     DiscoveryMatch::new(MatchPattern::UrlPredicate(predicate))
@@ -519,7 +528,9 @@ impl DiscoveryRoute {
     fn evidence(self) -> Option<Specificity> {
         self.matcher.specificity.or(match self.matcher.pattern {
             MatchPattern::Any => None,
-            MatchPattern::UrlSuffix(_) | MatchPattern::UrlPredicate(_) => Some(match self.kind {
+            MatchPattern::UrlSuffix(_)
+            | MatchPattern::FileName(_)
+            | MatchPattern::UrlPredicate(_) => Some(match self.kind {
                 RouteKind::Metadata | RouteKind::Image => Specificity::High,
                 RouteKind::Viewer => Specificity::Medium,
             }),
@@ -753,6 +764,30 @@ impl FormatSpec {
     #[must_use]
     pub const fn file_extensions(&self) -> &'static [&'static str] {
         self.file_extensions
+    }
+
+    /// Exact source filenames declared by discovery routes. These are alternatives
+    /// to extension declarations, not restrictions on content-based routes.
+    pub fn file_names(&self) -> impl Iterator<Item = &'static str> {
+        self.routes
+            .iter()
+            .filter_map(|route| match route.matcher.pattern {
+                MatchPattern::FileName(name) => Some(name),
+                _ => None,
+            })
+    }
+
+    /// Coarse native-dialog filters, including extensions derived from exact
+    /// filenames. Extensionless names need a wildcard; discovery enforces the
+    /// exact name after selection, since native filters only support extensions.
+    pub fn file_filter_extensions(&self) -> impl Iterator<Item = &'static str> {
+        self.file_extensions
+            .iter()
+            .copied()
+            .chain(self.file_names().map(|name| {
+                name.rsplit_once('.')
+                    .map_or("*", |(_, extension)| extension)
+            }))
     }
 
     #[must_use]

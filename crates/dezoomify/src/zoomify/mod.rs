@@ -14,7 +14,7 @@ use regex::{Regex, bytes::Regex as BytesRegex};
 use crate::Vec2d;
 use crate::core::discovery::{
     Specificity::{High, Low},
-    any, css, image_url, js_matches, metadata, resource_matches, url_matches, url_suffix, viewer,
+    any, css, file_name, image_url, js_matches, metadata, resource_matches, url_matches, viewer,
 };
 use crate::core::{
     CatalogPlan, DiscoveryError, DiscoveryRoute, FormatSpec, ImagePlan, ParsedResource, Request,
@@ -24,7 +24,7 @@ use crate::core::{
 mod image_properties;
 
 const ROUTES: &[DiscoveryRoute] = &[
-    metadata(url_suffix("ImageProperties.xml")).decode(image_properties),
+    metadata(file_name("ImageProperties.xml")).decode(image_properties),
     image_url(is_tile_url).resolve_metadata(tile_metadata),
     metadata(css("imagefile[format=\"zoomify\" i]")).text_file("ImageProperties.xml"),
     viewer(any()).try_decode(inline_catalog),
@@ -37,9 +37,7 @@ const ROUTES: &[DiscoveryRoute] = &[
     viewer(css("url").specificity(Low)).text_file("ImageProperties.xml"),
 ];
 
-pub const SPEC: FormatSpec = FormatSpec::new("zoomify", ROUTES)
-    .with_display_name("Zoomify")
-    .with_file_extensions(&["xml"]);
+pub const SPEC: FormatSpec = FormatSpec::new("zoomify", ROUTES).with_display_name("Zoomify");
 
 static SHOW_IMAGE_RE: LazyLock<Regex> = LazyLock::new(|| {
     let literal = r#"(?:'(?:\\[\s\S]|[^'\\])*'|"(?:\\[\s\S]|[^"\\])*")"#;

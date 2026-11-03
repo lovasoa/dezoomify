@@ -90,12 +90,12 @@ impl Registry {
             .collect()
     }
 
-    /// Registered source-file formats in priority order. Extension declarations
-    /// guide file pickers; discovery still tries its normal routes for any file.
+    /// Registered source-file formats in priority order. File pickers reuse
+    /// extension hints and exact filename routes; discovery owns acceptance.
     pub fn file_formats(&self) -> impl Iterator<Item = &FormatSpec> {
         self.specs
             .iter()
-            .filter(|spec| !spec.file_extensions().is_empty())
+            .filter(|spec| !spec.file_extensions().is_empty() || spec.file_names().next().is_some())
     }
 }
 

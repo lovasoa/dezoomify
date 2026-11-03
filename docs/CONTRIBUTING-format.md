@@ -8,7 +8,7 @@ URL/base handling, pixel/grid coordinate conventions, and malformed-input behavi
 at the owning declarations. Reuse shared geometry contracts where they apply.
 
 Declare each route's semantic role, matcher and action, such as
-`metadata(url_suffix("ImageProperties.xml")).decode(properties)`. Keep viewer
+`metadata(file_name("ImageProperties.xml")).decode(properties)`. Keep viewer
 entry points distinct from metadata resources and direct image URLs. Roles and
 matchers provide [specificity defaults](../crates/dezoomify/src/core/discovery.rs);
 explicit matcher overrides take precedence. Mark weak evidence, such as ordinary
@@ -23,8 +23,9 @@ discovery shares reads and schedules the continuation.
 
 Declare openable file extensions with `FormatSpec::with_file_extensions` and
 any opening instructions with `with_file_help`. Source-file pickers reuse these
-declarations. They do not change discovery matching or fetch priorities; keep
-remote URL evidence in the routes.
+declarations. Extension hints do not change discovery matching or fetch priorities.
+For fixed filenames, use the `file_name` route matcher: discovery enforces an exact
+basename, and pickers derive their labels and extension filters from that route.
 
 Decoding and metadata parsing designate the decoded resource as canonical by
 default. That URL must be able to reconstruct the image or catalog on its own.

@@ -100,7 +100,7 @@ pub fn on_menu_event(app: &AppHandle, event: MenuEvent) {
     let registry = default_registry();
     let extensions = registry
         .file_formats()
-        .flat_map(|format| format.file_extensions().iter().copied())
+        .flat_map(|format| format.file_filter_extensions())
         .collect::<std::collections::BTreeSet<_>>()
         .into_iter()
         .collect::<Vec<_>>();
@@ -123,7 +123,14 @@ pub fn on_menu_event(app: &AppHandle, event: MenuEvent) {
         .set_title(title)
         .add_filter("Image sources", &extensions);
     for format in registry.file_formats() {
-        dialog = dialog.add_filter(format.display_name(), format.file_extensions());
+        let names = format.file_names().collect::<Vec<_>>();
+        let label = if names.is_empty() {
+            format.display_name().to_owned()
+        } else {
+            format!("{} ({})", format.display_name(), names.join(", "))
+        };
+        let extensions = format.file_filter_extensions().collect::<Vec<_>>();
+        dialog = dialog.add_filter(label, &extensions);
     }
     dialog
         .add_filter("All files", &["*"])
