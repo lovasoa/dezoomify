@@ -17,7 +17,7 @@ macro_rules! host_members {
             /// is unspecified. The core owns retries, pacing, and backoff; hosts perform
             /// individual attempts and own I/O, decoding, and output resources.
             ///
-            /// On success or error, the core awaits `settle` after its other calls
+            /// On success or error, `dezoomify` awaits `settle` after its other calls
             /// have returned or their futures have been dropped. Hosts must track
             /// work that outlives those futures. Signal cancellation through the host
             /// and await the job; dropping a Rust job future skips this cleanup.

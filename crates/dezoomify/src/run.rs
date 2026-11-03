@@ -31,52 +31,129 @@ pub async fn dezoomify(
 }
 
 async fn run(inputs: Vec<JobInput>, options: &Options, host: &impl Host) -> Result<Output, Error> {
-    validate(&inputs, options)?;
-    host.checkpoint(Gate::Cancellation).await?;
-    host.report(Progress {
-        total: None,
-        ..Default::default()
-    });
-    let followed = RefCell::new(
-        inputs
-            .iter()
-            .filter(|input| input.kind.unwrap_or_default() == DiscoveryInputKind::Source)
-            .map(|input| input.url.clone())
-            .collect(),
-    );
-    let catalog = discover(inputs, options, host, &followed).await?;
-    let (image, level) = select(catalog, options, host, &followed).await?;
-    let mut progress = Progress {
-        phase: ProgressPhase::Planning,
-        source_format: Some(image.format.into()),
-        source_url: image.source_url.clone(),
-        title: image.title.clone(),
-        selected: image.levels[level].source.image_size().map(size),
-        maximum: image
-            .levels
-            .iter()
-            .filter_map(|level| level.source.image_size())
-            .max_by_key(|size| size.area())
-            .map(size),
-        completed: 0,
-        total: None,
-        preparation: None,
-    };
-    host.report(progress.clone());
-    host.checkpoint(Gate::Cancellation).await?;
-    let plan = prepare_plan(&image, level, options, host).await?;
-    let canvas = plan.canvas.clone();
-    let reused_tiles = acquire_plan(plan, host, options, &mut progress).await?;
-    host.checkpoint(Gate::Acquisition).await?;
-    progress.phase = ProgressPhase::Output;
-    host.report(progress);
-    host.finish(FinishRequest {
-        canvas,
-        format: options.output,
-        title: image.title,
-        reused_tiles,
-    })
-    .await
+    let (mut job, mut catalog) = Job::start(inputs, options, host).await?;
+    loop {
+        host.checkpoint(Gate::Cancellation).await?;
+        if catalog.is_empty() {
+            return Err(empty_plan());
+        }
+        let index = host.choose_image(catalog.public_catalog()).await? as usize;
+        let Some(entry) = catalog.into_entries().into_iter().nth(index) else {
+            return Err(Error::InvalidState(
+                "image selection is out of range".to_string().into(),
+            ));
+        };
+        match entry {
+            DiscoveredEntry::Deferred(resource) => catalog = job.follow(resource, host).await?,
+            DiscoveredEntry::Ready(image) => return job.download(image, host).await,
+        }
+    }
+}
+
+/// Branch-local discovery ancestry under a borrowed, validated policy.
+/// Clone before following sibling entries; each branch then has its own cycle
+/// and depth checks. Staged operations leave settlement to the caller: retain
+/// the discovery host and source capabilities until their final use, then await
+/// [`Host::settle`] on success, failure, or cancellation.
+#[derive(Clone)]
+pub struct Job<'a> {
+    options: &'a Options,
+    followed: RefCell<HashSet<String>>,
+    remaining_follows: u32,
+}
+
+impl<'a> Job<'a> {
+    /// Validate initial inputs and policy, then discover their ordered catalog.
+    pub async fn start(
+        inputs: Vec<JobInput>,
+        options: &'a Options,
+        host: &impl Host,
+    ) -> Result<(Self, DiscoveryCatalog), Error> {
+        validate(&inputs, options)?;
+        host.checkpoint(Gate::Cancellation).await?;
+        host.report(Progress {
+            total: None,
+            ..Default::default()
+        });
+        let job = Self {
+            options,
+            followed: RefCell::new(
+                inputs
+                    .iter()
+                    .filter(|input| input.kind.unwrap_or_default() == DiscoveryInputKind::Source)
+                    .map(|input| input.url.clone())
+                    .collect(),
+            ),
+            remaining_follows: options.max_deferred_follows,
+        };
+        let catalog = job.discover(inputs, host).await?;
+        Ok((job, catalog))
+    }
+
+    /// Resolve a deferred entry from this branch without selecting its children.
+    /// An attempted fetch advances ancestry; retain a clone to retry that branch.
+    pub async fn follow(
+        &mut self,
+        resource: core::DeferredResource,
+        host: &impl Host,
+    ) -> Result<DiscoveryCatalog, Error> {
+        if self.remaining_follows == 0 || !self.followed.borrow_mut().insert(resource.uri.clone()) {
+            return Err(Error::DeferredLimit {
+                max: self.options.max_deferred_follows,
+            });
+        }
+        self.remaining_follows -= 1;
+        self.discover(vec![JobInput::new(&resource.uri)], host)
+            .await
+    }
+
+    /// Choose a resolution and save an exact image descriptor from this job's
+    /// discovery. Supply a fresh output host with access to its source capabilities;
+    /// await [`Host::settle`] after every result, including failure or cancellation.
+    pub async fn download(
+        &self,
+        image: core::ResolvedImage,
+        host: &impl Host,
+    ) -> Result<Output, Error> {
+        let options = self.options;
+        let level = host.choose_level((&image).into()).await? as usize;
+        if level >= image.levels.len() {
+            return Err(Error::InvalidState(
+                "level selection is out of range".into(),
+            ));
+        }
+        let mut progress = Progress {
+            phase: ProgressPhase::Planning,
+            source_format: Some(image.format.into()),
+            source_url: image.source_url.clone(),
+            title: image.title.clone(),
+            selected: image.levels[level].source.image_size().map(size),
+            maximum: image
+                .levels
+                .iter()
+                .filter_map(|level| level.source.image_size())
+                .max_by_key(|size| size.area())
+                .map(size),
+            completed: 0,
+            total: None,
+            preparation: None,
+        };
+        host.report(progress.clone());
+        host.checkpoint(Gate::Cancellation).await?;
+        let plan = prepare_plan(&image, level, options, host).await?;
+        let canvas = plan.canvas.clone();
+        let reused_tiles = acquire_plan(plan, host, options, &mut progress).await?;
+        host.checkpoint(Gate::Acquisition).await?;
+        progress.phase = ProgressPhase::Output;
+        host.report(progress);
+        host.finish(FinishRequest {
+            canvas,
+            format: options.output,
+            title: image.title,
+            reused_tiles,
+        })
+        .await
+    }
 }
 
 struct AcquisitionPlan {
@@ -257,218 +334,143 @@ async fn acquire_plan(
     Ok(reused_tiles)
 }
 
-async fn discover(
-    inputs: Vec<JobInput>,
-    options: &Options,
-    host: &impl Host,
-    followed: &RefCell<HashSet<String>>,
-) -> Result<DiscoveryCatalog, Error> {
-    let registry = match options.format.as_deref() {
-        None | Some("auto") => core::default_registry(),
-        Some(format) => core::registry_for(format).ok_or_else(|| Error::UnknownFormat {
-            format: format.to_string(),
-        })?,
-    };
-    let catalog = registry
-        .discover(
-            inputs.into_iter().map(DiscoveryInput::from).collect(),
-            DiscoveryLimits {
-                concurrent: options.max_concurrent as usize,
-                ..Default::default()
-            },
-            |request, interaction| fetch_metadata(request, interaction, options, host, followed),
-            |query| host.parse_html(query),
-            |interaction| async move {
-                host.checkpoint(Gate::Cancellation).await?;
-                Ok(host
-                    .observe(interaction)
-                    .await?
-                    .into_iter()
-                    .map(DiscoveryInput::from)
-                    .collect())
-            },
-        )
-        .await
-        .map_err(discovery_failure)?;
-    let mut seen = HashSet::new();
-    for entry in catalog.entries() {
-        let (warnings, levels) = match entry {
-            DiscoveredEntry::Ready(image) => (image.warnings.as_slice(), image.levels.as_slice()),
-            DiscoveredEntry::Deferred(resource) => (resource.warnings.as_slice(), &[][..]),
+impl Job<'_> {
+    async fn discover(
+        &self,
+        inputs: Vec<JobInput>,
+        host: &impl Host,
+    ) -> Result<DiscoveryCatalog, Error> {
+        let registry = match self.options.format.as_deref() {
+            None | Some("auto") => core::default_registry(),
+            Some(format) => core::registry_for(format).ok_or_else(|| Error::UnknownFormat {
+                format: format.to_string(),
+            })?,
         };
-        for warning in warnings
-            .iter()
-            .chain(levels.iter().flat_map(|level| &level.warnings))
-        {
-            if seen.insert(warning) {
-                host.warn(warning.clone());
-            }
-        }
-    }
-    Ok(catalog)
-}
-
-async fn fetch_metadata(
-    request: core::Request,
-    interaction: Interaction,
-    options: &Options,
-    host: &impl Host,
-    followed: &RefCell<HashSet<String>>,
-) -> Result<ResourceRead, Error> {
-    host.checkpoint(Gate::Cancellation).await?;
-    let uri = request.uri.clone();
-    let result = host
-        .fetch(
-            ResourceRequest {
-                uri: request.uri,
-                headers: request.headers,
-                purpose: RequestPurpose::Metadata,
-            },
-            interaction,
-        )
-        .await
-        .map_err(|error| match error {
-            Error::Resource { .. } => error,
-            other => other.resource(uri.clone(), ResourceKind::Metadata),
-        })?;
-    if let ResourceRead::Response { response } = &result {
-        if let Some(final_uri) = response.final_uri.as_ref().filter(|uri| !uri.is_empty()) {
-            let mut followed = followed.borrow_mut();
-            if followed.contains(&uri) {
-                followed.insert(final_uri.clone());
-            }
-        }
-        let read = response
-            .final_uri
-            .as_deref()
-            .filter(|uri| !uri.is_empty())
-            .unwrap_or(&uri)
-            .to_string();
-        if response.bytes.is_empty() {
-            return Err(Error::EmptyResource.resource(read, ResourceKind::Metadata));
-        }
-        if u64::try_from(response.bytes.len()).unwrap_or(u64::MAX) > options.max_bytes {
-            return Err(Error::ResourceLimit(
-                format!("metadata resource exceeds max_bytes {}", options.max_bytes).into(),
+        let catalog = registry
+            .discover(
+                inputs.into_iter().map(DiscoveryInput::from).collect(),
+                DiscoveryLimits {
+                    concurrent: self.options.max_concurrent as usize,
+                    ..Default::default()
+                },
+                |request, interaction| self.fetch_metadata(request, interaction, host),
+                |query| host.parse_html(query),
+                |interaction| async move {
+                    host.checkpoint(Gate::Cancellation).await?;
+                    Ok(host
+                        .observe(interaction)
+                        .await?
+                        .into_iter()
+                        .map(DiscoveryInput::from)
+                        .collect())
+                },
             )
-            .resource(read, ResourceKind::Metadata));
+            .await
+            .map_err(discovery_failure)?;
+        let mut seen = HashSet::new();
+        for entry in catalog.entries() {
+            let (warnings, levels) = match entry {
+                DiscoveredEntry::Ready(image) => {
+                    (image.warnings.as_slice(), image.levels.as_slice())
+                }
+                DiscoveredEntry::Deferred(resource) => (resource.warnings.as_slice(), &[][..]),
+            };
+            for warning in warnings
+                .iter()
+                .chain(levels.iter().flat_map(|level| &level.warnings))
+            {
+                if seen.insert(warning) {
+                    host.warn(warning.clone());
+                }
+            }
         }
+        Ok(catalog)
     }
-    Ok(result)
+
+    async fn fetch_metadata(
+        &self,
+        request: core::Request,
+        interaction: Interaction,
+        host: &impl Host,
+    ) -> Result<ResourceRead, Error> {
+        host.checkpoint(Gate::Cancellation).await?;
+        let uri = request.uri.clone();
+        let result = host
+            .fetch(
+                ResourceRequest {
+                    uri: request.uri,
+                    headers: request.headers,
+                    purpose: RequestPurpose::Metadata,
+                },
+                interaction,
+            )
+            .await
+            .map_err(|error| match error {
+                Error::Resource { .. } => error,
+                other => other.resource(uri.clone(), ResourceKind::Metadata),
+            })?;
+        if let ResourceRead::Response { response } = &result {
+            if let Some(final_uri) = response.final_uri.as_ref().filter(|uri| !uri.is_empty()) {
+                let mut followed = self.followed.borrow_mut();
+                if followed.contains(&uri) {
+                    followed.insert(final_uri.clone());
+                }
+            }
+            let read = response
+                .final_uri
+                .as_deref()
+                .filter(|uri| !uri.is_empty())
+                .unwrap_or(&uri)
+                .to_string();
+            if response.bytes.is_empty() {
+                return Err(Error::EmptyResource.resource(read, ResourceKind::Metadata));
+            }
+            if u64::try_from(response.bytes.len()).unwrap_or(u64::MAX) > self.options.max_bytes {
+                return Err(Error::ResourceLimit(
+                    format!(
+                        "metadata resource exceeds max_bytes {}",
+                        self.options.max_bytes
+                    )
+                    .into(),
+                )
+                .resource(read, ResourceKind::Metadata));
+            }
+        }
+        Ok(result)
+    }
 }
 
 fn discovery_failure(error: core::DiscoveryError) -> Error {
-    match error {
-        core::DiscoveryError::Host(error) => *error,
-        error => {
-            // A document some format parsed as an empty image is
-            // `no-image-found`; an unparseable or unrecognized document
-            // is `malformed-metadata`/`discovery-failed`. When every
-            // candidate failed on observed fetch facts, the first typed
-            // cause stays attached: its context and retry verdict are
-            // the authoritative ones.
-            let cause = match &error {
-                core::DiscoveryError::NoCandidateAccepted { diagnostics }
-                    if diagnostics.iter().all(|diagnostic| {
-                        matches!(
-                            diagnostic.kind,
-                            core::RejectionKind::FetchFailed | core::RejectionKind::DidNotMatchUrl
-                        )
-                    }) =>
-                {
-                    diagnostics
-                        .iter()
-                        .find_map(|diagnostic| diagnostic.cause.clone())
-                }
-                _ => None,
-            };
-            let detail = Some(error.detail());
-            let empty_image = matches!(
-                &error,
-                core::DiscoveryError::Rejected {
-                    kind: core::RejectionKind::NoImage,
-                    ..
-                }
-            ) || matches!(&error, core::DiscoveryError::NoCandidateAccepted { diagnostics }
-            if diagnostics.iter().any(|diagnostic| {
-                diagnostic.kind == core::RejectionKind::NoImage
-            }));
-            let malformed = matches!(
-                &error,
-                core::DiscoveryError::InvalidMetadata(_)
-                    | core::DiscoveryError::Rejected {
-                        kind: core::RejectionKind::InvalidMetadata,
-                        ..
-                    }
-            ) || matches!(&error, core::DiscoveryError::NoCandidateAccepted { diagnostics }
-            if !diagnostics.is_empty()
-                && diagnostics.iter().any(|diagnostic| {
-                    diagnostic.kind == core::RejectionKind::InvalidMetadata
-                }));
-            match &error {
-                core::DiscoveryError::ResourceLimitExceeded => Error::ResourceLimit(Failure {
-                    request: None,
-                    detail,
-                }),
-                _ if empty_image => Error::NoImageFound(Failure {
-                    request: None,
-                    detail,
-                }),
-                _ if cause.is_none() && malformed => Error::MalformedMetadata(Failure {
-                    request: None,
-                    detail,
-                }),
-                _ => Error::DiscoveryFailed {
-                    failure: Failure {
-                        request: None,
-                        detail,
-                    },
-                    cause,
-                },
-            }
-        }
+    use core::{DiscoveryError as D, RejectionKind as R};
+    if let D::Host(error) = error {
+        return *error;
     }
-}
-
-async fn select(
-    mut catalog: DiscoveryCatalog,
-    options: &Options,
-    host: &impl Host,
-    followed: &RefCell<HashSet<String>>,
-) -> Result<(core::ResolvedImage, usize), Error> {
-    let mut remaining_follows = options.max_deferred_follows;
-    loop {
-        host.checkpoint(Gate::Cancellation).await?;
-        if catalog.is_empty() {
-            return Err(empty_plan());
+    // Empty images take precedence over malformed metadata. Preserve the first
+    // typed cause only when every candidate declined or failed on fetch facts.
+    let (empty, malformed, cause) = match &error {
+        D::NoCandidateAccepted { diagnostics } => {
+            let has = |kind| diagnostics.iter().any(|diagnostic| diagnostic.kind == kind);
+            let transport_only = diagnostics
+                .iter()
+                .all(|diagnostic| matches!(diagnostic.kind, R::FetchFailed | R::DidNotMatchUrl));
+            let cause = transport_only
+                .then(|| diagnostics.iter().find_map(|d| d.cause.clone()))
+                .flatten();
+            (has(R::NoImage), has(R::InvalidMetadata), cause)
         }
-        let index = host.choose_image(catalog.public_catalog()).await? as usize;
-        let Some(entry) = catalog.into_entries().into_iter().nth(index) else {
-            return Err(Error::InvalidState(
-                "image selection is out of range".to_string().into(),
-            ));
-        };
-        match entry {
-            DiscoveredEntry::Deferred(resource) => {
-                if remaining_follows == 0 || !followed.borrow_mut().insert(resource.uri.clone()) {
-                    return Err(Error::DeferredLimit {
-                        max: options.max_deferred_follows,
-                    });
-                }
-                remaining_follows -= 1;
-                catalog =
-                    discover(vec![JobInput::new(&resource.uri)], options, host, followed).await?;
-            }
-            DiscoveredEntry::Ready(image) => {
-                let level = host.choose_level((&image).into()).await? as usize;
-                if level >= image.levels.len() {
-                    return Err(Error::InvalidState(
-                        "level selection is out of range".to_string().into(),
-                    ));
-                }
-                return Ok((image, level));
-            }
-        }
+        D::Rejected { kind, .. } => (*kind == R::NoImage, *kind == R::InvalidMetadata, None),
+        D::InvalidMetadata(_) => (false, true, None),
+        _ => (false, false, None),
+    };
+    let failure = Failure {
+        detail: Some(error.detail()),
+        ..Default::default()
+    };
+    match error {
+        D::ResourceLimitExceeded => Error::ResourceLimit(failure),
+        _ if empty => Error::NoImageFound(failure),
+        _ if cause.is_none() && malformed => Error::MalformedMetadata(failure),
+        _ => Error::DiscoveryFailed { failure, cause },
     }
 }
 
