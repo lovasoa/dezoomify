@@ -6,11 +6,11 @@ use std::sync::LazyLock;
 use regex::Regex;
 use url::Url;
 
-use crate::core::discovery::{url_matches, viewer};
+use crate::core::discovery::{Specificity::High, url_matches, viewer};
 use crate::core::{DiscoveryError, DiscoveryRoute, Request};
 
-pub(super) const ROUTE: DiscoveryRoute = viewer(url_matches(|uri| info(uri).is_some()))
-    .resolve_metadata(|uri| {
+pub(super) const ROUTE: DiscoveryRoute =
+    viewer(url_matches(|uri| info(uri).is_some()).specificity(High)).resolve_metadata(|uri| {
         info(uri).ok_or_else(|| DiscoveryError::InvalidMetadata("invalid Gallica ARK URL".into()))
     });
 

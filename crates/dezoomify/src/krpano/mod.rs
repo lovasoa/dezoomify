@@ -13,7 +13,9 @@ use krpano_decrypt::{decrypt_xml, is_encrypted_xml};
 use krpano_metadata::{KrpanoMetadata, XY, all_sides};
 
 use crate::Vec2d;
-use crate::core::discovery::{any, html_matches, js_matches, metadata, url_suffix, viewer};
+use crate::core::discovery::{
+    Specificity::Medium, any, html_matches, js_matches, metadata, url_suffix, viewer,
+};
 use crate::core::resolve_relative;
 use crate::core::{
     CatalogPlan, DiscoveryCatalog, DiscoveryContext, DiscoveryError, DiscoveryResource,
@@ -40,10 +42,10 @@ static HTML_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
 
 const ROUTES: &[DiscoveryRoute] = &[
     metadata(url_suffix("/tiles.xml")).decode(handle_xml),
-    metadata(url_suffix("/tour.xml")).decode(handle_xml),
+    metadata(url_suffix("/tour.xml").specificity(Medium)).decode(handle_xml),
     metadata(any()).try_decode(try_xml),
-    viewer(html_matches(&HTML_RE)).decode(handle_html),
-    viewer(js_matches(&VIEWER_JS_RE)).decode(handle_viewer_js),
+    viewer(html_matches(&HTML_RE).specificity(Medium)).decode(handle_html),
+    viewer(js_matches(&VIEWER_JS_RE).specificity(Medium)).decode(handle_viewer_js),
 ];
 
 pub const SPEC: FormatSpec = FormatSpec::new("krpano", ROUTES)

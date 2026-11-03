@@ -8,7 +8,10 @@ use serde::Deserialize;
 use url::Url;
 
 use crate::Vec2d;
-use crate::core::discovery::{metadata, resource_matches, url_matches, viewer};
+use crate::core::discovery::{
+    Specificity::{Low, Medium},
+    metadata, resource_matches, url_matches, viewer,
+};
 use crate::core::{
     DiscoveryError, DiscoveryResource, DiscoveryRoute, FormatSpec, ImagePlan, ParsedResource,
     Request, ResolvedLevel, image_title,
@@ -28,15 +31,18 @@ static FILES_ARRAY_RE: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 const ROUTES: &[DiscoveryRoute] = &[
-    metadata(url_matches(is_ecw_url)).decode(decode),
-    metadata(url_matches(|uri| {
-        crate::core::uri::parse_uri(uri).is_ok_and(|url| url.path().contains("imagesize/"))
-    }))
+    metadata(url_matches(is_ecw_url).specificity(Medium)).decode(decode),
+    metadata(
+        url_matches(|uri| {
+            crate::core::uri::parse_uri(uri).is_ok_and(|url| url.path().contains("imagesize/"))
+        })
+        .specificity(Low),
+    )
     .decode(decode),
-    viewer(url_matches(is_hungaricana_url)).decode(follow_layer),
-    viewer(resource_matches(|resource| {
-        LAYER_URL_RE.is_match(&resource.text_lossy())
-    }))
+    viewer(url_matches(is_hungaricana_url).specificity(Low)).decode(follow_layer),
+    viewer(
+        resource_matches(|resource| LAYER_URL_RE.is_match(&resource.text_lossy())).specificity(Low),
+    )
     .decode(follow_layer),
 ];
 

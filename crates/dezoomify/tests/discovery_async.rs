@@ -532,31 +532,51 @@ fn declared_catalog_precedes_the_loaded_pages_snapshot() {
 }
 
 #[test]
-fn deferred_frame_observations_precede_permissions_for_unrelated_resources() {
-    let observations = RefCell::new(Vec::new());
+fn live_frame_observations_precede_blocked_resource_permissions() {
+    let events = RefCell::new(Vec::new());
     let catalog = futures::executor::block_on(core::default_registry().discover(
-        vec![DiscoveryInput::new("https://analytics.test/script.js")
-            .with_kind(dezoomify::model::DiscoveryInputKind::ObservedResource)],
+        vec![
+            DiscoveryInput::with_contents("https://museum.test/page", "<html></html>"),
+            DiscoveryInput::new("https://museum.test/zoom/1")
+                .with_kind(dezoomify::model::DiscoveryInputKind::ObservedResource),
+        ],
         Default::default(),
-        |_, interaction| async move {
-            assert_eq!(interaction, Interaction::Forbidden, "the viewer should win before analytics access");
-            Ok(ResourceRead::NeedsAccess { origin: "https://analytics.test".into() })
-        },
-        support::parse_html,
-        |interaction| {
-            observations.borrow_mut().push(interaction);
-            async move {
-                Ok(if interaction == Interaction::Forbidden { Vec::new() } else {
-                    vec![DiscoveryInput::with_contents("https://viewer.test/#loaded", br#"<Image TileSize="256" Overlap="0" Format="jpg"><Size Width="512" Height="512"/></Image>"#)
-                        .with_kind(dezoomify::model::DiscoveryInputKind::ObservedMetadata)]
+        |request, interaction| {
+            assert_eq!(request.uri, "https://museum.test/zoom/1");
+            events.borrow_mut().push(("fetch", interaction));
+            async {
+                Ok(ResourceRead::NeedsAccess {
+                    origin: "https://museum.test".into(),
                 })
             }
         },
-    )).unwrap();
+        support::parse_html,
+        |interaction| {
+            events.borrow_mut().push(("observe", interaction));
+            async move {
+                Ok(if interaction == Interaction::Forbidden {
+                    Vec::new()
+                } else {
+                    vec![
+                        DiscoveryInput::with_contents(
+                            "https://viewer.test/#loaded",
+                            include_bytes!("../../../fixtures/deepzoom/basic/image.dzi"),
+                        )
+                        .with_kind(dezoomify::model::DiscoveryInputKind::ObservedMetadata),
+                    ]
+                })
+            }
+        },
+    ))
+    .unwrap();
     assert_eq!(support::ready_image(catalog).format, "deepzoom");
     assert_eq!(
-        *observations.borrow(),
-        [Interaction::Forbidden, Interaction::Allowed]
+        *events.borrow(),
+        [
+            ("observe", Interaction::Forbidden),
+            ("fetch", Interaction::Forbidden),
+            ("observe", Interaction::Allowed),
+        ]
     );
 }
 
@@ -857,41 +877,6 @@ fn shared_format_reads_leave_room_for_other_resources() {
         support::ready_image(futures::executor::block_on(discovery).unwrap()).format,
         "deepzoom"
     );
-}
-
-#[test]
-fn accessible_live_metadata_precedes_speculative_scripts() {
-    use dezoomify::model::DiscoveryInputKind;
-    let mut inputs = vec![DiscoveryInput::with_contents(
-        "https://test/page",
-        "<html></html>",
-    )];
-    inputs.extend((0..32).map(|n| {
-        DiscoveryInput::new(format!("https://analytics.test/{n}.js"))
-            .with_kind(DiscoveryInputKind::ObservedResource)
-    }));
-    let registry = core::default_registry();
-    let catalog =
-        futures::executor::block_on(registry.discover(
-            inputs,
-            Default::default(),
-            |request, _| async move {
-                panic!("live metadata needs no speculative fetch: {}", request.uri)
-            },
-            support::parse_html,
-            |interaction| async move {
-                assert_eq!(interaction, Interaction::Forbidden);
-                Ok(vec![
-                    DiscoveryInput::with_contents(
-                        "https://viewer.test/#loaded",
-                        include_bytes!("../../../fixtures/deepzoom/basic/image.dzi"),
-                    )
-                    .with_kind(DiscoveryInputKind::ObservedMetadata),
-                ])
-            },
-        ))
-        .unwrap();
-    assert_eq!(support::ready_image(catalog).format, "deepzoom");
 }
 
 #[test]

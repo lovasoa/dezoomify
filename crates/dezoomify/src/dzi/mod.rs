@@ -7,8 +7,9 @@ use regex::{Regex, bytes::Regex as BytesRegex};
 
 use crate::Vec2d;
 use crate::core::discovery::{
-    Metadata, Specificity::Low, any, css, image_url, js_matches, metadata, url_matches, viewer,
-    xml_metadata,
+    Metadata,
+    Specificity::{High, Low},
+    any, css, image_url, js_matches, metadata, url_matches, viewer, xml_metadata,
 };
 use crate::core::{
     CatalogPlan, DiscoveryError, DiscoveryResource, DiscoveryRoute, FormatSpec, Grid, ImagePlan,
@@ -36,13 +37,13 @@ const ROUTES: &[DiscoveryRoute] = &[
     image_url(is_tile_url)
         .resolve_metadata(tile_metadata)
         .then_decode(decode_catalog),
-    viewer(url_matches(is_bl_viewer_url))
+    viewer(url_matches(is_bl_viewer_url).specificity(High))
         .resolve_metadata(bl_metadata)
         .then_decode(decode_catalog),
-    viewer(url_matches(is_nla_view_url))
+    viewer(url_matches(is_nla_view_url).specificity(High))
         .resolve_metadata(nla_metadata)
         .then_decode(decode_catalog),
-    viewer(url_matches(is_polona_item_url)).decode(follow_polona_json),
+    viewer(url_matches(is_polona_item_url).specificity(High)).decode(follow_polona_json),
     metadata(url_matches(is_polona_json_url))
         .decode(follow_polona_dzi)
         .non_canonical(),
@@ -67,6 +68,12 @@ pub const SPEC: FormatSpec =
 
 fn is_tile_url(input: &str) -> bool {
     TILE_URL.is_match(input)
+        && crate::core::uri::parse_uri(input).is_ok_and(|url| {
+            TILE_URL.is_match(url.path())
+                || url
+                    .query_pairs()
+                    .any(|(key, value)| key == "filename" && TILE_URL.is_match(&value))
+        })
 }
 
 fn is_dzi_url(input: &str) -> bool {
@@ -77,9 +84,6 @@ fn is_dzi_url(input: &str) -> bool {
                 .any(|(key, value)| key == "filename" && value.ends_with(".dzi"))
     })
 }
-
-static POLONA_ITEM_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"polona\.pl/item/\d+/").expect("constant Polona item pattern"));
 
 static DZI_LINK_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
     BytesRegex::new(
@@ -147,7 +151,14 @@ fn tile_metadata(input: &str) -> Result<Request, DiscoveryError> {
 }
 
 fn is_bl_viewer_url(uri: &str) -> bool {
-    uri.contains("bl.uk/manuscripts/Viewer.aspx")
+    crate::core::uri::parse_uri(uri).is_ok_and(|url| {
+        url.host_str()
+            .is_some_and(|host| host == "bl.uk" || host.ends_with(".bl.uk"))
+            && url.path() == "/manuscripts/Viewer.aspx"
+            && url
+                .query_pairs()
+                .any(|(name, value)| name == "ref" && !value.is_empty())
+    })
 }
 
 #[allow(clippy::unnecessary_wraps)]
@@ -163,7 +174,11 @@ fn bl_metadata(input: &str) -> Result<Request, DiscoveryError> {
 }
 
 fn is_polona_item_url(uri: &str) -> bool {
-    POLONA_ITEM_RE.is_match(uri)
+    crate::core::uri::parse_uri(uri).is_ok_and(|url| {
+        matches!(url.host_str(), Some("polona.pl" | "www.polona.pl"))
+            && matches!(url.path_segments().map(Iterator::collect::<Vec<_>>).as_deref(),
+                Some(["item", id, _, ..]) if id.parse::<u64>().is_ok())
+    })
 }
 
 fn is_nla_view_url(uri: &str) -> bool {
@@ -184,7 +199,14 @@ fn nla_metadata(input: &str) -> Result<Request, DiscoveryError> {
 }
 
 fn is_polona_json_url(uri: &str) -> bool {
-    uri.contains("polona.pl/resources/item/") && uri.contains("format=json")
+    crate::core::uri::parse_uri(uri).is_ok_and(|url| {
+        matches!(url.host_str(), Some("polona.pl" | "www.polona.pl"))
+            && matches!(url.path().trim_end_matches('/').split('/').collect::<Vec<_>>().as_slice(),
+                ["", "resources", "item", id] if id.parse::<u64>().is_ok())
+            && url
+                .query_pairs()
+                .any(|(name, value)| name == "format" && value == "json")
+    })
 }
 
 fn follow_polona_json(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {

@@ -13,8 +13,8 @@ use regex::{Regex, bytes::Regex as BytesRegex};
 
 use crate::Vec2d;
 use crate::core::discovery::{
-    Specificity::Low, any, css, image_url, js_matches, metadata, resource_matches, url_matches,
-    url_suffix, viewer,
+    Specificity::{High, Low},
+    any, css, image_url, js_matches, metadata, resource_matches, url_matches, url_suffix, viewer,
 };
 use crate::core::{
     CatalogPlan, DiscoveryError, DiscoveryRoute, FormatSpec, ImagePlan, ParsedResource, Request,
@@ -30,7 +30,8 @@ const ROUTES: &[DiscoveryRoute] = &[
     viewer(any()).try_decode(inline_catalog),
     viewer(resource_matches(contains_zoomify_declaration)).decode(extract_image_properties_url),
     viewer(js_matches(&FLUID_ACCESS_RE).specificity(Low)).decode(extract_fluid_catalog),
-    viewer(url_matches(is_unibe_page)).regex_file(&UNIBE_URL_RE, "ImageProperties.xml"),
+    viewer(url_matches(is_unibe_page).specificity(High))
+        .regex_file(&UNIBE_URL_RE, "ImageProperties.xml"),
     viewer(css(".ete-openlayers-src")).text_file("ImageProperties.xml"),
     ngv::ROUTE,
     viewer(css("url").specificity(Low)).text_file("ImageProperties.xml"),
@@ -117,6 +118,12 @@ static TILE_URL_RE: LazyLock<Regex> = LazyLock::new(|| {
 
 fn is_tile_url(uri: &str) -> bool {
     TILE_URL_RE.is_match(uri)
+        && crate::core::uri::parse_uri(uri).is_ok_and(|url| {
+            TILE_URL_RE.is_match(url.path())
+                || url
+                    .query_pairs()
+                    .any(|(key, value)| key == "filename" && TILE_URL_RE.is_match(&value))
+        })
 }
 
 fn extract_image_properties_url(
@@ -250,7 +257,9 @@ fn extract_fluid_catalog(
 }
 
 fn is_unibe_page(uri: &str) -> bool {
-    uri.contains("biblio.unibe.ch/web-apps/maps/zoomify.php")
+    Url::parse(uri).is_ok_and(|url| {
+        url.host_str() == Some("biblio.unibe.ch") && url.path() == "/web-apps/maps/zoomify.php"
+    })
 }
 
 /// Scheme + authority of a URI for site-root service URLs.

@@ -5,7 +5,7 @@ use std::sync::LazyLock;
 use regex::{Regex, bytes::Regex as BytesRegex};
 
 use crate::Vec2d;
-use crate::core::discovery::{css, metadata, url_matches, viewer};
+use crate::core::discovery::{Specificity::Medium, css, metadata, url_matches, viewer};
 use crate::core::{
     DiscoveryError, DiscoveryResource, DiscoveryRoute, FormatSpec, ImagePlan, ParsedResource,
     Request, ResolvedLevel, image_title,
@@ -21,12 +21,14 @@ static SERVER_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
     .expect("constant FSI server pattern")
 });
 const ROUTES: &[DiscoveryRoute] = &[
-    metadata(url_matches(is_server_url))
+    metadata(url_matches(is_server_url).specificity(Medium))
         .resolve_metadata(metadata_url)
         .then_decode(decode),
-    viewer(css("[src*=\"/server\"][src*=\"source=\" i]")).follow_attribute("src"),
-    viewer(css("[href*=\"/server\"][href*=\"source=\" i]")).follow_attribute("href"),
-    DiscoveryRoute::regex_link(&SERVER_RE, "$server"),
+    viewer(css("[src*=\"/server\"][src*=\"source=\" i]").specificity(Medium))
+        .follow_attribute("src"),
+    viewer(css("[href*=\"/server\"][href*=\"source=\" i]").specificity(Medium))
+        .follow_attribute("href"),
+    DiscoveryRoute::regex_link(&SERVER_RE, "$server").specificity(Medium),
 ];
 
 pub const SPEC: FormatSpec = FormatSpec::new("fsi", ROUTES)
@@ -34,8 +36,11 @@ pub const SPEC: FormatSpec = FormatSpec::new("fsi", ROUTES)
     .html_queries(&["property[width][value]", "property[height][value]"]);
 
 fn is_server_url(uri: &str) -> bool {
-    uri.split_once('?').is_some_and(|(path, query)| {
-        path.trim_end_matches('/').ends_with("/server") && SOURCE_RE.is_match(query)
+    crate::core::uri::parse_uri(uri).is_ok_and(|url| {
+        url.path().trim_end_matches('/').ends_with("/server")
+            && url
+                .query_pairs()
+                .any(|(key, value)| key.eq_ignore_ascii_case("source") && !value.is_empty())
     })
 }
 

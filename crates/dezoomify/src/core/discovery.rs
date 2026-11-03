@@ -299,8 +299,8 @@ pub enum Specificity {
     Low,
 }
 
-/// A matcher with a constructor-specific default strength. Override broad
-/// exceptions explicitly rather than inferring strength from selector syntax.
+/// A matcher with a constructor-specific default strength. Override unusually
+/// distinctive or ambiguous evidence explicitly, independently of resource role.
 /// URL evidence defaults to High for metadata/images and Medium for viewers.
 /// CSS/content regexes default to High and custom content predicates to Medium.
 /// Wildcards add no evidence; successful schema decoders retain caller evidence.

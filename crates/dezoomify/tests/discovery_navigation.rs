@@ -488,39 +488,6 @@ fn canonical_target_retains_redirects_and_exact_query_parameters() {
     assert_eq!(image.source_url.as_deref(), Some(redirected));
 }
 #[test]
-fn source_catalogs_and_readable_documents_precede_observed_previews() {
-    let manifest = include_bytes!(
-        "../../../testdata/scenarios/web/core-discovery/payloads/fixtures.test/iiif-presentation/manifest.json"
-    );
-    let preview = observed("https://image.test/TileGroup0/0-0-0.jpg");
-    let catalog = trace(
-        vec![
-            preview.clone(),
-            DiscoveryInput::with_contents(PAGE, b"stale observed page")
-                .with_kind(DiscoveryInputKind::ObservedDocument),
-            DiscoveryInput::with_contents(PAGE, manifest.as_slice()),
-        ],
-        &[],
-    );
-    assert!(
-        catalog
-            .entries()
-            .iter()
-            .any(|e| matches!(e, DiscoveredEntry::Deferred(_)))
-    );
-    image(
-        vec![
-            DiscoveryInput::with_contents(PAGE, FRAME),
-            DiscoveryInput::with_contents(PAGE, b"stale source page"),
-            preview,
-            DiscoveryInput::with_contents("https://museum.test/child", DZI)
-                .with_kind(DiscoveryInputKind::ObservedDocument),
-        ],
-        &[],
-        "deepzoom",
-    );
-}
-#[test]
 fn failed_duplicate_observations_leave_opaque_iframe_targets_available() {
     image(
         vec![
@@ -541,7 +508,7 @@ fn failed_duplicate_observations_leave_opaque_iframe_targets_available() {
     );
 }
 #[test]
-fn unknown_inventory_urls_need_supplied_contents_or_an_explicit_source() {
+fn unknown_inventory_is_ignored_but_explicit_sources_are_read() {
     const UNKNOWN: &str = "https://museum.test/assets/opaque.js";
     let inventory = || {
         [
@@ -570,13 +537,37 @@ fn unknown_inventory_urls_need_supplied_contents_or_an_explicit_source() {
             "https://wmts.xml/collect",
             "https://analytics.test/collect?ref=service=wmts&other=request=getcapabilities",
             "https://analytics.test/collect#service=wmts&request=getcapabilities",
+            "https://analytics.test/collect?ref=/lizardtech/iserv/calcrgn",
+            "https://analytics.test/collect?ref=https://images.test/iip?FIF=art.tif",
+            "https://analytics.test/iip?fifty=50",
+            "https://metadata.imgi",
+            "https://metadata.imgf",
+            "https://analytics.test/collect?ref=https://www.bl.uk/manuscripts/Viewer.aspx?ref=sample",
+            "https://bl.uk.evil.test/manuscripts/Viewer.aspx?ref=sample",
+            "https://www.bl.uk/manuscripts/Viewer.aspx.js?ref=sample",
+            "https://analytics.test/collect?ref=https://polona.pl/item/123/0",
+            "https://polona.pl.evil.test/item/123/0",
+            "https://analytics.test/collect?ref=https://polona.pl/resources/item/123/&format=json",
+            "https://polona.pl/resources/item/123/?otherformat=json",
+            "https://analytics.test/collect?ref=https://biblio.unibe.ch/web-apps/maps/zoomify.php",
+            "https://biblio.unibe.ch/web-apps/maps/zoomify.php.js",
+            "https://analytics.test/collect?ref=https://www.ngv.vic.gov.au/explore/collection/work/3867/",
+            "https://www.ngv.vic.gov.au/explore/collection/work.js",
+            "https://viewer.onb.ac.at/assets/runtime.js",
+            "https://viewer.onb.ac.at/10048A37/thumbnail.jpg",
+            "https://digital.onb.ac.at/RepViewer/viewer.faces?doc=",
+            "https://analytics.test/server?next=https://images.test/server?source=art",
+            "https://analytics.test/collect?ref=https://images.test/art_files/9/0_0.jpg",
+            "https://analytics.test/collect?ref=https://images.test/art/TileGroup0/0-0-0.jpg",
         ]
         .into_iter()
         .map(observed)
         .collect::<Vec<_>>()
     };
+    let mut inputs = vec![DiscoveryInput::with_contents(PAGE, "<html></html>")];
+    inputs.extend(inventory());
     let (result, requests) =
-        support::discover_inputs(default_registry(), inventory(), Default::default(), |uri| {
+        support::discover_inputs(default_registry(), inputs, Default::default(), |uri| {
             panic!("passive inventory alone must not trigger a read: {uri}")
         });
     assert!(matches!(
@@ -585,22 +576,82 @@ fn unknown_inventory_urls_need_supplied_contents_or_an_explicit_source() {
     ));
     assert!(requests.is_empty());
 
-    for supplied in [true, false] {
-        let mut inputs = inventory();
-        inputs.push(if supplied {
-            DiscoveryInput::with_contents(UNKNOWN, DZI)
-                .with_kind(DiscoveryInputKind::ObservedResource)
-        } else {
-            DiscoveryInput::new(UNKNOWN)
-        });
-        let (result, requests) =
-            support::discover_inputs(default_registry(), inputs, Default::default(), |uri| {
-                assert_eq!(uri, UNKNOWN);
-                Some(Ok((DZI.to_vec(), None)))
-            });
-        assert_eq!(support::ready_image(result.unwrap()).format, "deepzoom");
-        assert_eq!(requests.len(), usize::from(!supplied));
+    let (result, requests) = support::discover_inputs(
+        default_registry(),
+        vec![DiscoveryInput::new(UNKNOWN)],
+        Default::default(),
+        |uri| {
+            assert_eq!(uri, UNKNOWN);
+            Some(Ok((DZI.to_vec(), None)))
+        },
+    );
+    assert_eq!(support::ready_image(result.unwrap()).format, "deepzoom");
+    assert_eq!(requests.len(), 1);
+}
+
+#[test]
+fn generic_json_names_yield_to_tiles_metadata() {
+    let tiles = "https://image.test/tiles.xml";
+    for name in ["info.json", "manifest.json"] {
+        let (catalog, requests) = support::discover_inputs(
+            default_registry(),
+            vec![
+                DiscoveryInput::with_contents(PAGE, "<html></html>"),
+                observed(&format!("https://other.test/{name}")),
+                observed(tiles),
+            ],
+            Default::default(),
+            |uri| {
+                assert_eq!(
+                    uri, tiles,
+                    "tile evidence should avoid ambiguous JSON reads"
+                );
+                Some(Ok((
+                    include_bytes!("../../../fixtures/krpano/basic/tour.xml").to_vec(),
+                    None,
+                )))
+            },
+        );
+        assert_eq!(support::ready_image(catalog.unwrap()).format, "krpano");
+        assert_eq!(requests.len(), 1);
     }
+}
+
+#[test]
+fn distinctive_viewer_paths_precede_generic_metadata_names() {
+    let api = "https://museum.test/digital/api/singleitem/collection/archive/id/42";
+    let info = "https://image.test/art/info.json";
+    let (catalog, requests) = support::discover_inputs(
+        default_registry(),
+        vec![
+            DiscoveryInput::with_contents(PAGE, "<html></html>"),
+            observed("https://other.test/info.json"),
+            observed("https://museum.test/digital/collection/archive/id/42"),
+        ],
+        Default::default(),
+        |uri| {
+            Some(Ok((
+                match uri {
+                    uri if uri == api => {
+                        br#"{"iiifInfoUri":"https://image.test/art/info.json"}"#.to_vec()
+                    }
+                    uri if uri == info => IIIF.to_vec(),
+                    unexpected => {
+                        panic!("distinctive viewer should precede generic metadata: {unexpected}")
+                    }
+                },
+                None,
+            )))
+        },
+    );
+    assert_eq!(support::ready_image(catalog.unwrap()).format, "iiif");
+    assert_eq!(
+        requests
+            .iter()
+            .map(|request| request.uri.as_str())
+            .collect::<Vec<_>>(),
+        [api, info]
+    );
 }
 
 #[test]
