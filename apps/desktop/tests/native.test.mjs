@@ -18,7 +18,10 @@ function platform({ deferRegistration = false } = {}) {
     handlers,
     calls,
     resolve(output) {
-      resolve({ output, saved_output: { id: "saved:test", filename: "saved image.png" } });
+      resolve({
+        kind: "image",
+        result: { output, saved_output: { id: "saved:test", filename: "saved image.png" } },
+      });
     },
     reject,
     dispatched: dispatched.promise,
@@ -87,7 +90,7 @@ test("native invocation preserves settings, progress, completion, and result own
   );
   assert.deepEqual(api.calls.at(-1).args, { job: handle.id, question: 4, answer: "retry" });
   api.resolve(output);
-  assert.deepEqual((await handle.finished).output, output);
+  assert.deepEqual((await handle.finished).result.output, output);
   assert.equal(api.handlers.size, 0);
   await handle.openOutput(true);
   assert.deepEqual(api.calls.at(-1), {
@@ -147,10 +150,10 @@ test("image questions and encoded thumbnails stay scoped to the native invocatio
     [1, event],
     [1, preview],
   ]);
-  await handle.answerImage(1, 1);
+  await handle.answerImage(1, { kind: "one", index: 1 });
   assert.deepEqual(api.calls.at(-1), {
     command: "answer_image",
-    args: { job: handle.id, question: 1, index: 1 },
+    args: { job: handle.id, question: 1, choice: { kind: "one", index: 1 } },
   });
   const late = api.handlers.get("dezoomify://image-choice");
   await handle.dispose();
@@ -231,7 +234,7 @@ test("typed failure and complete output retain the native outcome", async () => 
       await assert.rejects(handle.finished, (error) => error === result);
     } else {
       api.resolve(result);
-      assert.deepEqual((await handle.finished).output, result);
+      assert.deepEqual((await handle.finished).result.output, result);
     }
     assert.equal(api.handlers.size, 0);
     await handle.dispose();
@@ -273,7 +276,9 @@ test("saved references remain usable independently of the invocation and never s
   const api = platform();
   const handle = await invokeNative(request(), { progress() {}, retry() {} }, api);
   api.resolve(output);
-  const { saved_output: saved } = await handle.finished;
+  const {
+    result: { saved_output: saved },
+  } = await handle.finished;
   assert.deepEqual(saved, { id: "saved:test", filename: "saved image.png" });
   await handle.dispose();
   await inspectSavedOutput(saved, api);

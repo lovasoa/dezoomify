@@ -1,10 +1,10 @@
 # Architecture
 
-All four products call `dezoomify(inputs, options, host)`, one asynchronous Rust
-algorithm. Rust discovers images, selects a resolution, plans and acquires tiles,
-handles retries, then awaits saving and cleanup. Hosts supply
-platform operations. This keeps download behavior consistent across products
-without making the core depend on a browser or operating system.
+All four products share one asynchronous Rust algorithm. `dezoomify` runs a
+single image; staged `Job` operations let desktop retain a catalog and schedule
+its entries. Both use the same discovery, resolution selection, tile acquisition,
+and saving code. Hosts supply platform operations, keeping download behavior
+consistent without making the core depend on a browser or operating system.
 
 ## Boundaries
 

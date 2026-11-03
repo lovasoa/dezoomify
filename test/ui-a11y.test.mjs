@@ -71,6 +71,7 @@ test("image choices have distinct accessible names and preserve missing metadata
   );
   assertButtonsNamed(el, "image picker");
   const buttons = [...el.querySelectorAll("[data-dz-image-index]")];
+  assert.equal(el.querySelector("#dz-btn-download-all"), null);
   assert.equal(new Set(buttons.map((button) => button.getAttribute("aria-label"))).size, 3);
   assert.equal(el.querySelectorAll(".dz-image-row").length, 3);
   assert.equal(el.querySelector(".dz-image-thumbnail img").getAttribute("alt"), "");
@@ -81,6 +82,55 @@ test("image choices have distinct accessible names and preserve missing metadata
   act(() => click(el.querySelector("#dz-btn-cancel")));
   assert.deepEqual(chosen, [1]);
   assert.deepEqual(cancelled, [true]);
+});
+
+test("catalog batch action keeps individual choices and disables all actions while pending", () => {
+  const el = makeContainer();
+  const chosen = [];
+  let downloaded = 0;
+  let cancelled = 0;
+  const props = {
+    catalog: {
+      entries: [
+        { kind: "image-request", uri: "https://images.test/first.dzi" },
+        { kind: "image-request", uri: "https://images.test/second.dzi" },
+      ],
+    },
+    previews: new Map(),
+    sourceUrl: "https://museum.test/images.urls",
+    onChoose: (index) => chosen.push(index),
+    onDownloadAll: () => downloaded++,
+    onCancel: () => cancelled++,
+  };
+  const show = (disabled = false) =>
+    render(
+      el,
+      presentIdle(),
+      callbacks,
+      {},
+      {
+        replace: createElement(ImagePicker, { ...props, disabled }),
+      },
+    );
+  show();
+  const download = el.querySelector("#dz-btn-download-all");
+  assert.equal(download.textContent.trim(), "Download all");
+  assert.equal(el.querySelector("button"), download);
+  click(download);
+  click(el.querySelector('[data-dz-image-index="1"]'));
+  click(el.querySelector("#dz-btn-cancel"));
+  assert.equal(downloaded, 1);
+  assert.deepEqual(chosen, [1]);
+  assert.equal(cancelled, 1);
+
+  show(true);
+  for (const button of el.querySelectorAll(".dz-image-picker button")) {
+    assert.equal(button.disabled, true);
+    click(button);
+  }
+  assert.equal(downloaded, 1);
+  assert.deepEqual(chosen, [1]);
+  assert.equal(cancelled, 1);
 });
 
 /** Every button must expose a non-empty accessible name (text or aria-label). */

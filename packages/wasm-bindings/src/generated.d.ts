@@ -26,6 +26,11 @@ export interface ObservedInput {
 }
 
 /**
+ * A desktop picker answer applies only to its current ordered catalog.
+ */
+export type DesktopImageChoice = { kind: "one"; index: number } | { kind: "all" };
+
+/**
  * A direct resource read, including its redirected base address. For a ranged
  * request, bytes cover exactly the requested interval; the Host validates this
  * contract before returning a successful response.
@@ -579,10 +584,28 @@ export type RequestPurpose = "metadata" | "tile" | "probe";
 export type HtmlDocument = Record<string, HtmlElement[]>;
 
 /**
+ * Snapshots include settled results even when cancellation stops remaining work.
+ */
+export interface DesktopBatch {
+    items: DesktopBatchItem[];
+    cancelled: boolean;
+}
+
+/**
  * Stable ordered catalog projection (never exposes private core enums).
  */
 export interface Catalog {
     entries: CatalogEntry[];
+}
+
+/**
+ * Stable session-local identity; expanding a nested catalog adds new identities.
+ */
+export interface DesktopBatchItem {
+    id: number;
+    title: string | undefined;
+    source_url: string | undefined;
+    state: DesktopBatchItemState;
 }
 
 /**
@@ -735,6 +758,10 @@ export interface OutputPreparation {
 }
 
 export type BlockedReason = "access-required" | "blocked-ipv4" | "blocked-ipv6" | "cancelled" | "content-type" | "dns-rebinding" | "dns-rebinding-v6" | "forbidden" | "invalid-url" | "limit-exceeded" | "loopback-host" | "malformed" | "malformed-body" | "method" | "network" | "non-standard-port" | "origin" | "private-host" | "protocol-version" | "redirect-limit" | "redirect-target" | "scheme" | "signed-query" | "source-document-lost" | "throttled" | "userinfo";
+
+export type DesktopBatchItemState = { kind: "pending" } | { kind: "running" } | { kind: "saved"; result: DesktopOutput } | { kind: "failed"; error: Error } | { kind: "cancelled" };
+
+export type DesktopResult = { kind: "image"; result: DesktopOutput } | { kind: "batch"; batch: DesktopBatch };
 
 export type DiagnosticLevel = "trace" | "debug" | "info" | "warn" | "error";
 

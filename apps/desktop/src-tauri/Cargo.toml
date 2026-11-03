@@ -48,6 +48,10 @@ tauri-plugin-updater = { version = "=2.14.0", optional = true }
 tauri-plugin-wdio-webdriver = { version = "1.5", optional = true }
 open = { version = "5.4.3", optional = true }
 
+[dev-dependencies]
+dezoomify-fixture-server = { path = "../../../crates/fixture-server" }
+image.workspace = true
+
 [build-dependencies]
 tauri-build = { version = "2", optional = true , features = [] }
 

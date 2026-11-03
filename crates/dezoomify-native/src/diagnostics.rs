@@ -89,6 +89,7 @@ fn fields(value: Value, truncated: &mut u32) -> BTreeMap<String, DiagnosticValue
 pub struct Diagnostics {
     inner: Arc<Mutex<State>>,
     started: Instant,
+    owns_outcome: bool,
 }
 
 type Sink = Arc<dyn Fn(&DiagnosticRecord) + Send + Sync>;
@@ -110,6 +111,7 @@ impl Diagnostics {
     pub fn new(product: &str, version: &str) -> Self {
         let result = Self {
             started: Instant::now(),
+            owns_outcome: true,
             inner: Arc::new(Mutex::new(State {
                 report: DiagnosticReport {
                     schema_version: 1,
@@ -234,7 +236,28 @@ impl Diagnostics {
         }
     }
 
+    /// Share bounded observations for child work without finalizing the parent's
+    /// outcome. The owner must finish only after its children have settled.
+    pub fn child(&self) -> Self {
+        Self {
+            owns_outcome: false,
+            ..self.clone()
+        }
+    }
+
     pub fn finish(&self, event: &str, facts: Value) {
+        if !self.owns_outcome {
+            self.record(
+                if event.contains("failed") {
+                    DiagnosticLevel::Error
+                } else {
+                    DiagnosticLevel::Info
+                },
+                event,
+                facts,
+            );
+            return;
+        }
         if self.inner.lock().is_ok_and(|s| s.report.outcome.is_some()) {
             return;
         }

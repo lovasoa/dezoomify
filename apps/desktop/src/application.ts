@@ -32,6 +32,9 @@ import {
 } from "@dezoomify/shared-ui";
 import type {
   Catalog,
+  DesktopBatch,
+  DesktopImageChoice,
+  DesktopResult,
   Error as JobError,
   Output,
   Progress,
@@ -39,11 +42,13 @@ import type {
   TileAcquisition,
 } from "@dezoomify/wasm-bindings";
 import { createElement } from "react";
+import { BatchResults } from "./batch-results.tsx";
 import {
   forgetSavedOutput,
   inspectSavedOutput,
   invokeNative,
   type NativeInvocation,
+  openBatchOutput,
   openExternalLink,
   openHistoryOutput,
   readNativeDiagnostics,
@@ -59,6 +64,7 @@ const nativeCapabilities = {
   openHistoryOutput,
   forgetSavedOutput,
   openExternalLink,
+  openBatchOutput,
   readNativeDiagnostics,
   validateSettings,
 };
@@ -112,6 +118,7 @@ export function createDesktopApplication(
     openHistoryOutput,
     forgetSavedOutput,
     openExternalLink,
+    openBatchOutput,
     readNativeDiagnostics,
     validateSettings,
   } = { ...nativeCapabilities, ...capabilities };
@@ -137,6 +144,7 @@ export function createDesktopApplication(
       activeHandle: null as NativeInvocation | null,
       progress: null as Progress | null,
       output: null as Output | null,
+      batch: null as DesktopBatch | null,
       retry: null as { question: number; value: TileAcquisition } | null,
       imageChoice: null as {
         question: number;
@@ -333,11 +341,17 @@ export function createDesktopApplication(
 
   function currentPresentation(): Presentation {
     if (currentAttempt.localFailure) return presentFailure(currentAttempt.localFailure);
+    if (currentAttempt.batch && currentAttempt.settled)
+      return presentStatus(currentAttempt.batch.cancelled ? "cancelled" : "completed");
     if (currentAttempt.output)
       return presentOutput(currentAttempt.output, currentAttempt.progress ?? undefined);
     if (currentAttempt.settled) return presentStatus("cancelled");
     if (!currentAttempt.progress) return presentIdle();
-    const presentation = presentProgress(currentAttempt.progress, {
+    return activePresentation(currentAttempt.progress);
+  }
+
+  function activePresentation(progress: Progress): Presentation {
+    const presentation = presentProgress(progress, {
       paused: currentAttempt.paused,
     });
     if (currentAttempt.retry) presentation.retryApproval = currentAttempt.retry.value;
@@ -368,6 +382,10 @@ export function createDesktopApplication(
     const diagnostics = currentAttempt.diagnostics;
     diagnostics.finish("retired", { reason: "replaced-or-reset" });
     currentAttempt.retired = true;
+    for (const item of currentAttempt.batch?.items ?? []) {
+      if (item.state.kind === "saved" && item.state.result.saved_output)
+        void forgetSavedOutput(item.state.result.saved_output).catch(() => {});
+    }
     const handle = currentAttempt.activeHandle;
     currentAttempt.activeHandle = null;
     currentAttempt.progress = null;
@@ -408,7 +426,7 @@ export function createDesktopApplication(
       progress(progress) {
         if (!owns(attempt) || attempt.settled) return;
         attempt.progress = progress;
-        desktopHistory.progress(attempt.historyEntry, progress);
+        if (!attempt.batch) desktopHistory.progress(attempt.historyEntry, progress);
         attempt.diagnostics.observe(progress);
         touchProgress();
         update();
@@ -434,6 +452,14 @@ export function createDesktopApplication(
         }
         update();
       },
+      batch(batch) {
+        if (!owns(attempt) || attempt.settled) return;
+        attempt.batch = batch;
+        attempt.imageChoice = null;
+        attempt.retry = null;
+        touchProgress();
+        update();
+      },
     })
       .then(async (handle) => {
         if (!owns(attempt)) {
@@ -444,14 +470,13 @@ export function createDesktopApplication(
         attempt.activeHandle = handle;
         attempt.diagnostics.context({ host_job: handle.id });
         update();
-        const { output, saved_output } = await handle.finished;
+        const result = await handle.finished;
         if (!owns(attempt)) return;
         attempt.settled = true;
         attempt.imageChoice = null;
-        attempt.output = output;
         attempt.retry = null;
         stopHeartbeat();
-        desktopHistory.complete(attempt.historyEntry, output, saved_output);
+        recordResult(attempt, result);
         update();
       })
       .catch((error: unknown) => {
@@ -482,12 +507,33 @@ export function createDesktopApplication(
       });
   }
 
+  function recordResult(attempt: DesktopAttempt, result: DesktopResult): void {
+    if (result.kind === "image") {
+      attempt.output = result.result.output;
+      desktopHistory.complete(
+        attempt.historyEntry,
+        result.result.output,
+        result.result.saved_output,
+      );
+      return;
+    }
+    attempt.batch = result.batch;
+    desktopHistory.update(attempt.historyEntry, {
+      status: result.batch.cancelled
+        ? "cancelled"
+        : result.batch.items.some((item) => item.state.kind === "failed")
+          ? "failed"
+          : "completed",
+      title: t("desktop.batch.title"),
+    });
+  }
+
   function handleCancel(): void {
     if (isTerminalNow()) return;
     const handle = currentAttempt.activeHandle;
 
     if (handle) void handle.cancel().catch(() => undefined);
-    handleReset();
+    if (!currentAttempt.batch) handleReset();
   }
 
   function handlePause(): void {
@@ -573,13 +619,24 @@ export function createDesktopApplication(
     );
   }
 
-  function chooseImage(attempt: DesktopAttempt, index: number): void {
+  function chooseImage(attempt: DesktopAttempt, answer: DesktopImageChoice): void {
     const choice = attempt.imageChoice;
     const handle = attempt.activeHandle;
     if (!owns(attempt) || !choice || choice.answering || !handle) return;
     choice.answering = true;
+    if (answer.kind === "all") {
+      attempt.batch = {
+        cancelled: false,
+        items: choice.catalog.entries.map((entry, id) => ({
+          id,
+          title: entry.title,
+          source_url: entry.kind === "image" ? entry.sourceUrl : entry.uri,
+          state: { kind: "pending" },
+        })),
+      };
+    }
     update();
-    void handle.answerImage(choice.question, index).then(
+    void handle.answerImage(choice.question, answer).then(
       () => {
         if (!owns(attempt) || attempt.imageChoice !== choice) return;
         attempt.imageChoice = null;
@@ -588,6 +645,7 @@ export function createDesktopApplication(
       (error: unknown) => {
         if (!owns(attempt) || attempt.imageChoice !== choice) return;
         attempt.imageChoice = null;
+        attempt.batch = null;
         void handle.cancel().catch(() => undefined);
         failLocally({ kind: "choice-failed", detail: unknownDetail(error) });
       },
@@ -633,7 +691,7 @@ export function createDesktopApplication(
     const presentation = currentPresentation();
     const doc = root.ownerDocument;
     doc.getElementById("dz-desktop-aux")?.remove();
-    const showCancelledNote = presentation.phase === "cancelled";
+    const showCancelledNote = presentation.phase === "cancelled" && !currentAttempt.batch;
     if (!showCancelledNote) return;
     const card = root.querySelector(".dz-card");
     if (!card) return;
@@ -748,14 +806,28 @@ export function createDesktopApplication(
   }
 
   function desktopContent(attempt: DesktopAttempt, presentation: Presentation) {
+    const batch = attempt.batch
+      ? createElement(BatchResults, {
+          batch: attempt.batch,
+          running: !attempt.settled,
+          onOpen: openBatchOutput,
+          onReset: handleReset,
+        })
+      : undefined;
     return {
+      ...(batch
+        ? attempt.settled && !attempt.localFailure
+          ? { replace: batch }
+          : { after: batch }
+        : {}),
       ...(attempt.imageChoice
         ? {
             replace: createElement(ImagePicker, {
               catalog: attempt.imageChoice.catalog,
               previews: attempt.imageChoice.previews,
               sourceUrl: attempt.lastInputUrl,
-              onChoose: (index: number) => chooseImage(attempt, index),
+              onChoose: (index: number) => chooseImage(attempt, { kind: "one", index }),
+              onDownloadAll: () => chooseImage(attempt, { kind: "all" }),
               onCancel: handleCancel,
               disabled: !attempt.activeHandle || attempt.imageChoice.answering,
             }),

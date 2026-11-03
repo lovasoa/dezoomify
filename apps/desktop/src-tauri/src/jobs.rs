@@ -1,5 +1,5 @@
 //! Native resources retained for a desktop invocation and its saved result.
-use dezoomify::model::{DiagnosticReport, Error, RetryChoice};
+use dezoomify::model::{DesktopImageChoice, DiagnosticReport, Error, RetryChoice};
 use dezoomify_native::{diagnostics::Diagnostics, Controls};
 use std::{
     collections::HashMap,
@@ -14,6 +14,7 @@ pub const CHANNEL_REGISTERED: &str = "dezoomify://registered";
 pub const CHANNEL_PROGRESS: &str = "dezoomify://progress";
 pub const CHANNEL_RETRY: &str = "dezoomify://retry";
 pub const CHANNEL_IMAGE_CHOICE: &str = "dezoomify://image-choice";
+pub const CHANNEL_BATCH: &str = "dezoomify://batch";
 
 pub struct Registration {
     pub controls: Controls,
@@ -28,7 +29,7 @@ pub struct Registration {
 struct ImageQuestion {
     id: u64,
     count: usize,
-    answer: tokio::sync::oneshot::Sender<u32>,
+    answer: tokio::sync::oneshot::Sender<DesktopImageChoice>,
 }
 
 impl Registration {
@@ -51,7 +52,10 @@ impl Registration {
         (question, receive)
     }
 
-    pub fn request_image(&self, count: usize) -> (u64, tokio::sync::oneshot::Receiver<u32>) {
+    pub fn request_image(
+        &self,
+        count: usize,
+    ) -> (u64, tokio::sync::oneshot::Receiver<DesktopImageChoice>) {
         let id = self.next_question.fetch_add(1, Ordering::SeqCst);
         let (answer, receive) = tokio::sync::oneshot::channel();
         *self
@@ -61,7 +65,7 @@ impl Registration {
         (id, receive)
     }
 
-    pub fn answer_image(&self, question: u64, index: u32) -> Result<(), Error> {
+    pub fn answer_image(&self, question: u64, choice: DesktopImageChoice) -> Result<(), Error> {
         let mut pending = self
             .image_choice
             .lock()
@@ -71,7 +75,7 @@ impl Registration {
             .filter(|pending| pending.id == question)
             .filter(|_| !self.controls.is_cancelled())
             .ok_or(Error::InteractionExpired)?;
-        if index as usize >= live.count {
+        if matches!(choice, DesktopImageChoice::One { index } if index as usize >= live.count) {
             return Err(Error::InvalidInput(
                 "image selection is out of range".into(),
             ));
@@ -79,7 +83,7 @@ impl Registration {
         if let Some(pending) = pending.take() {
             pending
                 .answer
-                .send(index)
+                .send(choice)
                 .map_err(|_| Error::InteractionExpired)?;
         }
         Ok(())
@@ -219,27 +223,28 @@ mod tests {
     use super::*;
     #[test]
     fn image_answers_are_bounded_and_scoped_to_a_live_question() {
+        let one = |index| DesktopImageChoice::One { index };
         let registration = Registration::new();
         let (old, _) = registration.request_image(2);
         let (current, mut answer) = registration.request_image(2);
         assert!(matches!(
-            registration.answer_image(old, 0),
+            registration.answer_image(old, one(0)),
             Err(Error::InteractionExpired)
         ));
         assert!(matches!(
-            registration.answer_image(current, 2),
+            registration.answer_image(current, one(2)),
             Err(Error::InvalidInput(_))
         ));
-        registration.answer_image(current, 1).unwrap();
-        assert_eq!(answer.try_recv().unwrap(), 1);
+        registration.answer_image(current, one(1)).unwrap();
+        assert_eq!(answer.try_recv().unwrap(), one(1));
         assert!(matches!(
-            registration.answer_image(current, 0),
+            registration.answer_image(current, DesktopImageChoice::All),
             Err(Error::InteractionExpired)
         ));
         let (cancelled, _) = registration.request_image(2);
         registration.controls.cancel();
         assert!(matches!(
-            registration.answer_image(cancelled, 0),
+            registration.answer_image(cancelled, DesktopImageChoice::All),
             Err(Error::InteractionExpired)
         ));
     }

@@ -15,6 +15,7 @@ export const de = {
   "view.images.noPreview": "Keine Vorschau verfügbar",
   "view.images.unknownSize": "Abmessungen unbekannt",
   "view.images.choose": "Auswählen",
+  "view.images.downloadAll": "Alle herunterladen",
   "view.images.chooseNamed": "{title} auswählen (Bild {number})",
   "view.images.cancel": "Abbrechen",
   "page.brand": "Zoombare Bilder speichern",
@@ -58,6 +59,19 @@ export const de = {
   "desktop.done.folderError":
     "Der Ordner konnte nicht geöffnet werden. Prüfen Sie, ob ein Dateimanager installiert ist.",
   "desktop.done.missingError": "Das gespeicherte Bild oder der Ordner ist nicht mehr vorhanden.",
+  "desktop.batch.title": "Downloadergebnisse",
+  "desktop.batch.runningTitle": "Bilder werden heruntergeladen",
+  "desktop.batch.cancelledTitle": "Downloads angehalten",
+  "desktop.batch.savedSummary": "{saved} von {total} gespeichert",
+  "desktop.batch.statusSummary":
+    "{failed} fehlgeschlagen · {cancelled} abgebrochen · {remaining} verbleibend",
+  "desktop.batch.pending": "Wartet",
+  "desktop.batch.running": "Wird heruntergeladen",
+  "desktop.batch.saved": "Gespeichert",
+  "desktop.batch.failed": "Fehlgeschlagen",
+  "desktop.batch.cancelled": "Nicht heruntergeladen",
+  "desktop.batch.openNamed": "{title} öffnen (Bild {number})",
+  "desktop.batch.revealNamed": "{title} im Ordner anzeigen (Bild {number})",
   // Modal chrome (shared view.ts openModal).
   "view.modal.ok": "Verstanden",
   "view.modal.closeDialog": "Dialog schließen",

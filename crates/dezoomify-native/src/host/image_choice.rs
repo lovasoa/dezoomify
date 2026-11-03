@@ -3,6 +3,25 @@ use base64::Engine as _;
 use dezoomify::model::{Catalog, CatalogEntry, DiagnosticLevel, Error, Gate, Tile};
 
 impl NativeHost<'_> {
+    /// Await a product-owned catalog answer while generating bounded previews.
+    /// Cancellation interrupts both work streams; the caller must settle this Host.
+    pub async fn catalog_answer<T>(
+        &self,
+        catalog: &Catalog,
+        answer: impl std::future::Future<Output = Result<T, Error>>,
+        mut preview: impl FnMut(u32, String),
+    ) -> Result<T, Error> {
+        tokio::pin!(answer);
+        self.controlled(async {
+            tokio::select! {
+                biased;
+                result = &mut answer => result,
+                () = self.image_previews(catalog, &mut preview) => answer.await,
+            }
+        })
+        .await
+    }
+
     pub(super) async fn select_image(&self, catalog: Catalog) -> Result<u32, Error> {
         self.controls.checkpoint(Gate::Cancellation).await?;
         let last = catalog
@@ -14,22 +33,12 @@ impl NativeHost<'_> {
         {
             return Ok(self.options.image_index.unwrap_or(0).min(last) as u32);
         }
-        let ImageSelection {
-            mut answer,
-            mut preview,
-        } = self
-            .image_chooser
-            .borrow_mut()
-            .as_mut()
-            .ok_or(Error::InteractionExpired)?(catalog.clone())?;
-        self.controlled(async {
-            tokio::select! {
-                biased;
-                result = &mut answer => result,
-                () = self.image_previews(&catalog, &mut preview) => answer.await,
-            }
-        })
-        .await
+        let ImageSelection { answer, preview } =
+            self.image_chooser
+                .borrow_mut()
+                .as_mut()
+                .ok_or(Error::InteractionExpired)?(catalog.clone())?;
+        self.catalog_answer(&catalog, answer, preview).await
     }
 
     async fn image_previews(&self, catalog: &Catalog, changed: &mut dyn FnMut(u32, String)) {

@@ -2,12 +2,13 @@ import type { Catalog } from "@dezoomify/wasm-bindings";
 import { useEffect, useRef } from "react";
 import { t } from "./i18n.ts";
 
-/** Hosts own the choice lifetime and preview resources; this view only presents them. */
+/** Hosts own the choice lifetime, previews, and optional batch action over the catalog. */
 export function ImagePicker({
   catalog,
   previews,
   sourceUrl,
   onChoose,
+  onDownloadAll,
   onCancel,
   disabled = false,
 }: {
@@ -15,6 +16,7 @@ export function ImagePicker({
   previews: ReadonlyMap<number, string>;
   sourceUrl: string;
   onChoose(index: number): void;
+  onDownloadAll?(): void;
   onCancel(): void;
   disabled?: boolean;
 }) {
@@ -27,6 +29,17 @@ export function ImagePicker({
       <h2 id="dz-image-picker-title" tabIndex={-1} ref={heading}>
         {t("view.images.title")}
       </h2>
+      {onDownloadAll && (
+        <button
+          type="button"
+          id="dz-btn-download-all"
+          className="dz-btn-tactile"
+          disabled={disabled}
+          onClick={onDownloadAll}
+        >
+          {t("view.images.downloadAll")}
+        </button>
+      )}
       <ul className="dz-image-list">
         {catalog.entries.map((entry, index) => {
           const title = entry.title?.trim() || t("view.images.untitled", { number: index + 1 });
@@ -49,7 +62,7 @@ export function ImagePicker({
                 </span>
                 <button
                   type="button"
-                  className="dz-btn-tactile"
+                  className={onDownloadAll ? "dz-btn-secondary" : "dz-btn-tactile"}
                   data-dz-image-index={index}
                   disabled={disabled}
                   aria-label={t("view.images.chooseNamed", { title, number: index + 1 })}
@@ -62,7 +75,13 @@ export function ImagePicker({
           );
         })}
       </ul>
-      <button type="button" id="dz-btn-cancel" className="dz-btn-secondary" onClick={onCancel}>
+      <button
+        type="button"
+        id="dz-btn-cancel"
+        className="dz-btn-secondary"
+        disabled={disabled}
+        onClick={onCancel}
+      >
         {t("view.images.cancel")}
       </button>
     </section>
