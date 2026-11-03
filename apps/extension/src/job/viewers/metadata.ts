@@ -4,6 +4,7 @@ import type {
   DziSource,
   IiifSource,
   IipSource,
+  KrpanoSource,
   MetadataContext,
   SourceGeometry,
   TileSource,
@@ -117,6 +118,26 @@ function iipMetadata(source: IipSource): ObservedInput {
   };
 }
 
+function krpanoMetadata(source: KrpanoSource, context: MetadataContext): ObservedInput {
+  const url = new URL(context.documentUrl);
+  url.hash = `dezoomify-krpano-${context.imageIndex}`;
+  const levels = source.levels.map(({ width, height, shapes }) => {
+    const contents = shapes
+      .map(({ type, url }) => `<${type} url="${xmlAttribute(url)}"/>`)
+      .join("");
+    return `<level tiledimagewidth="${width}" tiledimageheight="${height}">${contents}</level>`;
+  });
+  return {
+    kind: "observed-metadata",
+    url: url.href,
+    contents: `<krpano><image tilesize="${source.tileSize}" baseindex="${source.baseIndex}">${levels.join("")}</image></krpano>`,
+  };
+}
+
+function xmlAttribute(value: string): string {
+  return value.replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;");
+}
+
 /** Pure projection of validated page snapshots into the core's metadata input. */
 export function projectMetadata(source: TileSource, context: MetadataContext): ObservedInput {
   switch (source.protocol) {
@@ -128,5 +149,7 @@ export function projectMetadata(source: TileSource, context: MetadataContext): O
       return iiifMetadata(source);
     case "iip":
       return iipMetadata(source);
+    case "krpano":
+      return krpanoMetadata(source, context);
   }
 }

@@ -30,8 +30,12 @@ static VIEWER_JS_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
         .expect("constant krpano JavaScript pattern")
 });
 static HTML_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
-    BytesRegex::new(r"(?s-u)embedpano\(|createPanoViewer\(|<script.*(?:krpano|tour\.js)|(?:krpano|tour\.js).*<script")
-        .expect("constant krpano HTML pattern")
+    BytesRegex::new(concat!(
+        r#"(?is-u)\b(?:embedpano|createPanoViewer)\s*\(|"#,
+        r#"<script\b[^>]*\ssrc\s*=\s*["']?(?:[^\s"'<>?#]*/)?(?:krpano|tour)\.js"#,
+        r#"(?:[?#][^\s"'<>]*)?(?:["'\s>])"#,
+    ))
+    .expect("constant krpano HTML pattern")
 });
 
 const ROUTES: &[DiscoveryRoute] = &[
@@ -972,6 +976,7 @@ mod tests {
             b"<script>createPanoViewer({xml:'tour.xml'});</script>".as_slice(),
             b"<html><script src='krpano.js'></script></html>".as_slice(),
             b"<html><script src='tour.js'></script></html>".as_slice(),
+            b"<SCRIPT SRC=/assets/krpano.js?v=1></SCRIPT>".as_slice(),
         ] {
             assert!(HTML_RE.is_match(html));
         }
@@ -979,6 +984,9 @@ mod tests {
             b"<html><script src='jquery.min.js'></script></html>".as_slice(),
             b"<HTML><SCRIPT src='analytics.js'></SCRIPT></HTML>".as_slice(),
             b"<html><body>Hello</body></html>".as_slice(),
+            b"<script>const adapters = ['krpano']; const path = 'tour.js';</script>".as_slice(),
+            b"<script src='analytics.js?next=/tour.js'></script>".as_slice(),
+            b"<script data-src='tour.js' src='analytics.js'></script>".as_slice(),
         ] {
             assert!(!HTML_RE.is_match(html));
         }

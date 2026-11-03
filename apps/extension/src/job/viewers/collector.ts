@@ -1,3 +1,4 @@
+import { krpanoAdapter } from "../krpano/adapter.ts";
 import { openLayersAdapter } from "../openlayers/adapter.ts";
 import { openSeadragonAdapter } from "../openseadragon/adapter.ts";
 import { seadragonAdapter } from "../seadragon/adapter.ts";
@@ -7,7 +8,7 @@ import type { ScanState } from "./scan-state.ts";
 import { releaseViewerTiles } from "./session.ts";
 import type { PageRealm } from "./types.ts";
 
-const adapters = [openSeadragonAdapter, seadragonAdapter, openLayersAdapter];
+const adapters = [openSeadragonAdapter, seadragonAdapter, openLayersAdapter, krpanoAdapter];
 
 /** One collector deduplicates image sources across adapters and discovery paths. */
 export class ViewerCollector {
