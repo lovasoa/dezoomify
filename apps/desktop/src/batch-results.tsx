@@ -17,41 +17,60 @@ export function BatchResults({
   const titleId = useId();
   const count = (kind: DesktopBatchItem["state"]["kind"]) =>
     batch.items.filter((item) => item.state.kind === kind).length;
+  const saved = count("saved");
+  const failed = count("failed");
+  const cancelled = count("cancelled");
+  const remaining = count("pending") + count("running");
+  const settled = batch.items.length - remaining;
   return (
-    <section className="dz-batch-results" aria-labelledby={titleId}>
-      <h2 id={titleId}>
-        {t(
-          running
-            ? "desktop.batch.runningTitle"
-            : batch.cancelled
-              ? "desktop.batch.cancelledTitle"
-              : "desktop.batch.title",
+    <section className="dz-batch-results" aria-labelledby={titleId} data-running={running}>
+      <header className="dz-batch-head">
+        <h2 id={titleId}>
+          {t(
+            running
+              ? "desktop.batch.runningTitle"
+              : batch.cancelled
+                ? "desktop.batch.cancelledTitle"
+                : "desktop.batch.title",
+          )}
+        </h2>
+        {!running && (
+          <div className="dz-actions-row">
+            <button type="button" className="dz-btn-secondary" onClick={onReset}>
+              {t("view.done.another")}
+            </button>
+          </div>
         )}
-      </h2>
+      </header>
       <div className="dz-batch-totals" role="status" aria-live="polite">
         <p className="dz-batch-saved-total">
-          {t("desktop.batch.savedSummary", { saved: count("saved"), total: batch.items.length })}
+          {t("desktop.batch.savedSummary", { saved, total: batch.items.length })}
         </p>
-        <p className="dz-batch-status-total">
-          {t("desktop.batch.statusSummary", {
-            failed: count("failed"),
-            cancelled: count("cancelled"),
-            remaining: count("pending") + count("running"),
-          })}
-        </p>
+        {running && failed === 0 && cancelled === 0 && (
+          <p className="dz-batch-status-total">
+            {t("desktop.batch.remainingSummary", { remaining })}
+          </p>
+        )}
+        {(failed > 0 || cancelled > 0) && (
+          <p className="dz-batch-status-total">
+            {t("desktop.batch.statusSummary", { failed, cancelled, remaining })}
+          </p>
+        )}
       </div>
-      <ol className="dz-batch-list">
+      {running && (
+        <progress
+          className="dz-batch-progress"
+          value={settled}
+          max={batch.items.length || 1}
+          aria-label={t("desktop.batch.runningTitle")}
+        />
+      )}
+      {/* biome-ignore lint/a11y/noNoninteractiveTabindex: keyboard users must be able to scroll waiting items in the native webview. */}
+      <ol className="dz-batch-list" tabIndex={0} aria-labelledby={titleId}>
         {batch.items.map((item, index) => (
           <BatchItem key={item.id} item={item} number={index + 1} onOpen={onOpen} />
         ))}
       </ol>
-      {!running && (
-        <div className="dz-actions-row">
-          <button type="button" className="dz-btn-secondary" onClick={onReset}>
-            {t("view.done.another")}
-          </button>
-        </div>
-      )}
     </section>
   );
 }
@@ -88,9 +107,23 @@ function BatchItem({
     }
   }
   return (
-    <li className="dz-batch-item" data-batch-item={item.id}>
-      <h3>{title}</h3>
-      {item.source_url && <p className="dz-batch-source">{item.source_url}</p>}
+    <li className="dz-batch-item" data-batch-item={item.id} data-state={item.state.kind}>
+      <span className="dz-batch-icon" aria-hidden="true">
+        <BatchIcon state={item.state.kind} />
+      </span>
+      <div className="dz-batch-description">
+        <h3 title={title}>{title}</h3>
+        {saved && (
+          <p className="dz-batch-filename" title={saved.filename}>
+            {saved.filename}
+          </p>
+        )}
+        {item.source_url && (
+          <p className="dz-batch-source" title={item.source_url}>
+            {item.source_url}
+          </p>
+        )}
+      </div>
       <p className="dz-batch-status">{t(`desktop.batch.${item.state.kind}`)}</p>
       {item.state.kind === "failed" && (
         <p className="dz-batch-error">
@@ -98,29 +131,26 @@ function BatchItem({
         </p>
       )}
       {saved && (
-        <>
-          <p className="dz-batch-filename">{saved.filename}</p>
-          <div className="dz-batch-actions">
-            <button
-              type="button"
-              className="dz-btn-secondary"
-              disabled={opening}
-              aria-label={t("desktop.batch.openNamed", { title, number })}
-              onClick={() => void open(false)}
-            >
-              {t("desktop.done.open")}
-            </button>
-            <button
-              type="button"
-              className="dz-btn-secondary"
-              disabled={opening}
-              aria-label={t("desktop.batch.revealNamed", { title, number })}
-              onClick={() => void open(true)}
-            >
-              {t("desktop.done.reveal")}
-            </button>
-          </div>
-        </>
+        <div className="dz-batch-actions">
+          <button
+            type="button"
+            className="dz-btn-secondary"
+            disabled={opening}
+            aria-label={t("desktop.batch.openNamed", { title, number })}
+            onClick={() => void open(false)}
+          >
+            {t("desktop.done.open")}
+          </button>
+          <button
+            type="button"
+            className="dz-btn-secondary"
+            disabled={opening}
+            aria-label={t("desktop.batch.revealNamed", { title, number })}
+            onClick={() => void open(true)}
+          >
+            {t("desktop.done.reveal")}
+          </button>
+        </div>
       )}
       {openError && (
         <p className="dz-batch-error" role="alert">
@@ -134,5 +164,24 @@ function BatchItem({
         </p>
       )}
     </li>
+  );
+}
+
+function BatchIcon({ state }: { state: DesktopBatchItem["state"]["kind"] }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+      {state === "saved" ? (
+        <path d="m5 12 4 4L19 6" />
+      ) : state === "failed" || state === "cancelled" ? (
+        <path d="m7 7 10 10M17 7 7 17" />
+      ) : state === "running" ? (
+        <path d="M12 3v12m-5-5 5 5 5-5M5 17v4h14v-4" />
+      ) : (
+        <>
+          <circle cx="12" cy="12" r="8" />
+          <path d="M12 7v5l3 2" />
+        </>
+      )}
+    </svg>
   );
 }

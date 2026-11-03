@@ -16,6 +16,7 @@ export const de = {
   "view.images.unknownSize": "Abmessungen unbekannt",
   "view.images.choose": "Auswählen",
   "view.images.downloadAll": "Alle herunterladen",
+  "view.images.count": "{count} Bilder verfügbar",
   "view.images.chooseNamed": "{title} auswählen (Bild {number})",
   "view.images.cancel": "Abbrechen",
   "page.brand": "Zoombare Bilder speichern",
@@ -63,6 +64,7 @@ export const de = {
   "desktop.batch.runningTitle": "Bilder werden heruntergeladen",
   "desktop.batch.cancelledTitle": "Downloads angehalten",
   "desktop.batch.savedSummary": "{saved} von {total} gespeichert",
+  "desktop.batch.remainingSummary": "{remaining} verbleibend",
   "desktop.batch.statusSummary":
     "{failed} fehlgeschlagen · {cancelled} abgebrochen · {remaining} verbleibend",
   "desktop.batch.pending": "Wartet",

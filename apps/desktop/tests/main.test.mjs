@@ -211,13 +211,23 @@ test("desktop offers Download all for ready images and keeps every batch result"
       { id: 1, title: "Second", state: { kind: "failed", error: { kind: "no-image-found" } } },
     ],
   };
-  act(() => invocation.callbacks.batch(batch));
+  act(() =>
+    invocation.callbacks.batch({
+      ...batch,
+      items: [batch.items[0], { ...batch.items[1], state: { kind: "running" } }],
+    }),
+  );
   await act(() => invocation.answers[0].resolve());
   assert.equal(root.querySelector(".dz-image-picker"), null);
   assert.ok(root.querySelector(".dz-job-section"), "current tile progress remains visible");
+  const progress = root.querySelector(".dz-batch-progress");
+  assert.equal(progress.getAttribute("value"), "1");
+  assert.equal(progress.getAttribute("max"), "2");
+  assert.match(root.querySelector(".dz-batch-totals").textContent, /1 remaining/);
   await act(() => invocation.resolveBatch(batch));
   assert.equal(root.querySelectorAll(".dz-batch-item").length, 2);
   assert.equal(root.querySelector(".dz-job-section"), null);
+  assert.equal(root.querySelector(".dz-batch-progress"), null);
   assert.match(root.textContent, /First.png/);
   assert.match(root.textContent, /No zoomable image was found/);
   const opened = [];

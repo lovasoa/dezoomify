@@ -2366,6 +2366,17 @@ abbr[title] {
   min-width: 0;
 }
 
+/* The heading receives focus to announce a new catalog, without a control outline. */
+#dz-image-picker-title:focus {
+  outline: none;
+  box-shadow: none;
+}
+
+.dz-image-catalog-count {
+  color: var(--dz-text-secondary);
+  font-size: 0.85rem;
+}
+
 .dz-image-list {
   list-style: none;
   padding: 0;

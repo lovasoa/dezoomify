@@ -96,12 +96,24 @@ pub fn on_menu_event(app: &AppHandle, event: MenuEvent) {
         return;
     }
     let handle = app.clone();
+    // The macOS backend displays the title as NSOpenPanel's explanatory message.
+    let title = if cfg!(target_os = "macos") {
+        "Open IIIF metadata (.json), Deep Zoom (.dzi), or a URL list (.txt, .urls).\n\
+         URL lists contain one image address or file path per line. Relative paths use the list's folder."
+    } else {
+        "Open image source or URL list"
+    };
     app.dialog()
         .file()
-        .set_title("Open image source")
+        .set_title(title)
         .add_filter(
             "Image sources and URL lists",
             &["json", "dzi", "txt", "urls"],
+        )
+        .add_filter("IIIF and Deep Zoom metadata", &["json", "dzi"])
+        .add_filter(
+            "URL lists (one address or file path per line)",
+            &["txt", "urls"],
         )
         .add_filter("All files", &["*"])
         .pick_file(move |file| {
