@@ -156,15 +156,15 @@ impl Search {
             }
             entry.state = State::Queued;
         }
-        let recognized = specs
+        let url_strength = specs
             .iter()
             .filter_map(|spec| spec.url_specificity(&input.url))
-            .any(|strength| strength != Specificity::Low);
-        // Inventory alone does not justify a speculative read. Keep the entry
-        // available for explicit references and decode all supplied contents.
+            .min();
+        // Inventory needs a URL match, including explicitly Low evidence.
+        // Unmatched entries remain available for references and supplied bodies.
         if input.kind == DiscoveryInputKind::ObservedResource
             && entry.supplied.is_none()
-            && !recognized
+            && url_strength.is_none()
             && !retry
         {
             return;
@@ -173,7 +173,9 @@ impl Search {
             let mut priority = Priority(rank.0, rank.1, rank.2, format);
             if input.kind == DiscoveryInputKind::ObservedResource {
                 priority.0 = spec.url_specificity(&input.url).unwrap_or(rank.0);
-            } else if input.kind == DiscoveryInputKind::Source && recognized {
+            } else if input.kind == DiscoveryInputKind::Source
+                && url_strength.is_some_and(|strength| strength != Specificity::Low)
+            {
                 priority.0 = match spec.url_specificity(&input.url) {
                     Some(Specificity::High | Specificity::Medium) => Specificity::High,
                     _ => Specificity::Low,

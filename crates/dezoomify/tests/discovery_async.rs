@@ -107,6 +107,73 @@ fn metadata_url_defaults_outrank_viewers_but_explicit_strength_wins() {
 }
 
 #[test]
+fn low_priority_assets_run_after_medium_matches_fail() {
+    use dezoomify::model::DiscoveryInputKind;
+    const MEDIUM: FormatSpec = FormatSpec::new(
+        "medium",
+        &[viewer(url_suffix("/viewer")).decode(|resource| {
+            if resource.bytes() == b"invalid" {
+                Err(DiscoveryError::InvalidMetadata("not a viewer".into()))
+            } else {
+                catalog(resource)
+            }
+        })],
+    );
+    for medium_succeeds in [false, true] {
+        let mut registry = core::default_registry();
+        registry.register(MEDIUM);
+        let reads = RefCell::new(Vec::new());
+        let result = futures::executor::block_on(
+            registry.discover(
+                [
+                    "https://test/zoom/1",
+                    "https://test/random.js",
+                    "https://test/viewer",
+                ]
+                .into_iter()
+                .map(|uri| DiscoveryInput::new(uri).with_kind(DiscoveryInputKind::ObservedResource))
+                .collect(),
+                Default::default(),
+                |request, _| {
+                    reads.borrow_mut().push(request.uri.clone());
+                    async move {
+                        Ok(response(match request.uri.as_str() {
+                            "https://test/viewer" if !medium_succeeds => "invalid",
+                            "https://test/viewer" => &request.uri,
+                            "https://test/zoom/1" => {
+                                include_str!("../../../fixtures/vls/approximate-basic/zoom/1.html")
+                            }
+                            unexpected => {
+                                panic!("unmatched inventory must not be read: {unexpected}")
+                            }
+                        }))
+                    }
+                },
+                support::parse_html,
+                |_| async { Ok(Vec::new()) },
+            ),
+        )
+        .unwrap();
+        assert_eq!(
+            support::ready_image(result).source_url.as_deref(),
+            Some(if medium_succeeds {
+                "https://test/viewer"
+            } else {
+                "https://test/zoom/1"
+            })
+        );
+        assert_eq!(
+            *reads.borrow(),
+            if medium_succeeds {
+                vec!["https://test/viewer"]
+            } else {
+                vec!["https://test/viewer", "https://test/zoom/1"]
+            }
+        );
+    }
+}
+
+#[test]
 fn decoding_defaults_to_the_final_target_through_decoder_bound_references() {
     fn page(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
         Ok(resource.follow_relative("metadata").decode_with(metadata))
