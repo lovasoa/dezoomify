@@ -1,5 +1,6 @@
 //! Native source opening converges on one validated, idle-only frontend event.
 use crate::{commands, jobs::JobTable};
+use dezoomify::core::default_registry;
 use dezoomify::model::DesktopSource;
 use std::{path::PathBuf, sync::Mutex};
 use tauri::{
@@ -96,25 +97,35 @@ pub fn on_menu_event(app: &AppHandle, event: MenuEvent) {
         return;
     }
     let handle = app.clone();
+    let registry = default_registry();
+    let extensions = registry
+        .file_formats()
+        .flat_map(|format| format.file_extensions().iter().copied())
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
     // The macOS backend displays the title as NSOpenPanel's explanatory message.
     let title = if cfg!(target_os = "macos") {
-        "Open IIIF metadata (.json), Deep Zoom (.dzi), or a URL list (.txt, .urls).\n\
-         URL lists contain one image address or file path per line. Relative paths use the list's folder."
+        std::iter::once("Open an image source.")
+            .chain(
+                registry
+                    .file_formats()
+                    .filter_map(|format| format.file_help()),
+            )
+            .collect::<Vec<_>>()
+            .join("\n")
     } else {
-        "Open image source or URL list"
+        "Open image source".to_owned()
     };
-    app.dialog()
+    let mut dialog = app
+        .dialog()
         .file()
         .set_title(title)
-        .add_filter(
-            "Image sources and URL lists",
-            &["json", "dzi", "txt", "urls"],
-        )
-        .add_filter("IIIF and Deep Zoom metadata", &["json", "dzi"])
-        .add_filter(
-            "URL lists (one address or file path per line)",
-            &["txt", "urls"],
-        )
+        .add_filter("Image sources", &extensions);
+    for format in registry.file_formats() {
+        dialog = dialog.add_filter(format.display_name(), format.file_extensions());
+    }
+    dialog
         .add_filter("All files", &["*"])
         .pick_file(move |file| {
             if let Some(file) = file {
@@ -134,10 +145,7 @@ pub fn on_window_event(window: &tauri::Window, event: &WindowEvent) {
         match paths.as_slice() {
             [path] => open_file(window.app_handle(), path.clone()),
             [] => {}
-            _ => notice(
-                window.app_handle(),
-                "Open one file at a time. To download several images, open a URL list.",
-            ),
+            _ => notice(window.app_handle(), "Open one source file at a time."),
         }
     }
 }

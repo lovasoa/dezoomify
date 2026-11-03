@@ -88,7 +88,9 @@ const ROUTES: &[DiscoveryRoute] = &[
 ];
 
 /// IIIF format. See <https://iiif.io/>.
-pub const SPEC: FormatSpec = FormatSpec::new("iiif", ROUTES).with_display_name("IIIF");
+pub const SPEC: FormatSpec = FormatSpec::new("iiif", ROUTES)
+    .with_display_name("IIIF")
+    .with_file_extensions(&["json"]);
 
 fn decode(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
     catalog(resource.final_uri(), resource.bytes()).map(ParsedResource::Complete)

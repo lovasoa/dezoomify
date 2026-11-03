@@ -21,6 +21,11 @@ decoders retain the caller's evidence; explicitly broad matches also lower the
 priority of decoded results. Return a follow request for missing bytes;
 discovery shares reads and schedules the continuation.
 
+Declare openable file extensions with `FormatSpec::with_file_extensions` and
+any opening instructions with `with_file_help`. Source-file pickers reuse these
+declarations. They do not change discovery matching or fetch priorities; keep
+remote URL evidence in the routes.
+
 Decoding and metadata parsing designate the decoded resource as canonical by
 default. That URL must be able to reconstruct the image or catalog on its own.
 Use `non_canonical()` for intermediate routes, and `decode_intermediate_with()`

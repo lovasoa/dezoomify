@@ -37,7 +37,9 @@ const ROUTES: &[DiscoveryRoute] = &[
     viewer(css("url").specificity(Low)).text_file("ImageProperties.xml"),
 ];
 
-pub const SPEC: FormatSpec = FormatSpec::new("zoomify", ROUTES).with_display_name("Zoomify");
+pub const SPEC: FormatSpec = FormatSpec::new("zoomify", ROUTES)
+    .with_display_name("Zoomify")
+    .with_file_extensions(&["xml"]);
 
 static SHOW_IMAGE_RE: LazyLock<Regex> = LazyLock::new(|| {
     let literal = r#"(?:'(?:\\[\s\S]|[^'\\])*'|"(?:\\[\s\S]|[^"\\])*")"#;

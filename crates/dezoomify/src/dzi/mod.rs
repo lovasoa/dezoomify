@@ -63,8 +63,9 @@ const ROUTES: &[DiscoveryRoute] = &[
     metadata(any()).try_decode(embedded_metadata),
 ];
 
-pub const SPEC: FormatSpec =
-    FormatSpec::new("deepzoom", ROUTES).with_display_name("Seadragon (Deep Zoom Image)");
+pub const SPEC: FormatSpec = FormatSpec::new("deepzoom", ROUTES)
+    .with_display_name("Seadragon (Deep Zoom Image)")
+    .with_file_extensions(&["dzi", "xml"]);
 
 fn is_tile_url(input: &str) -> bool {
     TILE_URL.is_match(input)

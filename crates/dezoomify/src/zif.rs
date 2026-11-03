@@ -16,14 +16,14 @@ pub const SPEC: FormatSpec = FormatSpec::new(
         .resolve_metadata(initial_request)
         .then_decode(decode)],
 )
-.with_display_name("ZIF");
+.with_display_name("ZIF")
+.with_file_extensions(&["zif"]);
 
 // Large indexes are read incrementally, within every product's metadata cap.
 const METADATA_CHUNK_BYTES: u64 = 1024 * 1024;
 
 pub(crate) fn is_zif(uri: &str) -> bool {
-    crate::core::uri::parse_uri(uri)
-        .is_ok_and(|url| url.path().to_ascii_lowercase().ends_with(".zif"))
+    SPEC.matches_file_extension(uri)
 }
 
 fn invalid(error: impl std::fmt::Display) -> DiscoveryError {

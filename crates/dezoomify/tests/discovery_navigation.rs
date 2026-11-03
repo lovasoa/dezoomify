@@ -514,6 +514,8 @@ fn unknown_inventory_is_ignored_but_explicit_sources_are_read() {
         [
             UNKNOWN,
             "https://museum.test/assets/style.css",
+            "https://museum.test/assets/settings.json",
+            "https://museum.test/assets/settings.xml",
             "https://analytics.test/beacon?event=page",
             "https://analytics.test/playlist.js",
             "https://analytics.test/?source=analytics",

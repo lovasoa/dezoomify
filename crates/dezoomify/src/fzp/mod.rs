@@ -46,6 +46,7 @@ const ROUTES: &[DiscoveryRoute] = &[
 ];
 pub const SPEC: FormatSpec = FormatSpec::new("fzp", ROUTES)
     .with_display_name("FreezoomPack")
+    .with_file_extensions(&["xml"])
     .on_failure(viewer::failed_script);
 
 fn invalid(detail: impl std::fmt::Display) -> DiscoveryError {

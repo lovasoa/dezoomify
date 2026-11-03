@@ -7,7 +7,12 @@ pub const SPEC: FormatSpec = FormatSpec::new(
     "bulk_text",
     &[metadata(url_matches(is_bulk_file).specificity(Low)).decode(decode_catalog)],
 )
-.with_display_name("Bulk text");
+.with_display_name("URL list")
+.with_file_extensions(&["txt", "urls"])
+.with_file_help(
+    "URL lists contain one image address or file path per line, optionally followed by a title. \
+     Relative paths use the list's folder.",
+);
 
 fn decode_catalog(
     resource: crate::core::DiscoveryResource<'_>,
@@ -39,12 +44,7 @@ fn catalog(uri: &str, bytes: &[u8]) -> Result<crate::core::DiscoveryCatalog, Dis
 }
 
 fn is_bulk_file(uri: &str) -> bool {
-    crate::core::uri::parse_uri(uri).is_ok_and(|url| {
-        url.path().rsplit_once('.').is_some_and(|(_, extension)| {
-            extension.eq_ignore_ascii_case("txt") || extension.eq_ignore_ascii_case("urls")
-        })
-    }) && !uri.contains("{{")
-        && !uri.contains("}}")
+    SPEC.matches_file_extension(uri) && !uri.contains("{{") && !uri.contains("}}")
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -112,14 +112,21 @@ mod tests {
 
     #[test]
     fn signed_list_files_remain_discoverable_without_filename_guesses() {
-        const INPUT: &str = "https://images.test/batch.txt?token=exact%2Bvalue";
-        let (catalog, requests) =
-            crate::test_support::discover(SPEC, INPUT, &[(b"https://images.test/art.dzi", None)]);
-        assert!(matches!(
-            catalog.unwrap().entries(),
-            [DiscoveredEntry::Deferred(image)] if image.uri == "https://images.test/art.dzi"
-        ));
-        assert_eq!(requests[0].uri, INPUT);
+        for input in [
+            "https://images.test/batch.txt?token=exact%2Bvalue",
+            "https://images.test/batch.URLS?token=exact%2Bvalue#list",
+        ] {
+            let (catalog, requests) = crate::test_support::discover(
+                SPEC,
+                input,
+                &[(b"https://images.test/art.dzi", None)],
+            );
+            assert!(matches!(
+                catalog.unwrap().entries(),
+                [DiscoveredEntry::Deferred(image)] if image.uri == "https://images.test/art.dzi"
+            ));
+            assert_eq!(requests[0].uri, input);
+        }
         for unrelated in [
             "https://images.test/playlist.js",
             "https://images.test/bulk.css",

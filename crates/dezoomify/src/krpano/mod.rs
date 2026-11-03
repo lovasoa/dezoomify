@@ -50,6 +50,7 @@ const ROUTES: &[DiscoveryRoute] = &[
 
 pub const SPEC: FormatSpec = FormatSpec::new("krpano", ROUTES)
     .with_display_name("krpano")
+    .with_file_extensions(&["xml"])
     .on_failure(handle_failure);
 
 fn handle_html(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {

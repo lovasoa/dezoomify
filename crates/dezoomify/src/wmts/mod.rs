@@ -12,7 +12,9 @@ const ROUTES: &[DiscoveryRoute] = &[
     metadata(any()).try_decode(try_decode),
 ];
 
-pub const SPEC: FormatSpec = FormatSpec::new("wmts", ROUTES).with_display_name("WMTS");
+pub const SPEC: FormatSpec = FormatSpec::new("wmts", ROUTES)
+    .with_display_name("WMTS")
+    .with_file_extensions(&["xml"]);
 
 fn is_wmts_url(uri: &str) -> bool {
     crate::core::uri::parse_uri(uri).is_ok_and(|url| {

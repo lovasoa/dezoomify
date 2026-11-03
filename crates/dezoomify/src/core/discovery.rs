@@ -696,6 +696,8 @@ fn parse_resource(
 pub struct FormatSpec {
     name: &'static str,
     display_name: &'static str,
+    file_extensions: &'static [&'static str],
+    file_help: Option<&'static str>,
     routes: &'static [DiscoveryRoute],
     on_failure: Option<FailureHandler>,
     html_queries: &'static [&'static str],
@@ -707,6 +709,8 @@ impl FormatSpec {
         Self {
             name,
             display_name: name,
+            file_extensions: &[],
+            file_help: None,
             routes,
             on_failure: None,
             html_queries: &[],
@@ -728,6 +732,46 @@ impl FormatSpec {
     pub const fn with_display_name(mut self, display_name: &'static str) -> Self {
         self.display_name = display_name;
         self
+    }
+
+    /// Extensions offered by source-file pickers, without leading dots.
+    /// These are UI hints, not discovery evidence: broad extensions must not
+    /// cause speculative reads or prevent parsing an explicitly opened file.
+    #[must_use]
+    pub const fn with_file_extensions(mut self, extensions: &'static [&'static str]) -> Self {
+        self.file_extensions = extensions;
+        self
+    }
+
+    /// Optional opening instructions displayed alongside source-file filters.
+    #[must_use]
+    pub const fn with_file_help(mut self, help: &'static str) -> Self {
+        self.file_help = Some(help);
+        self
+    }
+
+    #[must_use]
+    pub const fn file_extensions(&self) -> &'static [&'static str] {
+        self.file_extensions
+    }
+
+    #[must_use]
+    pub const fn file_help(&self) -> Option<&'static str> {
+        self.file_help
+    }
+
+    /// Match a URL's parsed path or local resource name against the declared
+    /// extensions, ignoring case, query and fragment. Discovery routes may opt
+    /// into this check when an extension supplies enough evidence for a read.
+    #[must_use]
+    pub fn matches_file_extension(&self, uri: &str) -> bool {
+        super::uri::parse_uri(uri).is_ok_and(|url| {
+            url.path().rsplit_once('.').is_some_and(|(_, extension)| {
+                self.file_extensions
+                    .iter()
+                    .any(|candidate| extension.eq_ignore_ascii_case(candidate))
+            })
+        })
     }
     #[must_use]
     pub const fn name(&self) -> &'static str {

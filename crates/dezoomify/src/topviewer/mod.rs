@@ -90,7 +90,9 @@ fn known_detail_url(uri: &str) -> Result<Request, DiscoveryError> {
         .ok_or_else(|| DiscoveryError::InvalidMetadata("not a known Memorix detail URL".into()))
 }
 
-pub const SPEC: FormatSpec = FormatSpec::new("topviewer", ROUTES).with_display_name("TopViewer");
+pub const SPEC: FormatSpec = FormatSpec::new("topviewer", ROUTES)
+    .with_display_name("TopViewer")
+    .with_file_extensions(&["json"]);
 
 fn follow_mediabank(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
     let tag = resource.element()?;

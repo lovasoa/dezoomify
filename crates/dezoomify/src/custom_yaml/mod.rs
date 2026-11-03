@@ -20,7 +20,9 @@ pub const SPEC: FormatSpec = FormatSpec::new(
     "custom",
     &[metadata(url_suffix("tiles.yaml")).decode(decode)],
 )
-.with_display_name("Custom tiles");
+.with_display_name("Custom tiles")
+.with_file_extensions(&["yaml"])
+.with_file_help("Custom tile descriptions must be named tiles.yaml.");
 
 fn decode(resource: crate::core::DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
     decode_yaml(resource.bytes()).map(ParsedResource::Image)

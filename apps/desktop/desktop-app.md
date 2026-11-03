@@ -40,8 +40,9 @@ When a source offers several images, choose **Download all** above the image
 picker or choose one image individually. Batch results show each saved file and
 any failures. Cancelling stops the remaining work and keeps completed saves.
 
-Open local `info.json`, `.dzi`, `.txt`, or `.urls` sources through **File → Open…**,
+Open local source files through **File → Open…**,
 **⌘O** on macOS, **Ctrl+O** on Windows/Linux, or by dropping a file onto the window.
+The file dialog lists the supported formats.
 URL lists are plain text: one address or file path per line, optionally followed
 by a title. Relative entries use the list's directory. Keep local metadata with
 its tile files. Finish or cancel the current download before opening another source.
