@@ -756,3 +756,70 @@ body {
   border-color: var(--dz-accent-blue);
   box-shadow: var(--dz-focus-ring);
 }
+
+.dz-batch-results {
+  margin-top: 1.5rem;
+  text-align: left;
+  min-width: 0;
+}
+
+.dz-batch-totals {
+  font-variant-numeric: tabular-nums;
+}
+
+.dz-batch-saved-total,
+.dz-batch-status-total {
+  margin: 0.35rem 0;
+}
+
+.dz-batch-saved-total {
+  font-size: 1.15rem;
+  font-weight: 650;
+}
+
+.dz-batch-list {
+  list-style: none;
+  padding: 0;
+  margin: 1.5rem 0 0;
+}
+
+.dz-batch-item {
+  padding: 1rem 0;
+  border-bottom: 1px solid var(--dz-surface-border);
+  overflow-wrap: anywhere;
+}
+
+.dz-batch-item h3 {
+  margin: 0;
+}
+
+.dz-batch-source,
+.dz-batch-status,
+.dz-batch-filename,
+.dz-batch-error {
+  margin: 0.5rem 0;
+}
+
+.dz-batch-source {
+  font: 0.8rem var(--dz-font-mono);
+  color: var(--dz-text-muted);
+}
+
+.dz-batch-status {
+  color: var(--dz-text-secondary);
+}
+
+.dz-batch-filename {
+  font-weight: 600;
+}
+
+.dz-batch-error {
+  color: var(--dz-error-text);
+}
+
+.dz-batch-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-top: 0.75rem;
+}

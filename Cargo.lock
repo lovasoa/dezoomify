@@ -1143,7 +1143,9 @@ name = "dezoomify-desktop"
 version = "3.1.0"
 dependencies = [
  "dezoomify",
+ "dezoomify-fixture-server",
  "dezoomify-native",
+ "image",
  "open",
  "serde",
  "serde_json",

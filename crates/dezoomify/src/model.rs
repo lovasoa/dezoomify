@@ -1347,6 +1347,52 @@ pub struct DesktopOutput {
     pub saved_output: Option<SavedOutput>,
 }
 
+/// A desktop picker answer applies only to its current ordered catalog.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub enum DesktopImageChoice {
+    One { index: u32 },
+    All,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub enum DesktopBatchItemState {
+    Pending,
+    Running,
+    Saved { result: DesktopOutput },
+    Failed { error: Error },
+    Cancelled,
+}
+
+/// Stable session-local identity; expanding a nested catalog adds new identities.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub struct DesktopBatchItem {
+    pub id: u32,
+    pub title: Option<String>,
+    pub source_url: Option<String>,
+    pub state: DesktopBatchItemState,
+}
+
+/// Snapshots include settled results even when cancellation stops remaining work.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub struct DesktopBatch {
+    pub items: Vec<DesktopBatchItem>,
+    pub cancelled: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub enum DesktopResult {
+    Image { result: DesktopOutput },
+    Batch { batch: DesktopBatch },
+}
+
 // Bounded diagnostic observations.
 // Hosts supply clocks and identity. Fields are bounded scalar facts: bodies,
 // buffers, and arbitrary object graphs cannot enter a report.

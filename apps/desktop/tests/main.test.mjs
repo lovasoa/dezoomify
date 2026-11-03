@@ -139,8 +139,8 @@ test("desktop catalog choice keeps newer questions and ignores stale previews an
   assert.equal(root.querySelectorAll(".dz-image-row").length, 2);
   act(() => click(root.querySelector('[data-dz-image-index="1"]')));
   assert.deepEqual(
-    invocation.answers.map(({ question, index }) => [question, index]),
-    [[1, 1]],
+    invocation.answers.map(({ question, choice }) => [question, choice]),
+    [[1, { kind: "one", index: 1 }]],
   );
   act(() => invocation.callbacks.imageChoice(2, { kind: "catalog", catalog }));
   act(() =>
@@ -178,6 +178,103 @@ test("desktop retry actions retain a newer native question", async () => {
   assert.equal(invocation.answers[1].choice, "cancel");
   await act(async () => invocation.answers[1].resolve());
   assert.equal(root.querySelector("[data-dz-retry-actions]"), null);
+});
+
+test("desktop offers Download all for ready images and keeps every batch result", async () => {
+  const { root, start, native } = mountDesktop();
+  const invocation = await start();
+  const image = {
+    kind: "image",
+    format: "deepzoom",
+    sourceUrl: invocation.request.inputUrl,
+    levels: [],
+  };
+  act(() =>
+    invocation.callbacks.imageChoice(1, {
+      kind: "catalog",
+      catalog: {
+        entries: [
+          { ...image, title: "First" },
+          { ...image, title: "Second" },
+        ],
+      },
+    }),
+  );
+  click(root.querySelector("#dz-btn-download-all"));
+  assert.deepEqual(invocation.answers[0].choice, { kind: "all" });
+  assert.equal(root.querySelector("#dz-btn-download-all").disabled, true);
+  const saved = { id: "saved:first", filename: "First.png" };
+  const batch = {
+    cancelled: false,
+    items: [
+      { id: 0, title: "First", state: { kind: "saved", result: { output, saved_output: saved } } },
+      { id: 1, title: "Second", state: { kind: "failed", error: { kind: "no-image-found" } } },
+    ],
+  };
+  act(() => invocation.callbacks.batch(batch));
+  await act(() => invocation.answers[0].resolve());
+  assert.equal(root.querySelector(".dz-image-picker"), null);
+  assert.ok(root.querySelector(".dz-job-section"), "current tile progress remains visible");
+  await act(() => invocation.resolveBatch(batch));
+  assert.equal(root.querySelectorAll(".dz-batch-item").length, 2);
+  assert.equal(root.querySelector(".dz-job-section"), null);
+  assert.match(root.textContent, /First.png/);
+  assert.match(root.textContent, /No zoomable image was found/);
+  const opened = [];
+  native.openBatchOutput = async (...args) => opened.push(args);
+  click(root.querySelector(".dz-batch-actions button"));
+  await flush();
+  assert.deepEqual(opened, [[saved, false]]);
+});
+
+test("cancelling before the first batch event preserves results and ignores retired events", async () => {
+  const { root, start } = mountDesktop();
+  const invocation = await start();
+  let cancelled = 0;
+  invocation.cancel = async () => {
+    cancelled++;
+  };
+  const items = [
+    {
+      id: 0,
+      title: "Saved",
+      state: {
+        kind: "saved",
+        result: { output, saved_output: { id: "saved:one", filename: "Saved.png" } },
+      },
+    },
+    { id: 1, title: "Pending", state: { kind: "pending" } },
+  ];
+  act(() =>
+    invocation.callbacks.imageChoice(1, {
+      kind: "catalog",
+      catalog: {
+        entries: [
+          { kind: "image-request", uri: "https://images.test/one" },
+          { kind: "image-request", uri: "https://images.test/two" },
+        ],
+      },
+    }),
+  );
+  click(root.querySelector("#dz-btn-download-all"));
+  await act(() => invocation.answers[0].resolve());
+  click(root.querySelector("#dz-btn-cancel"));
+  await flush();
+  assert.equal(cancelled, 1);
+  assert.equal(root.querySelector("#dz-url-input"), null, "cancel awaits the batch result");
+  await act(() =>
+    invocation.resolveBatch({
+      cancelled: true,
+      items: [items[0], { ...items[1], state: { kind: "cancelled" } }],
+    }),
+  );
+  assert.match(root.textContent, /cancelled/i);
+  assert.match(root.textContent, /Saved.png/);
+  click(root.querySelector(".dz-batch-results .dz-actions-row button"));
+  await flush();
+  assert.ok(root.querySelector("#dz-url-input"));
+  act(() => invocation.callbacks.batch({ items, cancelled: false }));
+  assert.equal(root.querySelector(".dz-batch-results"), null);
 });
 
 test("a failed image answer closes the picker and exposes recovery", async () => {

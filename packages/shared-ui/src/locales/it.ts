@@ -15,6 +15,7 @@ export const it = {
   "view.images.noPreview": "Anteprima non disponibile",
   "view.images.unknownSize": "Dimensioni sconosciute",
   "view.images.choose": "Scegli",
+  "view.images.downloadAll": "Scarica tutto",
   "view.images.chooseNamed": "Scegli {title} (immagine {number})",
   "view.images.cancel": "Annulla",
   "page.brand": "Salva immagini zoomabili",
@@ -57,6 +58,19 @@ export const it = {
   "desktop.done.folderError":
     "Impossibile aprire la cartella. Verifica che sia installato un gestore di file.",
   "desktop.done.missingError": "L’immagine o la cartella non esiste più.",
+  "desktop.batch.title": "Risultati dei download",
+  "desktop.batch.runningTitle": "Download delle immagini",
+  "desktop.batch.cancelledTitle": "Download interrotti",
+  "desktop.batch.savedSummary": "{saved} di {total} salvate",
+  "desktop.batch.statusSummary":
+    "{failed} non riuscite · {cancelled} annullate · {remaining} rimanenti",
+  "desktop.batch.pending": "In attesa",
+  "desktop.batch.running": "Download in corso",
+  "desktop.batch.saved": "Salvata",
+  "desktop.batch.failed": "Non riuscita",
+  "desktop.batch.cancelled": "Non scaricata",
+  "desktop.batch.openNamed": "Apri {title} (immagine {number})",
+  "desktop.batch.revealNamed": "Mostra {title} nella cartella (immagine {number})",
   // Modal chrome (shared view.ts openModal).
   "view.modal.ok": "Capito",
   "view.modal.closeDialog": "Chiudi la finestra",

@@ -6,8 +6,11 @@ use crate::commands;
 use crate::jobs::JobTable;
 use crate::saved_outputs::SavedOutputs;
 use crate::settings::parse_settings;
-use dezoomify::model::{DesktopOutput, Error, Failure, ImageChoiceEvent, SavedOutputState};
-use dezoomify_native::{NativeHost, OutputTarget};
+use dezoomify::model::{
+    DesktopBatch, DesktopImageChoice, DesktopResult, Error, Failure, ImageChoiceEvent, Progress,
+    SavedOutputState, TileAcquisition,
+};
+use dezoomify_native::OutputTarget;
 
 #[cfg(all(test, target_os = "linux"))]
 mod output_tests {
@@ -176,11 +179,14 @@ async fn inspect_saved_output(
 async fn open_history_output(
     outputs: State<'_, Arc<SavedOutputs>>,
     id: String,
+    reveal: Option<bool>,
 ) -> Result<(), Error> {
     let outputs = Arc::clone(&outputs);
-    tauri::async_runtime::spawn_blocking(move || launch_saved_output(outputs.resolve(&id)?, false))
-        .await
-        .map_err(|error| Error::LaunchFailed(error.to_string().into()))?
+    tauri::async_runtime::spawn_blocking(move || {
+        launch_saved_output(outputs.resolve(&id)?, reveal.unwrap_or(false))
+    })
+    .await
+    .map_err(|error| Error::LaunchFailed(error.to_string().into()))?
 }
 
 #[tauri::command]
@@ -209,7 +215,7 @@ async fn dezoomify(
     job: String,
     input_url: String,
     settings: Option<serde_json::Value>,
-) -> Result<DesktopOutput, Error> {
+) -> Result<DesktopResult, Error> {
     if !commands::is_valid_input_url(&input_url) {
         return Err(Error::InvalidInput(
             "input_url must be an http(s) URL up to 2048 bytes without userinfo"
@@ -242,84 +248,16 @@ async fn dezoomify(
     };
     let saved_outputs = Arc::clone(&saved_outputs);
     tauri::async_runtime::spawn_blocking(move || {
-        let mut host = match NativeHost::with_diagnostics(options, registration.diagnostics.clone())
-        {
-            Ok(host) => host,
-            Err(error) => {
-                registration.finish(None);
-                registration
-                    .diagnostics
-                    .finish("failed", serde_json::json!({ "error": error }));
-                return Err(error);
-            }
-        };
-        host.controls = registration.controls.clone();
-        host.on_progress(|progress| {
-            let _ = app.emit(
-                crate::jobs::CHANNEL_PROGRESS,
-                serde_json::json!({"job": job, "progress": progress}),
-            );
-        });
-        host.on_retry(|request| {
-            let (question, answer) = registration.request_retry();
-            let _ = app.emit(
-                crate::jobs::CHANNEL_RETRY,
-                serde_json::json!({"job": job, "question": question, "request": request}),
-            );
-            Box::pin(async move { answer.await.map_err(|_| Error::InteractionExpired) })
-        });
-        host.on_choose_image(|catalog| {
-            let (question, answer) = registration.request_image(catalog.entries.len());
-            app.emit(
-                crate::jobs::CHANNEL_IMAGE_CHOICE,
-                serde_json::json!({"job": job, "question": question,
-                    "event": ImageChoiceEvent::Catalog { catalog }}),
-            )
-            .map_err(|error| Error::ChoiceFailed(error.to_string().into()))?;
-            let app = app.clone();
-            let job = job.clone();
-            Ok(dezoomify_native::host::ImageSelection {
-                answer: Box::pin(
-                    async move { answer.await.map_err(|_| Error::InteractionExpired) },
-                ),
-                preview: Box::new(move |index, thumbnail| {
-                    let _ = app.emit(
-                        crate::jobs::CHANNEL_IMAGE_CHOICE,
-                        serde_json::json!({"job": job, "question": question,
-                            "event": ImageChoiceEvent::Preview { index, thumbnail }}),
-                    );
-                }),
-            })
-        });
-        let result = host.transport.block_on(dezoomify::dezoomify(
-            host.inputs(),
-            host.algorithm_options(),
-            &host,
-        ));
-        let path = host.publication().map(|output| output.path);
-        registration.finish(path.clone());
-        let saved_output = path
-            .filter(|_| result.is_ok())
-            .and_then(|path| saved_outputs.register(path, &job).ok());
-        if let Some(saved) = &saved_output {
-            let id = saved.id.clone();
-            // History persistence is best effort and does not hold up completion.
-            tauri::async_runtime::spawn_blocking(move || saved_outputs.persist(&id));
-        }
-        if let Err(error) = &result {
-            registration.diagnostics.finish(
-                if matches!(error.cause(), Error::Cancelled) {
-                    "cancelled"
-                } else {
-                    "failed"
-                },
-                serde_json::json!({ "error": error }),
-            );
-        }
-        result.map(|output| DesktopOutput {
-            output,
-            saved_output,
-        })
+        crate::session::run_session(
+            options,
+            &registration,
+            saved_outputs,
+            &job,
+            &ShellEvents {
+                app,
+                job: job.clone(),
+            },
+        )
     })
     .await
     .map_err(|_| Error::Internal("native task failed".to_string().into()))?
@@ -363,11 +301,45 @@ async fn answer_image(
     state: State<'_, Mutex<JobTable>>,
     job: String,
     question: u64,
-    index: u32,
+    choice: DesktopImageChoice,
 ) -> Result<(), Error> {
     lock_table(&state)?
         .live(&job)?
-        .answer_image(question, index)
+        .answer_image(question, choice)
+}
+
+struct ShellEvents {
+    app: AppHandle,
+    job: String,
+}
+
+impl crate::session::SessionEvents for ShellEvents {
+    fn progress(&self, progress: Progress) {
+        let _ = self.app.emit(
+            crate::jobs::CHANNEL_PROGRESS,
+            serde_json::json!({"job": self.job, "progress": progress}),
+        );
+    }
+    fn retry(&self, question: u64, request: TileAcquisition) {
+        let _ = self.app.emit(
+            crate::jobs::CHANNEL_RETRY,
+            serde_json::json!({"job": self.job, "question": question, "request": request}),
+        );
+    }
+    fn image_choice(&self, question: u64, event: ImageChoiceEvent) -> Result<(), Error> {
+        self.app
+            .emit(
+                crate::jobs::CHANNEL_IMAGE_CHOICE,
+                serde_json::json!({"job": self.job, "question": question, "event": event}),
+            )
+            .map_err(|error| Error::ChoiceFailed(error.to_string().into()))
+    }
+    fn batch(&self, batch: &DesktopBatch) {
+        let _ = self.app.emit(
+            crate::jobs::CHANNEL_BATCH,
+            serde_json::json!({"job": self.job, "batch": batch}),
+        );
+    }
 }
 #[tauri::command]
 async fn get_job_diagnostics(

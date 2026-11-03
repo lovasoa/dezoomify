@@ -42,6 +42,7 @@
     "iiif-dir"
   ],
   "eventChannels": [
+    "dezoomify://batch",
     "dezoomify://image-choice",
     "dezoomify://progress",
     "dezoomify://registered",

@@ -1,6 +1,8 @@
 import { isValidInputUrl } from "@dezoomify/shared-ui";
 import type {
-  DesktopOutput,
+  DesktopBatch,
+  DesktopImageChoice,
+  DesktopResult,
   DiagnosticReport,
   ImageChoiceEvent,
   Error as JobError,
@@ -40,12 +42,12 @@ async function withVerdict<T>(error: T, api: DesktopIpc): Promise<T> {
 
 export interface NativeInvocation {
   id: string;
-  finished: Promise<DesktopOutput>;
+  finished: Promise<DesktopResult>;
   cancel(): Promise<void>;
   pause(): Promise<void>;
   resume(): Promise<void>;
   answer(question: number, choice: RetryChoice): Promise<void>;
-  answerImage(question: number, index: number): Promise<void>;
+  answerImage(question: number, choice: DesktopImageChoice): Promise<void>;
   openOutput(reveal: boolean): Promise<void>;
   dispose(): Promise<void>;
 }
@@ -74,6 +76,7 @@ interface NativeCallbacks {
   progress(value: Progress): void;
   retry(question: number, value: TileAcquisition): void;
   imageChoice?(question: number, event: ImageChoiceEvent): void;
+  batch?(batch: DesktopBatch): void;
 }
 
 function deliverNativeEvent(
@@ -94,6 +97,9 @@ function deliverNativeEvent(
       break;
     case "dezoomify://image-choice":
       receiveImageChoice(payload, callbacks.imageChoice);
+      break;
+    case "dezoomify://batch":
+      if ("batch" in payload) callbacks.batch?.(payload.batch as DesktopBatch);
       break;
   }
 }
@@ -122,6 +128,7 @@ export async function invokeNative(
       "dezoomify://progress",
       "dezoomify://retry",
       "dezoomify://image-choice",
+      "dezoomify://batch",
     ]) {
       const stop = await api.listen(channel, ({ payload }) => {
         if (retired || !belongsToJob(payload, id)) return;
@@ -148,7 +155,7 @@ export async function invokeNative(
     })
     .then((response) => {
       assertNoTileBytes(response);
-      return response as DesktopOutput;
+      return response as DesktopResult;
     })
     .catch(async (error: unknown) => {
       // The shell's retry verdict is stamped here, on the async path before
@@ -166,7 +173,7 @@ export async function invokeNative(
     pause: () => call("pause_job"),
     resume: () => call("resume_job"),
     answer: (question, answer) => call("answer_retry", { question, answer }),
-    answerImage: (question, index) => call("answer_image", { question, index }),
+    answerImage: (question, choice) => call("answer_image", { question, choice }),
     openOutput: (reveal) => call("open_saved_output", { reveal }),
     async dispose() {
       if (retired) return;
@@ -186,6 +193,11 @@ export async function inspectSavedOutput(
 
 export async function openHistoryOutput(saved: SavedOutput, api: DesktopIpc = ipc): Promise<void> {
   await api.invoke("open_history_output", { id: saved.id });
+}
+
+/** Open a batch result by its saved reference after its output Host has settled. */
+export async function openBatchOutput(saved: SavedOutput, reveal: boolean): Promise<void> {
+  await ipc.invoke("open_history_output", { id: saved.id, reveal });
 }
 
 export async function forgetSavedOutput(saved: SavedOutput, api: DesktopIpc = ipc): Promise<void> {

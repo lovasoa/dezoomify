@@ -49,17 +49,19 @@ export function mountDesktop({ languages = ["en"] } = {}) {
         answers,
         id: `job:test-${invocations.length}`,
         finished: finished.promise,
-        resolve: (output, saved_output) => finished.resolve({ output, saved_output }),
+        resolve: (output, saved_output) =>
+          finished.resolve({ kind: "image", result: { output, saved_output } }),
+        resolveBatch: (batch) => finished.resolve({ kind: "batch", batch }),
         reject: finished.reject,
         async pause() {},
         async resume() {},
         async cancel() {},
         async dispose() {
-          finished.resolve({ output });
+          finished.resolve({ kind: "image", result: { output } });
         },
         async openOutput() {},
         answer: (question, choice) => answer({ question, choice }),
-        answerImage: (question, index) => answer({ question, index }),
+        answerImage: (question, choice) => answer({ question, choice }),
       };
       invocations.push(invocation);
       callbacks.progress(progress);
@@ -77,6 +79,9 @@ export function mountDesktop({ languages = ["en"] } = {}) {
       },
       forgetSavedOutput: async () => {},
       openExternalLink: async () => {},
+      openBatchOutput: async (...args) => {
+        await native.openBatchOutput?.(...args);
+      },
       readNativeDiagnostics: async () => {
         throw new Error("No native report");
       },

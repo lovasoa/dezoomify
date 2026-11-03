@@ -36,6 +36,10 @@ start. Saving is automatic. When **Image saved** appears, use **Open image** or
 **Show in folder**. Settings return on the main screen, not the result screen.
 Pause stops new tile downloads; Cancel remains available while output finishes.
 
+When a source offers several images, choose **Download all** above the image
+picker or choose one image individually. Batch results show each saved file and
+any failures. Cancelling stops the remaining work and keeps completed saves.
+
 ## Install
 
 The [releases page](https://github.com/lovasoa/dezoomify/releases/latest)
