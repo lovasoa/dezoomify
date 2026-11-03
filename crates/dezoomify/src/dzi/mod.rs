@@ -70,14 +70,12 @@ fn is_tile_url(input: &str) -> bool {
 }
 
 fn is_dzi_url(input: &str) -> bool {
-    input
-        .split(['?', '#'])
-        .next()
-        .is_some_and(|path| path.ends_with(".dzi"))
-        || url::Url::parse(input).is_ok_and(|url| {
-            url.query_pairs()
+    crate::core::uri::parse_uri(input).is_ok_and(|url| {
+        url.path().ends_with(".dzi")
+            || url
+                .query_pairs()
                 .any(|(key, value)| key == "filename" && value.ends_with(".dzi"))
-        })
+    })
 }
 
 static POLONA_ITEM_RE: LazyLock<Regex> =
@@ -169,24 +167,20 @@ fn is_polona_item_url(uri: &str) -> bool {
 }
 
 fn is_nla_view_url(uri: &str) -> bool {
-    uri.contains("nla.gov.au/")
-        && uri
-            .rsplit(['?', '#'])
-            .next()
-            .unwrap_or(uri)
-            .ends_with("/view")
+    crate::core::uri::parse_uri(uri).is_ok_and(|url| {
+        url.host_str()
+            .is_some_and(|host| host == "nla.gov.au" || host.ends_with(".nla.gov.au"))
+            && url.path().ends_with("/view")
+    })
 }
 
-#[allow(clippy::unnecessary_wraps)]
 fn nla_metadata(input: &str) -> Result<Request, DiscoveryError> {
     // National Library of Australia viewer pages expose extensionless DZI
     // metadata next to the viewer path: `.../view` becomes `.../dzi`.
-    let base = input.split(['?', '#']).next().unwrap_or(input);
-    let parent = base
-        .trim_end_matches('/')
-        .rfind('/')
-        .map_or(base, |index| &base[..index]);
-    Ok(Request::new(format!("{parent}/dzi")))
+    let url = url::Url::parse(input)
+        .and_then(|url| url.join("dzi"))
+        .map_err(|error| DiscoveryError::InvalidMetadata(error.to_string()))?;
+    Ok(Request::new(url.to_string()))
 }
 
 fn is_polona_json_url(uri: &str) -> bool {

@@ -39,15 +39,11 @@ fn catalog(uri: &str, bytes: &[u8]) -> Result<crate::core::DiscoveryCatalog, Dis
 }
 
 fn is_bulk_file(uri: &str) -> bool {
-    uri.split(['?', '#'])
-        .next()
-        .unwrap_or(uri)
-        .rsplit('.')
-        .next()
-        .is_some_and(|extension| {
+    crate::core::uri::parse_uri(uri).is_ok_and(|url| {
+        url.path().rsplit_once('.').is_some_and(|(_, extension)| {
             extension.eq_ignore_ascii_case("txt") || extension.eq_ignore_ascii_case("urls")
         })
-        && !uri.contains("{{")
+    }) && !uri.contains("{{")
         && !uri.contains("}}")
 }
 

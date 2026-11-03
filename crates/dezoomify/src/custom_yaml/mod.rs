@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use serde::Deserialize;
 
 use crate::Vec2d;
-use crate::core::discovery::{metadata, url_matches};
+use crate::core::discovery::{metadata, url_suffix};
 use crate::core::{
     DiscoveryError, FormatSpec, ImagePlan, ParsedResource, Positioned, ProcessingRecipe, Request,
     ResolvedLevel, TileSourceError,
@@ -18,15 +18,9 @@ mod variable;
 
 pub const SPEC: FormatSpec = FormatSpec::new(
     "custom",
-    &[metadata(url_matches(is_tiles_yaml)).decode(decode)],
+    &[metadata(url_suffix("tiles.yaml")).decode(decode)],
 )
 .with_display_name("Custom tiles");
-
-fn is_tiles_yaml(uri: &str) -> bool {
-    uri.split(['?', '#'])
-        .next()
-        .is_some_and(|path| path.ends_with("tiles.yaml"))
-}
 
 fn decode(resource: crate::core::DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
     decode_yaml(resource.bytes()).map(ParsedResource::Image)
@@ -133,9 +127,17 @@ mod tests {
 
     #[test]
     fn recognizes_tiles_yaml_with_a_query_or_fragment() {
-        assert!(is_tiles_yaml("https://example.test/tiles.yaml?version=2"));
-        assert!(is_tiles_yaml("https://example.test/tiles.yaml#preview"));
-        assert!(!is_tiles_yaml("https://example.test/tiles.yml"));
+        for input in [
+            "https://example.test/tiles.yaml?version=2",
+            "https://example.test/tiles.yaml#preview",
+            "tiles.yaml",
+            r"C:\saved\tiles.yaml",
+        ] {
+            let (catalog, requests) =
+                crate::test_support::discover(SPEC, input, &[(BUNDLED, None)]);
+            assert!(catalog.is_ok(), "{input}");
+            assert_eq!(requests[0].uri, input);
+        }
     }
 
     fn positioned_source(catalog: &crate::core::DiscoveryCatalog) -> &TileSource {

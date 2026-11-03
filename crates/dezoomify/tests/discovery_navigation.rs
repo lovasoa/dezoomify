@@ -556,6 +556,20 @@ fn unknown_inventory_urls_need_supplied_contents_or_an_explicit_source() {
             "https://analytics.test/collect?dl=https%3A%2F%2Fartsandculture.google.com%2Fasset%2Ftest",
             "https://analytics.test/collect?dl=https%3A%2F%2Fhungaricana.hu%2Fimages%2Ftest",
             "https://analytics.test/collect#hungaricana.hu",
+            "https://artsandculture.google.com@analytics.test/collect",
+            "https://analytics.test/artsandculture.google.com/asset/test",
+            "https://artsandculture.google.com.analytics.test/collect",
+            "https://hungaricana.hu@analytics.test/collect",
+            "https://analytics.test/hungaricana.hu/collect",
+            "https://hungaricana.hu.analytics.test/collect",
+            "https://analytics.test/collect?ref=imagesize/image.ecw",
+            "https://metadata.dzi",
+            "https://metadata.zif",
+            "https://metadata.txt",
+            "https://tiles.yaml",
+            "https://wmts.xml/collect",
+            "https://analytics.test/collect?ref=service=wmts&other=request=getcapabilities",
+            "https://analytics.test/collect#service=wmts&request=getcapabilities",
         ]
         .into_iter()
         .map(observed)
@@ -673,6 +687,17 @@ fn local_paths_and_only_supported_iframe_sources_are_followed() {
         "deepzoom",
     );
 }
+#[test]
+fn nla_viewer_queries_do_not_hide_the_metadata_route() {
+    image(
+        vec![DiscoveryInput::new(
+            "https://nla.gov.au/nla.obj-123/view?part=1#preview",
+        )],
+        &[("https://nla.gov.au/nla.obj-123/dzi", DZI)],
+        "deepzoom",
+    );
+}
+
 #[test]
 fn a_large_resource_inventory_is_ranked_before_spending_the_read_budget() {
     let metadata = "https://museum.test/proxy?filename=objectimages/painting.dzi";

@@ -690,7 +690,7 @@ async function retireFirefoxFixture(driver, driverTab) {
 }
 
 function browserFixtureInput(fixture) {
-  const path = fixture.input.split(/[?#]/, 1)[0];
+  const path = new URL(fixture.input, fixtureServer.base).pathname;
   return /\.(?:zif|ya?ml)$/i.test(path) || fixture.input.includes("{{")
     ? fixture.viewer
     : fixture.input;

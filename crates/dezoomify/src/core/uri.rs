@@ -2,6 +2,17 @@
 
 use url::Url;
 
+/// Parse a URL or local resource name for discovery matching. Relative names
+/// use a file base; keep the original reference for requests and resolution.
+pub(crate) fn parse_uri(uri: &str) -> Result<Url, url::ParseError> {
+    if matches!(uri.as_bytes(), [drive, b':', b'/' | b'\\', ..] if drive.is_ascii_alphabetic()) {
+        return Url::parse(&format!("file:///{uri}"));
+    }
+    static BASE: std::sync::LazyLock<Url> =
+        std::sync::LazyLock::new(|| Url::parse("file:///").expect("constant file base"));
+    Url::options().base_url(Some(&BASE)).parse(uri)
+}
+
 /// Resolve `reference` against an opaque URL or local resource name.
 #[must_use]
 pub fn resolve_relative(base: &str, reference: &str) -> String {
