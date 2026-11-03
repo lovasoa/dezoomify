@@ -28,8 +28,9 @@ const ROUTES: &[DiscoveryRoute] = &[
         .follow_attribute("src"),
 ];
 
-pub const SPEC: FormatSpec =
-    FormatSpec::new("second_canvas", ROUTES).with_display_name("Second Canvas");
+pub const SPEC: FormatSpec = FormatSpec::new("second_canvas", ROUTES)
+    .with_display_name("Second Canvas")
+    .with_file_extensions(&["json"]);
 
 static EMBEDDED_CONFIG_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
     BytesRegex::new(

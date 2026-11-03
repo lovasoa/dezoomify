@@ -314,6 +314,7 @@ pub struct DiscoveryMatch {
 enum MatchPattern {
     Any,
     UrlSuffix(&'static str),
+    FileName(&'static str),
     UrlPredicate(UrlPredicate),
     Css(&'static str, fn(&HtmlElement) -> bool),
     ResourcePredicate(for<'a> fn(DiscoveryResource<'a>) -> bool),
@@ -342,6 +343,12 @@ impl DiscoveryMatch {
             MatchPattern::UrlSuffix(suffix) => {
                 super::uri::parse_uri(uri).is_ok_and(|url| url.path().ends_with(suffix))
             }
+            MatchPattern::FileName(pattern) => super::uri::parse_uri(uri).is_ok_and(|url| {
+                let name = url.path().rsplit('/').next().unwrap_or_default();
+                pattern
+                    .strip_prefix('*')
+                    .map_or_else(|| name == pattern, |suffix| name.ends_with(suffix))
+            }),
             MatchPattern::UrlPredicate(predicate) => predicate(uri),
             _ => false,
         }
@@ -350,7 +357,7 @@ impl DiscoveryMatch {
     fn url_match(self, uri: &str) -> Option<bool> {
         matches!(
             self.pattern,
-            MatchPattern::UrlSuffix(_) | MatchPattern::UrlPredicate(_)
+            MatchPattern::UrlSuffix(_) | MatchPattern::FileName(_) | MatchPattern::UrlPredicate(_)
         )
         .then(|| self.matches_url(uri))
     }
@@ -379,6 +386,13 @@ pub const fn any() -> DiscoveryMatch {
 /// and fragment. Requests retain the original reference.
 pub const fn url_suffix(suffix: &'static str) -> DiscoveryMatch {
     DiscoveryMatch::new(MatchPattern::UrlSuffix(suffix))
+}
+/// Match a case-sensitive basename in a URL path or local resource name,
+/// ignoring query and fragment. A leading `*` allows any filename prefix;
+/// otherwise the name must match exactly. No other wildcards are supported.
+/// Source-file pickers reuse the pattern; requests retain the original reference.
+pub const fn file_name(pattern: &'static str) -> DiscoveryMatch {
+    DiscoveryMatch::new(MatchPattern::FileName(pattern))
 }
 pub const fn url_matches(predicate: UrlPredicate) -> DiscoveryMatch {
     DiscoveryMatch::new(MatchPattern::UrlPredicate(predicate))
@@ -519,7 +533,9 @@ impl DiscoveryRoute {
     fn evidence(self) -> Option<Specificity> {
         self.matcher.specificity.or(match self.matcher.pattern {
             MatchPattern::Any => None,
-            MatchPattern::UrlSuffix(_) | MatchPattern::UrlPredicate(_) => Some(match self.kind {
+            MatchPattern::UrlSuffix(_)
+            | MatchPattern::FileName(_)
+            | MatchPattern::UrlPredicate(_) => Some(match self.kind {
                 RouteKind::Metadata | RouteKind::Image => Specificity::High,
                 RouteKind::Viewer => Specificity::Medium,
             }),
@@ -696,6 +712,8 @@ fn parse_resource(
 pub struct FormatSpec {
     name: &'static str,
     display_name: &'static str,
+    file_extensions: &'static [&'static str],
+    file_help: Option<&'static str>,
     routes: &'static [DiscoveryRoute],
     on_failure: Option<FailureHandler>,
     html_queries: &'static [&'static str],
@@ -707,6 +725,8 @@ impl FormatSpec {
         Self {
             name,
             display_name: name,
+            file_extensions: &[],
+            file_help: None,
             routes,
             on_failure: None,
             html_queries: &[],
@@ -728,6 +748,70 @@ impl FormatSpec {
     pub const fn with_display_name(mut self, display_name: &'static str) -> Self {
         self.display_name = display_name;
         self
+    }
+
+    /// Extensions offered by source-file pickers, without leading dots.
+    /// These are UI hints, not discovery evidence: broad extensions must not
+    /// cause speculative reads or prevent parsing an explicitly opened file.
+    #[must_use]
+    pub const fn with_file_extensions(mut self, extensions: &'static [&'static str]) -> Self {
+        self.file_extensions = extensions;
+        self
+    }
+
+    /// Optional opening instructions displayed alongside source-file filters.
+    #[must_use]
+    pub const fn with_file_help(mut self, help: &'static str) -> Self {
+        self.file_help = Some(help);
+        self
+    }
+
+    #[must_use]
+    pub const fn file_extensions(&self) -> &'static [&'static str] {
+        self.file_extensions
+    }
+
+    /// Source filename patterns declared by discovery routes. These are alternatives
+    /// to extension declarations, not restrictions on content-based routes.
+    pub fn file_names(&self) -> impl Iterator<Item = &'static str> {
+        self.routes
+            .iter()
+            .filter_map(|route| match route.matcher.pattern {
+                MatchPattern::FileName(name) => Some(name),
+                _ => None,
+            })
+    }
+
+    /// Coarse native-dialog filters, including extensions derived from filename
+    /// patterns. Extensionless names need a wildcard; discovery enforces the
+    /// pattern after selection, since native filters only support extensions.
+    pub fn file_filter_extensions(&self) -> impl Iterator<Item = &'static str> {
+        self.file_extensions
+            .iter()
+            .copied()
+            .chain(self.file_names().map(|name| {
+                name.rsplit_once('.')
+                    .map_or("*", |(_, extension)| extension)
+            }))
+    }
+
+    #[must_use]
+    pub const fn file_help(&self) -> Option<&'static str> {
+        self.file_help
+    }
+
+    /// Match a URL's parsed path or local resource name against the declared
+    /// extensions, ignoring case, query and fragment. Discovery routes may opt
+    /// into this check when an extension supplies enough evidence for a read.
+    #[must_use]
+    pub fn matches_file_extension(&self, uri: &str) -> bool {
+        super::uri::parse_uri(uri).is_ok_and(|url| {
+            url.path().rsplit_once('.').is_some_and(|(_, extension)| {
+                self.file_extensions
+                    .iter()
+                    .any(|candidate| extension.eq_ignore_ascii_case(candidate))
+            })
+        })
     }
     #[must_use]
     pub const fn name(&self) -> &'static str {

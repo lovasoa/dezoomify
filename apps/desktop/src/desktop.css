@@ -757,69 +757,370 @@ body {
   box-shadow: var(--dz-focus-ring);
 }
 
+/* Catalogs and batches occupy the window; only their lists scroll. Keep the
+ * toolbar, current image controls, and diagnostics outside the scrolling list. */
+body:has(.dz-image-picker, .dz-batch-results) {
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+}
+
+#root.dz-main:has(.dz-image-picker, .dz-batch-results) {
+  flex: 1 1 0;
+  min-height: 0;
+  width: 100%;
+  margin: 0;
+  padding: 1.5rem 1.75rem 0;
+  box-sizing: border-box;
+}
+
+#root .dz-card:has(.dz-batch-results),
+.dz-image-picker,
 .dz-batch-results {
-  margin-top: 1.5rem;
-  text-align: left;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-height: 0;
   min-width: 0;
+  text-align: left;
+}
+
+.dz-batch-results {
+  order: -1;
+}
+
+.dz-image-picker-head,
+.dz-batch-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex: 0 0 auto;
+  gap: 1rem;
+  min-height: 38px;
+}
+
+#root .dz-image-picker-head h2,
+#root .dz-batch-head h2 {
+  margin: 0;
+  color: var(--dz-text-primary);
+  font-size: 1.15rem;
+  font-weight: 650;
+  letter-spacing: -0.025em;
+}
+
+.dz-image-catalog-count {
+  margin: 0.3rem 0 0;
+  font-size: 0.78rem;
+}
+
+#root .dz-batch-head .dz-actions-row {
+  margin: 0;
+}
+
+#root :is(.dz-image-picker, .dz-batch-results) button {
+  min-height: 30px;
+  min-width: 0;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.78rem;
+}
+
+#root #dz-btn-download-all {
+  flex: 0 0 auto;
+  width: auto;
+  min-height: 34px;
+  padding-inline: 1rem;
+}
+
+#root :is(.dz-image-picker, .dz-batch-results) button:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .dz-batch-totals {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 1rem;
+  padding: 0.6rem 0 1rem;
   font-variant-numeric: tabular-nums;
 }
 
 .dz-batch-saved-total,
 .dz-batch-status-total {
-  margin: 0.35rem 0;
+  margin: 0;
+  font-size: 0.78rem;
 }
 
 .dz-batch-saved-total {
-  font-size: 1.15rem;
-  font-weight: 650;
-}
-
-.dz-batch-list {
-  list-style: none;
-  padding: 0;
-  margin: 1.5rem 0 0;
-}
-
-.dz-batch-item {
-  padding: 1rem 0;
-  border-bottom: 1px solid var(--dz-surface-border);
-  overflow-wrap: anywhere;
-}
-
-.dz-batch-item h3 {
-  margin: 0;
-}
-
-.dz-batch-source,
-.dz-batch-status,
-.dz-batch-filename,
-.dz-batch-error {
-  margin: 0.5rem 0;
-}
-
-.dz-batch-source {
-  font: 0.8rem var(--dz-font-mono);
-  color: var(--dz-text-muted);
-}
-
-.dz-batch-status {
-  color: var(--dz-text-secondary);
-}
-
-.dz-batch-filename {
+  color: var(--dz-text-primary);
   font-weight: 600;
 }
 
-.dz-batch-error {
+.dz-batch-status-total {
+  color: var(--dz-text-secondary);
+}
+
+.dz-batch-progress {
+  appearance: none;
+  flex: 0 0 auto;
+  width: 100%;
+  height: 3px;
+  margin: 0 0 1rem;
+  overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  background: var(--dz-progress-track);
+}
+
+.dz-batch-progress::-webkit-progress-bar {
+  background: var(--dz-progress-track);
+}
+
+.dz-batch-progress::-webkit-progress-value {
+  background: var(--dz-progress-bar);
+}
+
+.dz-batch-progress::-moz-progress-bar {
+  background: var(--dz-progress-bar);
+}
+
+.dz-image-list,
+.dz-batch-list {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--dz-surface-border);
+  scrollbar-width: thin;
+  scrollbar-color: var(--dz-surface-border) transparent;
+}
+
+.dz-image-list {
+  margin-top: 1.25rem;
+}
+
+.dz-image-list:focus-visible,
+.dz-batch-list:focus-visible {
+  outline: 2px solid var(--dz-accent-blue);
+  outline-offset: -2px;
+}
+
+.dz-image-row,
+.dz-batch-item {
+  display: grid;
+  align-items: center;
+  column-gap: 1rem;
+  padding: 0.95rem 0.75rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--dz-surface-border) 60%, transparent);
+}
+
+.dz-image-row:nth-child(even),
+.dz-batch-item:nth-child(even) {
+  background: color-mix(in srgb, var(--dz-btn-secondary-bg) 45%, transparent);
+}
+
+.dz-image-row {
+  grid-template-columns: 56px minmax(0, 1fr);
+}
+
+.dz-image-thumbnail {
+  width: 56px;
+  height: 56px;
+  border: 1px solid var(--dz-surface-border);
+  border-radius: var(--dz-radius);
+  box-sizing: border-box;
+}
+
+.dz-image-description {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.25rem 1rem;
+}
+
+.dz-image-description h3,
+.dz-batch-item h3 {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dz-text-primary);
+  font-size: 0.85rem;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.dz-image-url,
+.dz-batch-source,
+.dz-batch-filename {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dz-text-secondary);
+  font-size: 0.73rem;
+  line-height: 1.5;
+  user-select: text;
+}
+
+.dz-image-url {
+  grid-column: 1;
+}
+
+.dz-image-size {
+  grid-column: 1;
+  color: var(--dz-text-secondary);
+  font-size: 0.73rem;
+}
+
+#root .dz-image-description button {
+  grid-column: 2;
+  grid-row: 1 / 4;
+}
+
+.dz-image-picker-foot {
+  display: flex;
+  flex: 0 0 auto;
+  justify-content: flex-end;
+  padding: 0.85rem 0;
+  border-top: 1px solid var(--dz-surface-border);
+}
+
+.dz-batch-item {
+  grid-template-columns: 32px minmax(0, 1fr) 6.5rem 14.5rem;
+  row-gap: 0.4rem;
+  min-height: 74px;
+  box-sizing: border-box;
+}
+
+.dz-batch-description {
+  min-width: 0;
+}
+
+.dz-batch-icon {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 36px;
+  color: var(--dz-text-muted);
+}
+
+.dz-batch-icon svg {
+  width: 24px;
+  height: 24px;
+}
+
+.dz-batch-item[data-state="saved"] :is(.dz-batch-icon, .dz-batch-status) {
+  color: var(--dz-success-text);
+}
+
+.dz-batch-item[data-state="failed"] :is(.dz-batch-icon, .dz-batch-status) {
   color: var(--dz-error-text);
+}
+
+.dz-batch-item[data-state="running"] {
+  background: var(--dz-btn-secondary-bg);
+  box-shadow: inset 2px 0 var(--dz-link-color);
+}
+
+.dz-batch-item[data-state="running"] :is(.dz-batch-icon, .dz-batch-status) {
+  color: var(--dz-link-color);
+}
+
+.dz-batch-source,
+.dz-batch-filename,
+.dz-batch-status,
+.dz-batch-error {
+  margin: 0.2rem 0 0;
+}
+
+.dz-batch-source {
+  font-family: var(--dz-font-mono);
+}
+
+.dz-batch-status {
+  grid-column: 3;
+  grid-row: 1;
+  color: var(--dz-text-secondary);
+  font-size: 0.73rem;
+}
+
+.dz-batch-error {
+  grid-column: 2 / -1;
+  overflow-wrap: anywhere;
+  color: var(--dz-error-text);
+  font-size: 0.78rem;
+  line-height: 1.5;
 }
 
 .dz-batch-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.6rem;
-  margin-top: 0.75rem;
+  grid-column: 4;
+  grid-row: 1;
+  gap: 0.5rem;
+}
+
+#root .dz-card:has(.dz-batch-results) .dz-job-section {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 1rem 0;
+  border-top: 1px solid var(--dz-surface-border);
+  animation: none;
+}
+
+#root .dz-card:has(.dz-batch-results) .dz-progress-buttons {
+  height: 30px;
+  gap: 0.4rem;
+}
+
+#root .dz-card:has(.dz-batch-results) .dz-progress-control {
+  width: 30px;
+  height: 30px;
+  background: var(--dz-btn-secondary-bg);
+  border: 1px solid var(--dz-btn-secondary-border);
+  border-radius: var(--dz-radius);
+}
+
+#root .dz-card:has(.dz-batch-results) .dz-progress-control:hover {
+  background: var(--dz-btn-secondary-hover-bg);
+}
+
+#root .dz-card:has(.dz-batch-results) .dz-progress-control svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+#root:has(.dz-image-picker, .dz-batch-results) .dz-details {
+  flex: 0 0 auto;
+  max-height: 30vh;
+  margin: 0;
+  padding: 0.6rem 0;
+  overflow-y: auto;
+  border-top: 1px solid var(--dz-surface-border);
+}
+
+@media (max-width: 700px) {
+  #root.dz-main:has(.dz-image-picker, .dz-batch-results) {
+    padding: 1rem 1rem 0;
+  }
+
+  .dz-batch-item {
+    grid-template-columns: 24px minmax(0, 1fr) auto;
+    column-gap: 0.6rem;
+  }
+
+  .dz-batch-actions {
+    grid-column: 2 / -1;
+    grid-row: auto;
+  }
+
+  .dz-image-row {
+    column-gap: 0.75rem;
+    padding-inline: 0.4rem;
+  }
 }

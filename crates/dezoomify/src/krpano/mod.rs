@@ -14,7 +14,7 @@ use krpano_metadata::{KrpanoMetadata, XY, all_sides};
 
 use crate::Vec2d;
 use crate::core::discovery::{
-    Specificity::Medium, any, html_matches, js_matches, metadata, url_suffix, viewer,
+    Specificity::Medium, any, file_name, html_matches, js_matches, metadata, viewer,
 };
 use crate::core::resolve_relative;
 use crate::core::{
@@ -41,8 +41,8 @@ static HTML_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
 });
 
 const ROUTES: &[DiscoveryRoute] = &[
-    metadata(url_suffix("/tiles.xml")).decode(handle_xml),
-    metadata(url_suffix("/tour.xml").specificity(Medium)).decode(handle_xml),
+    metadata(file_name("tiles.xml")).decode(handle_xml),
+    metadata(file_name("tour.xml").specificity(Medium)).decode(handle_xml),
     metadata(any()).try_decode(try_xml),
     viewer(html_matches(&HTML_RE).specificity(Medium)).decode(handle_html),
     viewer(js_matches(&VIEWER_JS_RE).specificity(Medium)).decode(handle_viewer_js),
@@ -50,6 +50,7 @@ const ROUTES: &[DiscoveryRoute] = &[
 
 pub const SPEC: FormatSpec = FormatSpec::new("krpano", ROUTES)
     .with_display_name("krpano")
+    .with_file_extensions(&["xml"])
     .on_failure(handle_failure);
 
 fn handle_html(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {

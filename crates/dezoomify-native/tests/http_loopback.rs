@@ -258,11 +258,10 @@ fn reads_file_uris_as_local_paths() {
     let dir = std::env::temp_dir().join(format!("dz-file-uri-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("temp dir");
-    let file = dir.join("tile.png");
+    let file = dir.join("étude 100%.png");
     std::fs::write(&file, b"tile-bytes").expect("write temp file");
-    let path = file.to_str().expect("utf8 path").to_string();
-
-    for uri in [format!("file://{path}"), format!("file://localhost{path}")] {
+    let uri = url::Url::from_file_path(&file).expect("absolute file URL");
+    for uri in [uri.to_string(), format!("file://localhost{}", uri.path())] {
         let outcome = fetch(&uri, &BTreeMap::new(), None, &limits()).expect("file read");
         assert_eq!(outcome.status, 200);
         assert_eq!(outcome.final_uri, uri);

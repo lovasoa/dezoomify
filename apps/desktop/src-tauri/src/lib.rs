@@ -27,3 +27,6 @@ pub mod tauri_shell;
 
 #[cfg(feature = "tauri")]
 mod updater;
+
+#[cfg(feature = "tauri")]
+mod source_open;

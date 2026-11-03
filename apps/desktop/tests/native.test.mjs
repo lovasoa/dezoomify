@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { inspectSavedOutput, invokeNative, openHistoryOutput } from "../src/native.ts";
+import {
+  inspectSavedOutput,
+  invokeNative,
+  onOpenSource,
+  openHistoryOutput,
+} from "../src/native.ts";
 import { defaultSettings } from "../src/settings.ts";
 
 function platform({ deferRegistration = false } = {}) {
@@ -49,7 +54,10 @@ function platform({ deferRegistration = false } = {}) {
     },
   };
 }
-const request = () => ({ inputUrl: "https://example.com/image", settings: defaultSettings() });
+const request = () => ({
+  source: { kind: "url", url: "https://example.com/image" },
+  settings: defaultSettings(),
+});
 const output = {
   canvas: { width: 512, height: 512 },
   format: "png",
@@ -66,7 +74,7 @@ test("native invocation preserves settings, progress, completion, and result own
     api,
   );
   assert.equal(api.calls[0].command, "dezoomify");
-  assert.equal(api.calls[0].args.inputUrl, request().inputUrl);
+  assert.deepEqual(api.calls[0].args.source, request().source);
   assert.deepEqual(api.calls[0].args.settings.headers, []);
   api.emit("dezoomify://progress", { job: "job:other", progress: { completed: 100 } });
   assert.equal(progress.length, 0);
@@ -245,10 +253,40 @@ test("untrusted addresses fail before native IPC", async () => {
   for (const inputUrl of ["file:///etc/passwd", "https://user:pass@example.com/image", "invalid"]) {
     const api = platform();
     await assert.rejects(
-      invokeNative({ ...request(), inputUrl }, { progress() {}, retry() {} }, api),
+      invokeNative(
+        { ...request(), source: { kind: "url", url: inputUrl } },
+        { progress() {}, retry() {} },
+        api,
+      ),
     );
     assert.equal(api.calls.length, 0);
   }
+});
+
+test("explicit local sources preserve filesystem spelling through native IPC", async () => {
+  const api = platform();
+  const source = { kind: "file", path: "/tmp/Art é/painting #1/info.json" };
+  const handle = await invokeNative({ ...request(), source }, { progress() {}, retry() {} }, api);
+  assert.deepEqual(api.calls[0].args.source, source);
+  api.resolve(output);
+  await handle.finished;
+  await handle.dispose();
+});
+
+test("native file-open subscription accepts file sources and releases its listener", async () => {
+  const api = platform();
+  const opened = [];
+  const stop = await onOpenSource((source) => opened.push(source), api);
+  for (const payload of [null, {}, { kind: "file", path: "" }, request().source]) {
+    api.emit("dezoomify://open-source", payload);
+  }
+  const source = { kind: "file", path: "C:\\Art é\\painting #1.dzi" };
+  api.emit("dezoomify://open-source", source);
+  assert.deepEqual(opened, [source]);
+  stop();
+  api.emit("dezoomify://open-source", source);
+  assert.deepEqual(opened, [source]);
+  assert.equal(api.handlers.size, 0);
 });
 
 test("raw header lines cross IPC as typed and Rust rejections return untouched", async () => {
@@ -256,7 +294,7 @@ test("raw header lines cross IPC as typed and Rust rejections return untouched",
   const settings = { ...defaultSettings(), retries: 500, headers };
   const api = platform();
   const handle = await invokeNative(
-    { inputUrl: "https://example.com/image", settings },
+    { source: { kind: "url", url: "https://example.com/image" }, settings },
     { progress() {}, retry() {} },
     api,
   );

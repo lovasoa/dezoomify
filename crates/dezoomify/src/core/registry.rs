@@ -89,6 +89,14 @@ impl Registry {
             .map(|spec| (spec.name(), spec.display_name()))
             .collect()
     }
+
+    /// Registered source-file formats in priority order. File pickers reuse
+    /// extension hints and filename routes; discovery owns acceptance.
+    pub fn file_formats(&self) -> impl Iterator<Item = &FormatSpec> {
+        self.specs
+            .iter()
+            .filter(|spec| !spec.file_extensions().is_empty() || spec.file_names().next().is_some())
+    }
 }
 
 /// Compose every built-in format. Discovery owns per-resource ordering.
@@ -138,9 +146,31 @@ mod tests {
         const TOY: FormatSpec = FormatSpec::new(
             "toy",
             &[metadata(css(".viewer > a[data-width]:first-child")).decode(decode)],
-        );
+        )
+        .with_display_name("Toy image")
+        .with_file_extensions(&["toy"])
+        .with_file_help("Keep tile files beside the description.");
         let mut registry = Registry::new();
+        registry.register(FormatSpec::new("page-only", &[]));
         registry.register(TOY);
+        let file_formats: Vec<_> = registry
+            .file_formats()
+            .map(|spec| {
+                (
+                    spec.display_name(),
+                    spec.file_extensions(),
+                    spec.file_help(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            file_formats,
+            [(
+                "Toy image",
+                &["toy"][..],
+                Some("Keep tile files beside the description.")
+            )]
+        );
         let parses = std::cell::Cell::new(0);
         let catalog = futures::executor::block_on(registry.discover(
             vec![DiscoveryInput::with_contents("memory://metadata", br#"<template><div class=viewer><a data-width=99></a></div></template><script>'<div class=viewer><a data-width=88></a></div>'</script><div class=viewer><a data-width=4 title='A > B &amp; C'></a></div>"#)],

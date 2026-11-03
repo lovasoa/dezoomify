@@ -12,7 +12,7 @@ image in memory. Memory use depends on the source and output format; WebP and
 AVIF still need the complete picture in memory. If a save reaches a limit,
 choose another format, a smaller resolution, or a tile folder.
 
-Image information and every image piece are downloaded through your own internet
+Online image information and pieces are downloaded through your own internet
 connection. This can help when a source site blocks Dezoomify’s shared server.
 
 ## Resuming an interrupted save
@@ -39,6 +39,13 @@ Pause stops new tile downloads; Cancel remains available while output finishes.
 When a source offers several images, choose **Download all** above the image
 picker or choose one image individually. Batch results show each saved file and
 any failures. Cancelling stops the remaining work and keeps completed saves.
+
+Open local source files through **File → Open…**,
+**⌘O** on macOS, **Ctrl+O** on Windows/Linux, or by dropping a file onto the window.
+The file dialog lists the supported formats.
+URL lists are plain text: one address or file path per line, optionally followed
+by a title. Relative entries use the list's directory. Keep local metadata with
+its tile files. Finish or cancel the current download before opening another source.
 
 ## Install
 

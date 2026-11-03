@@ -35,10 +35,12 @@ import type {
   DesktopBatch,
   DesktopImageChoice,
   DesktopResult,
+  DesktopSource,
   Error as JobError,
   Output,
   Progress,
   RetryChoice,
+  SavedOutput,
   TileAcquisition,
 } from "@dezoomify/wasm-bindings";
 import { createElement } from "react";
@@ -48,6 +50,7 @@ import {
   inspectSavedOutput,
   invokeNative,
   type NativeInvocation,
+  onOpenSource,
   openBatchOutput,
   openExternalLink,
   openHistoryOutput,
@@ -67,6 +70,7 @@ const nativeCapabilities = {
   openBatchOutput,
   readNativeDiagnostics,
   validateSettings,
+  onOpenSource,
 };
 
 function outputActionFailure(reveal: boolean, error: unknown) {
@@ -121,6 +125,7 @@ export function createDesktopApplication(
     openBatchOutput,
     readNativeDiagnostics,
     validateSettings,
+    onOpenSource,
   } = { ...nativeCapabilities, ...capabilities };
   let disposed = false;
   setLocale(
@@ -144,6 +149,7 @@ export function createDesktopApplication(
       activeHandle: null as NativeInvocation | null,
       progress: null as Progress | null,
       output: null as Output | null,
+      localSavedOutput: null as SavedOutput | null,
       batch: null as DesktopBatch | null,
       retry: null as { question: number; value: TileAcquisition } | null,
       imageChoice: null as {
@@ -155,7 +161,8 @@ export function createDesktopApplication(
       lastImageQuestion: -1,
       paused: false,
       localFailure: null as JobError | null,
-      lastInputUrl: "",
+      source: null as DesktopSource | null,
+      sourceText: "",
       historyEntry: null as HistoryEntry | null,
       heartbeatTimer: null as ReturnType<typeof setInterval> | null,
       viewCtx: {} as ViewContext,
@@ -371,8 +378,12 @@ export function createDesktopApplication(
       failLocally({ kind: "invalid-url" });
       return;
     }
+    startSource({ kind: "url", url: trimmed });
+  }
+
+  function startSource(source: DesktopSource): void {
     void retireActiveJob();
-    launchNativeJob(trimmed);
+    launchNativeJob(source);
   }
 
   /** Stop following the current job; its late events can never move the view. */
@@ -382,6 +393,8 @@ export function createDesktopApplication(
     const diagnostics = currentAttempt.diagnostics;
     diagnostics.finish("retired", { reason: "replaced-or-reset" });
     currentAttempt.retired = true;
+    if (currentAttempt.localSavedOutput)
+      void forgetSavedOutput(currentAttempt.localSavedOutput).catch(() => {});
     for (const item of currentAttempt.batch?.items ?? []) {
       if (item.state.kind === "saved" && item.state.result.saved_output)
         void forgetSavedOutput(item.state.result.saved_output).catch(() => {});
@@ -399,19 +412,21 @@ export function createDesktopApplication(
     return disposal;
   }
 
-  function launchNativeJob(trimmed: string): void {
+  function launchNativeJob(source: DesktopSource): void {
     const attempt = currentAttempt;
-    attempt.lastInputUrl = trimmed;
-    attempt.historyEntry = desktopHistory.start(trimmed);
+    const sourceText = source.kind === "url" ? source.url : source.path;
+    attempt.source = source;
+    attempt.sourceText = sourceText;
+    attempt.historyEntry = desktopHistory.start(sourceText);
     attempt.diagnostics.context({
-      input: trimmed,
+      input: sourceText,
       submitted: {
         ...desktopSettings,
         // Raw header lines carry values, so they never enter diagnostics.
         headers: undefined,
       },
     });
-    resetActivity(trimmed);
+    resetActivity(sourceText);
 
     // Rust (`parse_settings`) is the single settings validator; its typed
     // rejection below is authoritative. A rejected save shows its reason and
@@ -419,7 +434,7 @@ export function createDesktopApplication(
     settingsError = null;
     update();
     const request = {
-      inputUrl: trimmed,
+      source,
       settings: { ...desktopSettings, headers: [...desktopSettings.headers] },
     };
     void invokeNative(request, {
@@ -510,6 +525,8 @@ export function createDesktopApplication(
   function recordResult(attempt: DesktopAttempt, result: DesktopResult): void {
     if (result.kind === "image") {
       attempt.output = result.result.output;
+      if (attempt.source?.kind === "file")
+        attempt.localSavedOutput = result.result.saved_output ?? null;
       desktopHistory.complete(
         attempt.historyEntry,
         result.result.output,
@@ -777,8 +794,7 @@ export function createDesktopApplication(
       onRetrySameUrl() {
         if (!owns(attempt)) return;
 
-        const url = currentAttempt.lastInputUrl || currentAttempt.viewCtx.jobActivity?.url || "";
-        if (isValidInputUrl(url)) handleSubmitUrl(url);
+        if (attempt.source) startSource(attempt.source);
       },
       onReset() {
         if (!owns(attempt)) return;
@@ -825,7 +841,7 @@ export function createDesktopApplication(
             replace: createElement(ImagePicker, {
               catalog: attempt.imageChoice.catalog,
               previews: attempt.imageChoice.previews,
-              sourceUrl: attempt.lastInputUrl,
+              sourceUrl: attempt.sourceText,
               onChoose: (index: number) => chooseImage(attempt, { kind: "one", index }),
               onDownloadAll: () => chooseImage(attempt, { kind: "all" }),
               onCancel: handleCancel,
@@ -866,7 +882,7 @@ export function createDesktopApplication(
       viewCallbacks(attempt, retry, presentation),
       {
         diagnosticReport: attempt.diagnostics.report(),
-        sourceUrl: attempt.progress?.source_url ?? attempt.lastInputUrl,
+        sourceUrl: attempt.progress?.source_url ?? attempt.sourceText,
         ...(presentation.phase === "completed" ? { outputKey: attempt.activeHandle?.id } : {}),
         jobActivity: attempt.viewCtx.jobActivity,
         initialUrl: attempt.viewCtx.initialUrl,
@@ -888,6 +904,22 @@ export function createDesktopApplication(
   root.ownerDocument.addEventListener("click", handleExternalNavigation, true);
   hostWindow?.addEventListener("hashchange", syncInitialUrlFromLocation);
   hostWindow?.addEventListener("focus", onFocus);
+  let stopOpeningSources: (() => void) | undefined;
+  void onOpenSource((source) => {
+    if (disposed || (currentAttempt.source && !currentAttempt.settled)) return;
+    startSource(source);
+  }).then(
+    (stop) => {
+      if (disposed) stop();
+      else stopOpeningSources = stop;
+    },
+    (error: unknown) => {
+      if (!disposed)
+        currentAttempt.diagnostics.record("error", "open-source-listener-failed", {
+          kind: isJobError(error) ? error.kind : "invoke-failed",
+        });
+    },
+  );
   update();
   void applyPlatformOutputDefault();
 
@@ -901,6 +933,7 @@ export function createDesktopApplication(
     async dispose(): Promise<void> {
       if (disposed) return;
       disposed = true;
+      stopOpeningSources?.();
       const disposal = retireActiveJob();
       root.ownerDocument.removeEventListener("click", handleExternalNavigation, true);
       hostWindow?.removeEventListener("hashchange", syncInitialUrlFromLocation);

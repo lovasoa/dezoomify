@@ -34,6 +34,7 @@ dezoomify-native = { path = "../../../crates/dezoomify-native" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
+url.workspace = true
 tokio = { workspace = true, features = ["sync"] }
 # Real window shell (optional; see the `tauri` feature below).
 tauri = { version = "=2.12.5", optional = true , features = [] }

@@ -16,6 +16,7 @@ export const it = {
   "view.images.unknownSize": "Dimensioni sconosciute",
   "view.images.choose": "Scegli",
   "view.images.downloadAll": "Scarica tutto",
+  "view.images.count": "{count} immagini disponibili",
   "view.images.chooseNamed": "Scegli {title} (immagine {number})",
   "view.images.cancel": "Annulla",
   "page.brand": "Salva immagini zoomabili",
@@ -62,6 +63,7 @@ export const it = {
   "desktop.batch.runningTitle": "Download delle immagini",
   "desktop.batch.cancelledTitle": "Download interrotti",
   "desktop.batch.savedSummary": "{saved} di {total} salvate",
+  "desktop.batch.remainingSummary": "{remaining} rimanenti",
   "desktop.batch.statusSummary":
     "{failed} non riuscite · {cancelled} annullate · {remaining} rimanenti",
   "desktop.batch.pending": "In attesa",

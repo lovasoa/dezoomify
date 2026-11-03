@@ -1347,6 +1347,16 @@ pub struct DesktopOutput {
     pub saved_output: Option<SavedOutput>,
 }
 
+/// A desktop source preserves an explicitly opened filesystem path separately
+/// from a typed web address; paths are never interpreted as URL input.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub enum DesktopSource {
+    Url { url: String },
+    File { path: String },
+}
+
 /// A desktop picker answer applies only to its current ordered catalog.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]

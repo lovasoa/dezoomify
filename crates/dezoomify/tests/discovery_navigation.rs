@@ -65,6 +65,84 @@ fn image(inputs: Vec<DiscoveryInput>, replies: &[(&str, &[u8])], format: &str) {
 }
 
 #[test]
+fn filename_patterns_supply_picker_filters_and_preserve_prefixed_names() {
+    for (format, pattern, extension, bytes) in [
+        (
+            "custom",
+            "*tiles.yaml",
+            "yaml",
+            include_bytes!("../../../testdata/scenarios/rs-core/formats/payloads/tiles.yaml")
+                .as_slice(),
+        ),
+        ("zoomify", "*ImageProperties.xml", "xml", ZOOMIFY),
+    ] {
+        let registry = registry_for(format).unwrap();
+        let spec = registry.file_formats().next().unwrap();
+        assert_eq!(spec.file_names().collect::<Vec<_>>(), [pattern]);
+        assert_eq!(
+            spec.file_filter_extensions().collect::<Vec<_>>(),
+            [extension]
+        );
+        assert_eq!(spec.file_help(), None);
+        let filename = pattern.trim_start_matches('*');
+        for name in [filename.to_owned(), format!("local-{filename}")] {
+            let input = format!("file:///My%20collection/{name}");
+            let catalog = lookup(
+                registry.clone(),
+                vec![DiscoveryInput::with_contents(&input, bytes)],
+                &[],
+                Default::default(),
+                None,
+            )
+            .unwrap();
+            assert!(matches!(catalog.entries(), [DiscoveredEntry::Ready(_)]));
+        }
+        for wrong_name in [format!("{filename}.bak"), filename.to_ascii_uppercase()] {
+            let input = format!("file:///My%20collection/{wrong_name}");
+            assert!(
+                lookup(
+                    registry.clone(),
+                    vec![DiscoveryInput::with_contents(&input, bytes)],
+                    &[],
+                    Default::default(),
+                    None,
+                )
+                .is_err(),
+                "{input}"
+            );
+        }
+    }
+}
+
+#[test]
+fn conventional_filename_routes_keep_content_based_fallbacks() {
+    for (format, names, bytes) in [
+        ("iiif", ["info.json", "manifest.json"], IIIF),
+        (
+            "krpano",
+            ["tiles.xml", "tour.xml"],
+            include_bytes!("../../../fixtures/krpano/basic/tour.xml").as_slice(),
+        ),
+    ] {
+        let registry = registry_for(format).unwrap();
+        let spec = registry.file_formats().next().unwrap();
+        assert_eq!(spec.file_names().collect::<Vec<_>>(), names);
+        let catalog = lookup(
+            registry,
+            vec![DiscoveryInput::with_contents(
+                "file:///collection/renamed",
+                bytes,
+            )],
+            &[],
+            Default::default(),
+            None,
+        )
+        .unwrap();
+        assert!(matches!(catalog.entries(), [DiscoveredEntry::Ready(_)]));
+    }
+}
+
+#[test]
 fn unrelated_content_is_a_route_miss_but_declared_metadata_keeps_its_error() {
     for bytes in [
         br#"<html><script>const settings = {theme: 'dark'};</script><body>Welcome</body></html>"#
@@ -514,6 +592,8 @@ fn unknown_inventory_is_ignored_but_explicit_sources_are_read() {
         [
             UNKNOWN,
             "https://museum.test/assets/style.css",
+            "https://museum.test/assets/settings.json",
+            "https://museum.test/assets/settings.xml",
             "https://analytics.test/beacon?event=page",
             "https://analytics.test/playlist.js",
             "https://analytics.test/?source=analytics",

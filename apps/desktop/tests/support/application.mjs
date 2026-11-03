@@ -21,7 +21,7 @@ export function typeInto(element, value) {
 }
 
 /** Fresh storage, native jobs, and application state; teardown also runs on assertion failure. */
-export function mountDesktop({ languages = ["en"] } = {}) {
+export function mountDesktop({ languages = ["en"], subscribeOpenSource } = {}) {
   const invocations = [],
     historyStore = new Map(),
     root = makeContainer();
@@ -34,7 +34,11 @@ export function mountDesktop({ languages = ["en"] } = {}) {
     setItem: (key, value) => historyStore.set(key, value),
     removeItem: (key) => historyStore.delete(key),
   };
+  let openSource;
   const native = {
+    openSource(source) {
+      openSource?.(source);
+    },
     async invokeNative(request, callbacks) {
       const finished = Promise.withResolvers(),
         answers = [];
@@ -72,12 +76,21 @@ export function mountDesktop({ languages = ["en"] } = {}) {
   act(() => {
     app = createDesktopApplication(root, {
       invokeNative: (...args) => native.invokeNative(...args),
+      onOpenSource: async (callback) => {
+        openSource = callback;
+        if (subscribeOpenSource) return subscribeOpenSource(callback);
+        return () => {
+          openSource = undefined;
+        };
+      },
       inspectSavedOutput: async (saved) =>
         (await native.inspectSavedOutput?.(saved)) ?? "available",
       openHistoryOutput: async (saved) => {
         await native.openHistoryOutput?.(saved);
       },
-      forgetSavedOutput: async () => {},
+      forgetSavedOutput: async (saved) => {
+        await native.forgetSavedOutput?.(saved);
+      },
       openExternalLink: async () => {},
       openBatchOutput: async (...args) => {
         await native.openBatchOutput?.(...args);

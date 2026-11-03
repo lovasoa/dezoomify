@@ -44,6 +44,7 @@
   "eventChannels": [
     "dezoomify://batch",
     "dezoomify://image-choice",
+    "dezoomify://open-source",
     "dezoomify://progress",
     "dezoomify://registered",
     "dezoomify://retry"
