@@ -139,7 +139,9 @@ impl Session<'_> {
                                     host.transport.block_on(discovery.follow(resource, &host))?;
                             }
                             DiscoveredEntry::Ready(image) => {
-                                let (result, path) = self.download(&discovery, image, true)?;
+                                let persist = self.options.input_url.starts_with("http://")
+                                    || self.options.input_url.starts_with("https://");
+                                let (result, path) = self.download(&discovery, image, persist)?;
                                 return Ok((DesktopResult::Image { result }, Some(path)));
                             }
                         }
@@ -645,5 +647,62 @@ mod tests {
         let pixel = image.get_pixel(128, 128).0;
         assert!(pixel[1] > pixel[0], "nested picker selected second image");
         assert!(events.snapshots.borrow().is_empty());
+    }
+
+    #[test]
+    fn opened_local_metadata_and_url_lists_save_their_sibling_tiles() {
+        let directory = temp_dir("desktop-local-sources").join("a painting 雪#%7B%");
+        std::fs::create_dir_all(&directory).unwrap();
+        let tile =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../fixtures/tiles/0-0.png");
+        let expected = image::open(&tile).unwrap().to_rgba8();
+        for (name, metadata, relative_tile) in [
+            (
+                "painting.dzi",
+                r#"<Image TileSize="256" Overlap="0" Format="png"><Size Width="256" Height="256" /></Image>"#,
+                "painting_files/8/0_0.png",
+            ),
+            (
+                "info.json",
+                r#"{"@context":"http://iiif.io/api/image/2/context.json","width":256,"height":256,"tiles":[{"width":256,"scaleFactors":[1]}],"formats":["png"]}"#,
+                "0,0,256,256/256,256/0/default.png",
+            ),
+            ("list.urls", "./painting.dzi", "painting_files/8/0_0.png"),
+        ] {
+            let path = directory.join(name);
+            std::fs::write(&path, metadata).unwrap();
+            let destination = directory.join(relative_tile);
+            std::fs::create_dir_all(destination.parent().unwrap()).unwrap();
+            std::fs::copy(&tile, destination).unwrap();
+            let source = dezoomify::model::DesktopSource::File {
+                path: path.to_str().unwrap().into(),
+            };
+            let input = crate::commands::source_input(&source).unwrap();
+            let registration = Registration::new();
+            let events = events(&registration, vec![]);
+            let outputs = Arc::new(SavedOutputs::new(directory.join("references")));
+            let result = run_session(
+                options(input, &directory),
+                &registration,
+                Arc::clone(&outputs),
+                "job:local",
+                &events,
+            )
+            .unwrap();
+            let DesktopResult::Image { result } = result else {
+                panic!("single local image");
+            };
+            let saved = result.saved_output.unwrap();
+            assert_eq!(
+                image::open(outputs.resolve(&saved.id).unwrap())
+                    .unwrap()
+                    .to_rgba8(),
+                expected
+            );
+            assert!(
+                !directory.join("references").exists(),
+                "local paths have no persisted URL history reference"
+            );
+        }
     }
 }

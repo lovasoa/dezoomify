@@ -566,29 +566,17 @@ fn resolve_redirect(base: &str, location: &str) -> Result<String, Error> {
     }
 }
 
-/// Map a non-HTTP URI to a filesystem path: `file://` URIs strip the scheme
-/// (`file:///abs/path` and `file://localhost/abs/path` both name an absolute
-/// path; any other `file://` host is rejected), while anything else is
-/// already a local path and passes through unchanged.
-fn local_path_for_uri(uri: &str) -> Result<&str, Error> {
-    if let Some(rest) = uri.strip_prefix("file://") {
-        if let Some(path) = rest.strip_prefix("localhost") {
-            if path.is_empty() {
-                return Ok("/");
-            }
-            if path.starts_with('/') {
-                return Ok(path);
-            }
-        } else if rest.starts_with('/') {
-            return Ok(rest);
-        }
-        return Err(Error::BadUrl(
-            "file uri must name a local absolute path"
-                .to_string()
-                .into(),
-        ));
+/// Decode local file URLs using platform path rules; remote file hosts are
+/// rejected. Ordinary OS paths retain their exact spelling, including `%`.
+fn local_path_for_uri(uri: &str) -> Result<std::path::PathBuf, Error> {
+    if !uri.starts_with("file://") {
+        return Ok(uri.into());
     }
-    Ok(uri)
+    url::Url::parse(uri)
+        .ok()
+        .filter(|url| url.host_str().is_none_or(|host| host == "localhost"))
+        .and_then(|url| url.to_file_path().ok())
+        .ok_or_else(|| Error::BadUrl("file uri must name a local absolute path".into()))
 }
 
 /// Read a local resource or seek to one finite byte interval; the final URI

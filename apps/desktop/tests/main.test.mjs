@@ -64,7 +64,7 @@ test("desktop failure preserves canonical refusal facts and diagnostic context",
   const count = invocations.length;
   root.querySelector("#dz-url-input").value = "https://other.test/image";
   click(root.querySelector(".dz-history-main"));
-  assert.equal(root.querySelector("#dz-url-input").value, invocation.request.inputUrl);
+  assert.equal(root.querySelector("#dz-url-input").value, invocation.request.source.url);
   assert.equal(invocations.length, count);
   click(root.querySelector(".dz-history-remove"));
   assert.deepEqual(JSON.parse(historyStore.get("dezoomify.desktop.history.v2")), []);
@@ -82,7 +82,7 @@ test("saved history renders during slow disk checks, opens the file after retire
     root.querySelector("#dz-url-input"),
     "the main input is ready while the disk check is pending",
   );
-  assert.equal(root.querySelector(".dz-history-main").textContent, invocation.request.inputUrl);
+  assert.equal(root.querySelector(".dz-history-main").textContent, invocation.request.source.url);
   assert.equal(
     root.querySelector("tbody tr td:nth-child(4) .dz-history-output").textContent,
     saved.filename,
@@ -104,7 +104,7 @@ test("saved history renders during slow disk checks, opens the file after retire
   assert.match(root.querySelector("tbody tr").textContent, /Deleted/);
   assert.equal(root.querySelector(".dz-history-output").disabled, true);
   click(root.querySelector(".dz-history-main"));
-  assert.equal(root.querySelector("#dz-url-input").value, invocation.request.inputUrl);
+  assert.equal(root.querySelector("#dz-url-input").value, invocation.request.source.url);
   assert.equal(invocations.length, count, "a deleted result still allows selecting its source");
   native.inspectSavedOutput = async () => "available";
   act(() => window.dispatchEvent(new window.Event("focus")));
@@ -186,7 +186,7 @@ test("desktop offers Download all for ready images and keeps every batch result"
   const image = {
     kind: "image",
     format: "deepzoom",
-    sourceUrl: invocation.request.inputUrl,
+    sourceUrl: invocation.request.source.url,
     levels: [],
   };
   act(() =>
@@ -390,4 +390,65 @@ test("disposing a desktop mount releases its view and ignores late job events", 
   act(() => window.dispatchEvent(new window.Event("focus")));
   assert.equal(root.childElementCount, 0);
   assert.equal(app.getCurrentJobId(), null);
+});
+
+test("native local opening retains picker choices, protects active work, and retries the exact source", async () => {
+  const { root, native, invocations, historyStore, reset } = mountDesktop();
+  const source = { kind: "file", path: "/tmp/Art é/paintings #1.urls" };
+  await act(async () => native.openSource(source));
+  const invocation = invocations[0];
+  assert.deepEqual(invocation.request.source, source);
+  assert.equal(historyStore.has("dezoomify.desktop.history.v2"), false);
+  act(() => native.openSource({ kind: "file", path: "/tmp/other.dzi" }));
+  assert.equal(invocations.length, 1, "file opens cannot replace active work");
+  act(() =>
+    invocation.callbacks.imageChoice(1, {
+      kind: "catalog",
+      catalog: {
+        entries: [
+          { kind: "image-request", uri: "https://images.test/first.dzi" },
+          { kind: "image-request", uri: "https://images.test/second.dzi" },
+        ],
+      },
+    }),
+  );
+  assert.equal(root.querySelectorAll("[data-dz-image-index]").length, 2);
+  click(root.querySelector("#dz-btn-download-all"));
+  assert.deepEqual(invocation.answers[0].choice, { kind: "all" });
+  await act(async () => invocation.answers[0].reject({ kind: "invoke-failed" }));
+  act(() => native.openSource({ kind: "file", path: "/tmp/another.dzi" }));
+  assert.equal(invocations.length, 1, "a local control failure does not settle native work");
+  await act(async () =>
+    invocation.reject({ kind: "network-failure", transport: "native", retryable: true }),
+  );
+  assert.ok(root.querySelector("#dz-job-diagnostics").textContent.includes(source.path));
+  click(root.querySelector("#dz-btn-try-again"));
+  await flush();
+  assert.equal(invocations.length, 2);
+  assert.deepEqual(invocations[1].request.source, source);
+  const saved = { id: "saved:local", filename: "painting.png" };
+  const forgotten = [];
+  native.forgetSavedOutput = async (reference) => forgotten.push(reference);
+  await act(async () => invocations[1].resolve(output, saved));
+  await reset();
+  assert.deepEqual(forgotten, [saved]);
+  assert.equal(root.querySelectorAll(".dz-history-main").length, 0);
+});
+
+test("disposing while native file-open subscription is pending releases the late listener", async () => {
+  const subscription = Promise.withResolvers();
+  let receive;
+  let stopped = 0;
+  const { app, native, invocations } = mountDesktop({
+    subscribeOpenSource(callback) {
+      receive = callback;
+      return subscription.promise;
+    },
+  });
+  await act(() => app.dispose());
+  await act(async () => subscription.resolve(() => stopped++));
+  assert.equal(stopped, 1);
+  act(() => receive({ kind: "file", path: "/tmp/late.dzi" }));
+  act(() => native.openSource({ kind: "file", path: "/tmp/also-late.dzi" }));
+  assert.equal(invocations.length, 0);
 });

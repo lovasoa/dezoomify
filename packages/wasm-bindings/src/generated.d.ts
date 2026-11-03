@@ -31,6 +31,12 @@ export interface ObservedInput {
 export type DesktopImageChoice = { kind: "one"; index: number } | { kind: "all" };
 
 /**
+ * A desktop source preserves an explicitly opened filesystem path separately
+ * from a typed web address; paths are never interpreted as URL input.
+ */
+export type DesktopSource = { kind: "url"; url: string } | { kind: "file"; path: string };
+
+/**
  * A direct resource read, including its redirected base address. For a ranged
  * request, bytes cover exactly the requested interval; the Host validates this
  * contract before returning a successful response.

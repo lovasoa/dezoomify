@@ -73,7 +73,7 @@ fn parse_text_urls_with_base(
             let mut parts = line.splitn(2, char::is_whitespace);
             let raw_uri = parts.next().unwrap_or_default();
             validate_uri(raw_uri, line_number)?;
-            let uri = normalize_uri(raw_uri, base_uri);
+            let uri = crate::core::resolve_relative(base_uri, raw_uri);
             let title = parts
                 .next()
                 .filter(|title| !title.is_empty())
@@ -81,37 +81,6 @@ fn parse_text_urls_with_base(
             Ok(ListedImage { uri, title })
         })
         .collect()
-}
-
-fn normalize_uri(uri: &str, base_uri: &str) -> String {
-    if url::Url::parse(uri).is_ok()
-        || uri.contains("{{X}}")
-        || uri.contains("{{Y}}")
-        || uri.starts_with(['/', '.', '\\'])
-        || uri.contains(['/', '\\'])
-        || (uri.len() >= 2 && uri.as_bytes()[1] == b':' && uri.as_bytes()[0].is_ascii_alphabetic())
-    {
-        return uri.to_owned();
-    }
-    if base_uri.is_empty() {
-        return uri.to_owned();
-    }
-    let base_path = if let Ok(url) = url::Url::parse(base_uri) {
-        url.path().to_owned()
-    } else {
-        base_uri.to_owned()
-    };
-    if let Some(slash) = base_path.rfind('/') {
-        let dir = &base_path[..=slash];
-        if let Ok(url) = url::Url::parse(base_uri) {
-            if let Ok(joined) = url.join(uri) {
-                return joined.to_string();
-            }
-            return format!("{dir}{uri}");
-        }
-        return format!("{dir}{uri}");
-    }
-    uri.to_owned()
 }
 
 fn validate_uri(input: &str, line: usize) -> Result<(), DiscoveryError> {
@@ -192,6 +161,36 @@ mod tests {
         );
         let error = parse_text_urls("not_a_valid_url").unwrap_err().to_string();
         assert!(error.contains("line 1") && error.contains("not_a_valid_url"));
+    }
+
+    #[test]
+    fn relative_entries_use_the_list_directory_and_preserve_templates() {
+        for (base, expected) in [
+            (
+                "/pictures/My collection/list.txt",
+                "/pictures/My collection/./art/image.dzi",
+            ),
+            (r"C:\pictures\list.urls", r"C:\pictures/./art/image.dzi"),
+            (
+                "https://images.test/catalog/list.txt",
+                "https://images.test/catalog/art/image.dzi",
+            ),
+        ] {
+            let images = parse_text_urls_with_base("./art/image.dzi Painting", base).unwrap();
+            assert_eq!(images[0].uri, expected);
+            assert_eq!(images[0].title.as_deref(), Some("Painting"));
+        }
+        let images =
+            parse_text_urls_with_base("tiles/{{X}}/{{Y}}.jpg", "/pictures/list.txt").unwrap();
+        assert_eq!(images[0].uri, "/pictures/tiles/{{X}}/{{Y}}.jpg");
+        let signed = "https://images.test/image.dzi?token=%7Bexact%7D";
+        let images = parse_text_urls_with_base(
+            &format!("image.dzi\n{signed}"),
+            "/pictures/%7Bcollection%7D/list.txt",
+        )
+        .unwrap();
+        assert_eq!(images[0].uri, "/pictures/%7Bcollection%7D/image.dzi");
+        assert_eq!(images[1].uri, signed);
     }
 
     #[test]

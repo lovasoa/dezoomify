@@ -7,8 +7,8 @@ use crate::jobs::JobTable;
 use crate::saved_outputs::SavedOutputs;
 use crate::settings::parse_settings;
 use dezoomify::model::{
-    DesktopBatch, DesktopImageChoice, DesktopResult, Error, Failure, ImageChoiceEvent, Progress,
-    SavedOutputState, TileAcquisition,
+    DesktopBatch, DesktopImageChoice, DesktopResult, DesktopSource, Error, Failure,
+    ImageChoiceEvent, Progress, SavedOutputState, TileAcquisition,
 };
 use dezoomify_native::OutputTarget;
 
@@ -213,16 +213,15 @@ async fn dezoomify(
     saved_outputs: State<'_, Arc<SavedOutputs>>,
     app: AppHandle,
     job: String,
-    input_url: String,
+    source: DesktopSource,
     settings: Option<serde_json::Value>,
 ) -> Result<DesktopResult, Error> {
-    if !commands::is_valid_input_url(&input_url) {
-        return Err(Error::InvalidInput(
-            "input_url must be an http(s) URL up to 2048 bytes without userinfo"
-                .to_string()
-                .into(),
-        ));
-    }
+    let is_file = matches!(source, DesktopSource::File { .. });
+    let validated_source = source.clone();
+    let input_url =
+        tauri::async_runtime::spawn_blocking(move || commands::source_input(&validated_source))
+            .await
+            .map_err(|error| Error::Internal(error.to_string().into()))??;
     let settings = settings
         .map(|value| parse_settings(&value))
         .transpose()
@@ -230,7 +229,18 @@ async fn dezoomify(
         .unwrap_or_else(crate::settings::DesktopSettings::with_defaults);
     let mut options = crate::settings::job_options_for(&settings)
         .map_err(|message| Error::InvalidSettings(message.into()))?;
-    let registration = lock_table(&state)?.insert(&job)?;
+    let registration = {
+        let mut jobs = lock_table(&state)?;
+        if is_file && jobs.is_busy() {
+            return Err(Error::InvalidState(
+                "finish or cancel the current save before opening another source".into(),
+            ));
+        }
+        jobs.insert(&job)?
+    };
+    registration
+        .diagnostics
+        .context(serde_json::json!({"source": source}));
     if let Err(error) = app.emit(
         crate::jobs::CHANNEL_REGISTERED,
         serde_json::json!({"job": job}),
@@ -370,7 +380,8 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .on_menu_event(crate::updater::on_menu_event);
+        .on_menu_event(crate::source_open::on_menu_event)
+        .on_window_event(crate::source_open::on_window_event);
     // Test-only embedded WebDriver server for the real-window E2E. The plugin
     // starts its server unconditionally, so it is compiled in only for the
     // non-default `testing-webdriver` feature and never reaches a release bundle.
@@ -384,7 +395,7 @@ pub fn run() {
     builder
         .manage(Mutex::new(JobTable::new()))
         .setup(|app| {
-            crate::updater::setup(app)?;
+            crate::source_open::setup(app)?;
             app.manage(Arc::new(SavedOutputs::new(
                 app.path().app_data_dir()?.join("saved-outputs"),
             )));

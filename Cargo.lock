@@ -1158,6 +1158,7 @@ dependencies = [
  "tauri-plugin-updater",
  "tauri-plugin-wdio-webdriver",
  "tokio",
+ "url",
 ]
 
 [[package]]

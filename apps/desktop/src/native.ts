@@ -3,6 +3,7 @@ import type {
   DesktopBatch,
   DesktopImageChoice,
   DesktopResult,
+  DesktopSource,
   DiagnosticReport,
   ImageChoiceEvent,
   Error as JobError,
@@ -25,6 +26,27 @@ export interface DesktopIpc {
 
 const ipc: DesktopIpc = { invoke, listen };
 let nextInvocation = 0;
+
+/** Subscribe before accepting native file opens; callers own and release the listener. */
+export async function onOpenSource(
+  callback: (source: DesktopSource) => void,
+  api: DesktopIpc = ipc,
+): Promise<() => void> {
+  const stop = await api.listen("dezoomify://open-source", ({ payload }) => {
+    if (
+      payload &&
+      typeof payload === "object" &&
+      "kind" in payload &&
+      payload.kind === "file" &&
+      "path" in payload &&
+      typeof payload.path === "string" &&
+      payload.path.length > 0
+    ) {
+      callback({ kind: "file", path: payload.path });
+    }
+  });
+  return typeof stop === "function" ? (stop as () => void) : () => {};
+}
 
 /** Stamp the shell's retry verdict (`is_retryable`, the one policy in Rust)
  * onto a typed error in place as a plain `retryable` hint for the shared UI;
@@ -105,11 +127,11 @@ function deliverNativeEvent(
 }
 
 export async function invokeNative(
-  request: { inputUrl: string; settings: DesktopSettings },
+  request: { source: DesktopSource; settings: DesktopSettings },
   callbacks: NativeCallbacks,
   api: DesktopIpc = ipc,
 ): Promise<NativeInvocation> {
-  if (!isValidInputUrl(request.inputUrl)) {
+  if (request.source.kind === "url" && !isValidInputUrl(request.source.url)) {
     throw { kind: "invalid-input", detail: "the image address is not usable" };
   }
   const id = `job:desktop-${Date.now()}-${++nextInvocation}`;
@@ -150,7 +172,7 @@ export async function invokeNative(
   const finished = api
     .invoke("dezoomify", {
       job: id,
-      inputUrl: request.inputUrl,
+      source: request.source,
       settings: { ...request.settings, headers: [...request.settings.headers] },
     })
     .then((response) => {

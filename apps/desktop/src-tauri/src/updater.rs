@@ -14,8 +14,7 @@ use crate::jobs::JobTable;
 
 const CHECK_UPDATES: &str = "check-updates";
 
-pub(crate) fn setup(app: &tauri::App) -> tauri::Result<()> {
-    let menu = Menu::default(app.handle())?;
+pub(crate) fn append_menu(app: &tauri::App, menu: &Menu<tauri::Wry>) -> tauri::Result<()> {
     if let Some(help) = menu
         .get(HELP_SUBMENU_ID)
         .and_then(|item| item.as_submenu().cloned())
@@ -28,7 +27,6 @@ pub(crate) fn setup(app: &tauri::App) -> tauri::Result<()> {
             None::<&str>,
         )?)?;
     }
-    app.set_menu(menu)?;
     app.manage(Arc::new(AtomicBool::new(false)));
     Ok(())
 }

@@ -15,6 +15,7 @@ pub const CHANNEL_PROGRESS: &str = "dezoomify://progress";
 pub const CHANNEL_RETRY: &str = "dezoomify://retry";
 pub const CHANNEL_IMAGE_CHOICE: &str = "dezoomify://image-choice";
 pub const CHANNEL_BATCH: &str = "dezoomify://batch";
+pub const CHANNEL_OPEN_SOURCE: &str = "dezoomify://open-source";
 
 pub struct Registration {
     pub controls: Controls,
@@ -157,17 +158,20 @@ impl JobTable {
     pub fn get(&self, id: &str) -> Result<Arc<Registration>, Error> {
         self.jobs.get(id).cloned().ok_or_else(|| unknown_job(id))
     }
+    /// Active or retiring saves and reserved update installation exclude source imports.
+    pub fn is_busy(&self) -> bool {
+        self.updating
+            || self
+                .jobs
+                .values()
+                .chain(&self.retiring)
+                .any(|job| !job.completed.load(Ordering::SeqCst))
+    }
     /// Reserve installation only after all native jobs have settled.
     pub fn begin_update(&mut self) -> Result<(), Error> {
         self.retiring
             .retain(|job| !job.completed.load(Ordering::SeqCst));
-        if self.updating
-            || !self.retiring.is_empty()
-            || self
-                .jobs
-                .values()
-                .any(|job| !job.completed.load(Ordering::SeqCst))
-        {
+        if self.is_busy() {
             return Err(Error::InvalidState(
                 "finish or cancel the current save before updating".into(),
             ));
