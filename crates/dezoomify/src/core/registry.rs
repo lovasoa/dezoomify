@@ -91,7 +91,7 @@ impl Registry {
     }
 
     /// Registered source-file formats in priority order. File pickers reuse
-    /// extension hints and exact filename routes; discovery owns acceptance.
+    /// extension hints and filename routes; discovery owns acceptance.
     pub fn file_formats(&self) -> impl Iterator<Item = &FormatSpec> {
         self.specs
             .iter()

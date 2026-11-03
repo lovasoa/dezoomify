@@ -24,7 +24,7 @@ use crate::core::{
 mod image_properties;
 
 const ROUTES: &[DiscoveryRoute] = &[
-    metadata(file_name("ImageProperties.xml")).decode(image_properties),
+    metadata(file_name("*ImageProperties.xml")).decode(image_properties),
     image_url(is_tile_url).resolve_metadata(tile_metadata),
     metadata(css("imagefile[format=\"zoomify\" i]")).text_file("ImageProperties.xml"),
     viewer(any()).try_decode(inline_catalog),

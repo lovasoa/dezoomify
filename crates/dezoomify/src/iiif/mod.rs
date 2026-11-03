@@ -9,8 +9,8 @@ use url::Url;
 
 use crate::Vec2d;
 use crate::core::discovery::{
-    Metadata, Specificity::Medium, any, html_matches, image_url, js_matches, json_metadata,
-    metadata, url_matches, url_suffix, viewer,
+    Metadata, Specificity::Medium, any, file_name, html_matches, image_url, js_matches,
+    json_metadata, metadata, url_matches, viewer,
 };
 use crate::core::{
     AdaptiveSource, CatalogPlan, DeferredResource, DiscoveryCatalog, DiscoveryError,
@@ -76,9 +76,9 @@ const ROUTES: &[DiscoveryRoute] = &[
     national_gallery::ROUTES[1],
     philadelphia::ROUTE.then_decode(decode),
     emuseum::ROUTE,
-    metadata(url_suffix("/info.json").specificity(Medium)).decode(decode),
+    metadata(file_name("info.json").specificity(Medium)).decode(decode),
     metadata(url_matches(has_iiif_info_query)).decode(decode),
-    metadata(url_suffix("/manifest.json").specificity(Medium)).decode(decode),
+    metadata(file_name("manifest.json").specificity(Medium)).decode(decode),
     json_metadata::<Document>(),
     metadata(any()).try_decode(embedded_metadata),
     viewer(html_matches(&ABS_INFO_JSON_RE).specificity(Medium)).decode(follow_info_json_url),

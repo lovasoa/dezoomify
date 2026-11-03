@@ -18,7 +18,7 @@ mod variable;
 
 pub const SPEC: FormatSpec = FormatSpec::new(
     "custom",
-    &[metadata(file_name("tiles.yaml")).decode(decode)],
+    &[metadata(file_name("*tiles.yaml")).decode(decode)],
 )
 .with_display_name("Custom tiles");
 

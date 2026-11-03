@@ -343,8 +343,12 @@ impl DiscoveryMatch {
             MatchPattern::UrlSuffix(suffix) => {
                 super::uri::parse_uri(uri).is_ok_and(|url| url.path().ends_with(suffix))
             }
-            MatchPattern::FileName(name) => super::uri::parse_uri(uri)
-                .is_ok_and(|url| url.path().rsplit('/').next() == Some(name)),
+            MatchPattern::FileName(pattern) => super::uri::parse_uri(uri).is_ok_and(|url| {
+                let name = url.path().rsplit('/').next().unwrap_or_default();
+                pattern
+                    .strip_prefix('*')
+                    .map_or_else(|| name == pattern, |suffix| name.ends_with(suffix))
+            }),
             MatchPattern::UrlPredicate(predicate) => predicate(uri),
             _ => false,
         }
@@ -383,11 +387,12 @@ pub const fn any() -> DiscoveryMatch {
 pub const fn url_suffix(suffix: &'static str) -> DiscoveryMatch {
     DiscoveryMatch::new(MatchPattern::UrlSuffix(suffix))
 }
-/// Match an exact, case-sensitive basename in a URL path or local resource
-/// name, ignoring query and fragment. Source-file pickers reuse this declaration;
-/// requests retain the original reference.
-pub const fn file_name(name: &'static str) -> DiscoveryMatch {
-    DiscoveryMatch::new(MatchPattern::FileName(name))
+/// Match a case-sensitive basename in a URL path or local resource name,
+/// ignoring query and fragment. A leading `*` allows any filename prefix;
+/// otherwise the name must match exactly. No other wildcards are supported.
+/// Source-file pickers reuse the pattern; requests retain the original reference.
+pub const fn file_name(pattern: &'static str) -> DiscoveryMatch {
+    DiscoveryMatch::new(MatchPattern::FileName(pattern))
 }
 pub const fn url_matches(predicate: UrlPredicate) -> DiscoveryMatch {
     DiscoveryMatch::new(MatchPattern::UrlPredicate(predicate))
@@ -766,7 +771,7 @@ impl FormatSpec {
         self.file_extensions
     }
 
-    /// Exact source filenames declared by discovery routes. These are alternatives
+    /// Source filename patterns declared by discovery routes. These are alternatives
     /// to extension declarations, not restrictions on content-based routes.
     pub fn file_names(&self) -> impl Iterator<Item = &'static str> {
         self.routes
@@ -777,9 +782,9 @@ impl FormatSpec {
             })
     }
 
-    /// Coarse native-dialog filters, including extensions derived from exact
-    /// filenames. Extensionless names need a wildcard; discovery enforces the
-    /// exact name after selection, since native filters only support extensions.
+    /// Coarse native-dialog filters, including extensions derived from filename
+    /// patterns. Extensionless names need a wildcard; discovery enforces the
+    /// pattern after selection, since native filters only support extensions.
     pub fn file_filter_extensions(&self) -> impl Iterator<Item = &'static str> {
         self.file_extensions
             .iter()
