@@ -22,11 +22,8 @@ pub const SPEC: FormatSpec = FormatSpec::new(
 const METADATA_CHUNK_BYTES: u64 = 1024 * 1024;
 
 pub(crate) fn is_zif(uri: &str) -> bool {
-    uri.split(['?', '#'])
-        .next()
-        .unwrap_or(uri)
-        .to_ascii_lowercase()
-        .ends_with(".zif")
+    crate::core::uri::parse_uri(uri)
+        .is_ok_and(|url| url.path().to_ascii_lowercase().ends_with(".zif"))
 }
 
 fn invalid(error: impl std::fmt::Display) -> DiscoveryError {

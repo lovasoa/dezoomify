@@ -8,7 +8,7 @@ use serde::Deserialize;
 use url::Url;
 
 use crate::Vec2d;
-use crate::core::discovery::{Specificity::Low, metadata, url_matches, viewer};
+use crate::core::discovery::{metadata, resource_matches, url_matches, viewer};
 use crate::core::{
     DiscoveryError, DiscoveryResource, DiscoveryRoute, FormatSpec, ImagePlan, ParsedResource,
     Request, ResolvedLevel, image_title,
@@ -29,24 +29,30 @@ static FILES_ARRAY_RE: LazyLock<Regex> = LazyLock::new(|| {
 
 const ROUTES: &[DiscoveryRoute] = &[
     metadata(url_matches(is_ecw_url)).decode(decode),
-    metadata(url_matches(|uri| uri.contains("imagesize/"))).decode(decode),
-    metadata(url_matches(|uri| uri.contains("/image/")).specificity(Low)).decode(decode),
+    metadata(url_matches(|uri| {
+        crate::core::uri::parse_uri(uri).is_ok_and(|url| url.path().contains("imagesize/"))
+    }))
+    .decode(decode),
     viewer(url_matches(is_hungaricana_url)).decode(follow_layer),
+    viewer(resource_matches(|resource| {
+        LAYER_URL_RE.is_match(&resource.text_lossy())
+    }))
+    .decode(follow_layer),
 ];
 
 pub const SPEC: FormatSpec =
     FormatSpec::new("hungaricana", ROUTES).with_display_name("Hungaricana");
 
 fn is_hungaricana_url(uri: &str) -> bool {
-    let lower = uri.to_ascii_lowercase();
-    lower.contains("hungaricana") || is_ecw_url(uri)
+    crate::core::uri::parse_uri(uri).is_ok_and(|url| {
+        url.host_str()
+            .is_some_and(|host| host == "hungaricana.hu" || host.ends_with(".hungaricana.hu"))
+    })
 }
 
 fn is_ecw_url(uri: &str) -> bool {
-    uri.split_once(['?', '#'])
-        .map_or(uri, |(path, _)| path)
-        .to_ascii_lowercase()
-        .ends_with(".ecw")
+    crate::core::uri::parse_uri(uri)
+        .is_ok_and(|url| url.path().to_ascii_lowercase().ends_with(".ecw"))
 }
 
 fn follow_layer(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
@@ -73,9 +79,10 @@ fn follow_file_array(
     let file = files.get(image_index(page_uri)).ok_or_else(|| {
         DiscoveryError::InvalidMetadata("Hungaricana file index is out of range".into())
     })?;
-    Ok(ParsedResource::Follow(Request::new(layer_file_url(
-        page, file,
-    )?)))
+    Ok(ParsedResource::FollowWith(
+        Request::new(layer_file_url(page, file)?),
+        decode,
+    ))
 }
 
 fn layer_file_url(page: &str, file: &str) -> Result<String, DiscoveryError> {

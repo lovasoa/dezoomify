@@ -293,6 +293,7 @@ async function runChromiumJob(base, work, { logFile = fixtureServer.logFile, ...
   const onPage = observe;
   context.on("page", onPage);
   try {
+    await options.beforeStart?.(context);
     downloadSession = await context.browser().newBrowserCDPSession();
     downloadSession.on("Browser.downloadWillBegin", onDownload);
     await downloadSession.send("Browser.setDownloadBehavior", {
@@ -430,7 +431,7 @@ async function chromiumDriverPage(context, serviceWorker, options) {
     driverPage = await context.newPage();
     await driverPage.goto(driverUrl);
   }
-  await driverPage.goto(`${driverUrl}?scenario=${encodeURIComponent(options.scenario ?? "")}`);
+  await driverPage.goto(testDriverUrl(driverUrl, options));
   await driverPage.waitForFunction(
     () => typeof globalThis.__DEZOOMIFY_TEST_RUN__?.then === "function",
     { timeout: 15000 },
@@ -447,6 +448,14 @@ async function chromiumDriverPage(context, serviceWorker, options) {
     `Chromium test driver failed: ${JSON.stringify(driverResult)}`,
   );
   return driverPage;
+}
+
+function testDriverUrl(url, options) {
+  const target = new URL(url);
+  target.search = "";
+  target.searchParams.set("scenario", options.scenario ?? "");
+  if (options.fixtureInput) target.searchParams.set("input", options.fixtureInput);
+  return target.href;
 }
 
 async function restartChromiumWorker(context, serviceWorker, jobPage, driverPage) {
@@ -548,9 +557,7 @@ async function runFirefoxJob(base, work, { logFile = fixtureServer.logFile, ...r
           if (!fixtureStarted) {
             // Navigate the privileged page through WebDriver without injecting
             // script. The shared idle package starts exactly one fixture job.
-            const driverUrl = new URL(url);
-            driverUrl.search = `scenario=${encodeURIComponent(runOptions.scenario ?? "")}`;
-            await driver.get(driverUrl.href);
+            await driver.get(testDriverUrl(url, runOptions));
             fixtureStarted = true;
             return false;
           }
@@ -682,6 +689,13 @@ async function retireFirefoxFixture(driver, driverTab) {
   await driver.switchTo().window(driverTab);
 }
 
+function browserFixtureInput(fixture) {
+  const path = new URL(fixture.input, fixtureServer.base).pathname;
+  return /\.(?:zif|ya?ml)$/i.test(path) || fixture.input.includes("{{")
+    ? fixture.viewer
+    : fixture.input;
+}
+
 test("packaged browser format matrices", { concurrency: 2 }, async (matrix) => {
   // WXT is synchronous. Finish both builds before launching browsers so it
   // cannot block delivery of page/download events from a running fixture.
@@ -708,6 +722,7 @@ test("packaged browser format matrices", { concurrency: 2 }, async (matrix) => {
                 assertSavedPyramid(
                   await run(fixtureServer.base, work, {
                     scenario: `fixtures/${fixture.name}`,
+                    fixtureInput: browserFixtureInput(fixture),
                     choice: fixture.choice,
                   }),
                   fixture.tolerance,
@@ -731,14 +746,28 @@ for (const [browser, run, scenario] of [
   ["chromium", runChromiumJob, "loaded-image-viewer"],
   ["firefox", runFirefoxJob, "loaded-image-viewer"],
 ]) {
-  test(`${browser}: ${scenario} is saved after tiled discovery fails`, {
+  test(`${browser}: ${scenario} is saved before speculative discovery or permissions`, {
     timeout: 180000,
   }, async () => {
     const work = mkdtempSync(path.join(tmpdir(), "dezoomify-loaded-image-"));
+    const offset = readFileSync(fixtureServer.logFile, "utf8").length;
+    const speculativeReads = [];
     try {
       const bytes = await run(fixtureServer.base, work, {
         scenario,
+        sourceHostOnly: true,
+        async beforeStart(context) {
+          await context.route(
+            /\/(?:loaded-image-noise|openseadragon-fixture)\.js/,
+            async (route) => {
+              if (route.request().resourceType() === "script") return route.continue();
+              speculativeReads.push(route.request().url());
+              await route.abort("blockedbyclient");
+            },
+          );
+        },
         async afterSave(page) {
+          assert.equal(await page.locator("[data-dz-allow-access=true]").count(), 0);
           assert.match(
             await page.locator(".dz-completed-section").textContent(),
             /image available on this page/,
@@ -754,6 +783,12 @@ for (const [browser, run, scenario] of [
           assert.doesNotMatch(draft.searchParams.get("body"), /attempt failed/);
         },
       });
+      assert.deepEqual(speculativeReads, [], "the original needs no speculative metadata reads");
+      const inventory = newFixtureEvents(fixtureServer.logFile, offset).filter(
+        (event) => event.path === "/loaded-image-noise.js",
+      );
+      assert.equal(inventory.length, 8, "only the page loads its unrelated scripts");
+      assert.equal(new Set(inventory.map((event) => event.url)).size, 8);
       assert.deepEqual(bytes, readFileSync(path.join(fixtureWork, "static", "loaded-image.png")));
       const pixels = decodePngPixels(bytes);
       assert.deepEqual([pixels.width, pixels.height], [1800, 1200]);
@@ -763,6 +798,28 @@ for (const [browser, run, scenario] of [
     }
   });
 }
+
+test("chromium: recognized tiled metadata precedes a loaded original", {
+  timeout: 180000,
+}, async () => {
+  const work = mkdtempSync(path.join(tmpdir(), "dezoomify-loaded-image-tiled-"));
+  try {
+    assertPng(
+      await runChromiumJob(fixtureServer.base, work, {
+        scenario: "loaded-image-tiled",
+        sourceHostOnly: true,
+        async afterSave(page) {
+          assert.doesNotMatch(
+            await page.locator(".dz-completed-section").textContent(),
+            /image available on this page/,
+          );
+        },
+      }),
+    );
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+});
 
 test("chromium: packaged extension runs the job-tab flow", { timeout: 180000 }, async () => {
   const work = mkdtempSync(path.join(tmpdir(), "dezoomify-e2e-chromium-"));

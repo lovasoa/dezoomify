@@ -5,7 +5,7 @@ use std::sync::LazyLock;
 use regex::{Regex, bytes::Regex as BytesRegex};
 
 use crate::Vec2d;
-use crate::core::discovery::{Specificity::Low, css, metadata, url_matches, viewer};
+use crate::core::discovery::{css, metadata, url_matches, viewer};
 use crate::core::{
     DiscoveryError, DiscoveryResource, DiscoveryRoute, FormatSpec, ImagePlan, ParsedResource,
     Request, ResolvedLevel, image_title,
@@ -27,7 +27,6 @@ const ROUTES: &[DiscoveryRoute] = &[
     viewer(css("[src*=\"/server\"][src*=\"source=\" i]")).follow_attribute("src"),
     viewer(css("[href*=\"/server\"][href*=\"source=\" i]")).follow_attribute("href"),
     DiscoveryRoute::regex_link(&SERVER_RE, "$server"),
-    metadata(url_matches(|uri| SOURCE_RE.is_match(uri)).specificity(Low)).decode(decode),
 ];
 
 pub const SPEC: FormatSpec = FormatSpec::new("fsi", ROUTES)

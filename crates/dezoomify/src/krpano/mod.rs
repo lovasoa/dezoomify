@@ -13,9 +13,7 @@ use krpano_decrypt::{decrypt_xml, is_encrypted_xml};
 use krpano_metadata::{KrpanoMetadata, XY, all_sides};
 
 use crate::Vec2d;
-use crate::core::discovery::{
-    Specificity::Low, any, html_matches, js_matches, metadata, url_matches, url_suffix, viewer,
-};
+use crate::core::discovery::{any, html_matches, js_matches, metadata, url_suffix, viewer};
 use crate::core::resolve_relative;
 use crate::core::{
     CatalogPlan, DiscoveryCatalog, DiscoveryContext, DiscoveryError, DiscoveryResource,
@@ -42,7 +40,6 @@ const ROUTES: &[DiscoveryRoute] = &[
     metadata(any()).try_decode(try_xml),
     viewer(html_matches(&HTML_RE)).decode(handle_html),
     viewer(js_matches(&VIEWER_JS_RE)).decode(handle_viewer_js),
-    viewer(url_matches(is_javascript_uri).specificity(Low)).decode(handle_viewer_js),
 ];
 
 pub const SPEC: FormatSpec = FormatSpec::new("krpano", ROUTES)
@@ -217,11 +214,7 @@ fn next_viewer_from_initial(
 }
 
 fn is_javascript_resource(resource: DiscoveryResource<'_>) -> bool {
-    is_javascript_uri(resource.final_uri()) || contains_viewer_js(resource.bytes())
-}
-
-fn is_javascript_uri(uri: &str) -> bool {
-    is_javascript_src(uri)
+    is_javascript_src(resource.final_uri()) || contains_viewer_js(resource.bytes())
 }
 
 fn contains_viewer_js(contents: &[u8]) -> bool {

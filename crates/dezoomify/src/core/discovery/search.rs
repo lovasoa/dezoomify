@@ -160,6 +160,15 @@ impl Search {
             .iter()
             .filter_map(|spec| spec.url_specificity(&input.url))
             .any(|strength| strength != Specificity::Low);
+        // Inventory alone does not justify a speculative read. Keep the entry
+        // available for explicit references and decode all supplied contents.
+        if input.kind == DiscoveryInputKind::ObservedResource
+            && entry.supplied.is_none()
+            && !recognized
+            && !retry
+        {
+            return;
+        }
         for (format, spec) in specs.iter().enumerate() {
             let mut priority = Priority(rank.0, rank.1, rank.2, format);
             if input.kind == DiscoveryInputKind::ObservedResource {

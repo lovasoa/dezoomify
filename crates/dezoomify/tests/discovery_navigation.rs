@@ -146,6 +146,40 @@ fn dzi_links_skip_javascript_identifiers_and_preserve_query_parameters() {
 }
 
 #[test]
+fn dzi_options_decode_literals_without_following_library_messages() {
+    const TARGET: &str = "https://museum.test/opaque?token=exact%2Bvalue&v=2";
+    for contents in [
+        r#"<script>const errors={Dzi:"Hmm, this doesn\'t appear to be a valid Deep Zoom Image."}; const options={dzi:'/\x6fpaque?token=exact%2Bvalue&v=2'};</script>"#,
+        r#"const options={'dzi':"/opaque?token=exact%2Bvalue&v=2"};"#,
+        r#"const options={"dzi":'/opaque?token=exact%2Bvalue&v=2'};"#,
+        r#"<div dzi="/opaque?token=exact%2Bvalue&amp;v=2"></div>"#,
+    ] {
+        let (catalog, requests) = support::discover_inputs(
+            registry_for("deepzoom").unwrap(),
+            vec![DiscoveryInput::with_contents(PAGE, contents)],
+            Default::default(),
+            |uri| {
+                assert_eq!(uri, TARGET);
+                Some(Ok((DZI.to_vec(), None)))
+            },
+        );
+        assert_eq!(support::ready_image(catalog.unwrap()).format, "deepzoom");
+        assert_eq!(requests.len(), 1);
+    }
+    let (catalog, requests) = support::discover_inputs(
+        registry_for("deepzoom").unwrap(),
+        vec![DiscoveryInput::with_contents(
+            PAGE,
+            r#"const errors={Dzi:"Hmm, this doesn\'t appear to be a valid Deep Zoom Image."}; const example="dzi: 'not-an-image'";"#,
+        )],
+        Default::default(),
+        |_| panic!("library messages and quoted examples are not image references"),
+    );
+    assert!(catalog.is_err());
+    assert!(requests.is_empty());
+}
+
+#[test]
 fn opaque_metadata_and_embedded_objects_remain_discoverable() {
     for (bytes, format) in [
         (IIIF, "iiif"),
@@ -487,7 +521,7 @@ fn source_catalogs_and_readable_documents_precede_observed_previews() {
     );
 }
 #[test]
-fn failed_duplicate_observations_leave_navigation_and_opaque_content_available() {
+fn failed_duplicate_observations_leave_opaque_iframe_targets_available() {
     image(
         vec![
             DiscoveryInput::with_contents(PAGE, FRAME),
@@ -497,12 +531,78 @@ fn failed_duplicate_observations_leave_navigation_and_opaque_content_available()
         ],
         &[
             ("https://museum.test/broken.dzi", b"invalid"),
-            ("https://museum.test/art", b"unrelated"),
+            (
+                "https://museum.test/art",
+                br#"<iframe src="/opaque"></iframe>"#,
+            ),
             ("https://museum.test/opaque", DZI),
         ],
         "deepzoom",
     );
 }
+#[test]
+fn unknown_inventory_urls_need_supplied_contents_or_an_explicit_source() {
+    const UNKNOWN: &str = "https://museum.test/assets/opaque.js";
+    let inventory = || {
+        [
+            UNKNOWN,
+            "https://museum.test/assets/style.css",
+            "https://analytics.test/beacon?event=page",
+            "https://analytics.test/playlist.js",
+            "https://analytics.test/?source=analytics",
+            "https://analytics.test/media?q=1",
+            "https://analytics.test/image/opaque",
+            "https://analytics.test/random.js",
+            "https://analytics.test/collect?dl=https%3A%2F%2Fartsandculture.google.com%2Fasset%2Ftest",
+            "https://analytics.test/collect?dl=https%3A%2F%2Fhungaricana.hu%2Fimages%2Ftest",
+            "https://analytics.test/collect#hungaricana.hu",
+            "https://artsandculture.google.com@analytics.test/collect",
+            "https://analytics.test/artsandculture.google.com/asset/test",
+            "https://artsandculture.google.com.analytics.test/collect",
+            "https://hungaricana.hu@analytics.test/collect",
+            "https://analytics.test/hungaricana.hu/collect",
+            "https://hungaricana.hu.analytics.test/collect",
+            "https://analytics.test/collect?ref=imagesize/image.ecw",
+            "https://metadata.dzi",
+            "https://metadata.zif",
+            "https://metadata.txt",
+            "https://tiles.yaml",
+            "https://wmts.xml/collect",
+            "https://analytics.test/collect?ref=service=wmts&other=request=getcapabilities",
+            "https://analytics.test/collect#service=wmts&request=getcapabilities",
+        ]
+        .into_iter()
+        .map(observed)
+        .collect::<Vec<_>>()
+    };
+    let (result, requests) =
+        support::discover_inputs(default_registry(), inventory(), Default::default(), |uri| {
+            panic!("passive inventory alone must not trigger a read: {uri}")
+        });
+    assert!(matches!(
+        result,
+        Err(DiscoveryError::NoCandidateAccepted { .. })
+    ));
+    assert!(requests.is_empty());
+
+    for supplied in [true, false] {
+        let mut inputs = inventory();
+        inputs.push(if supplied {
+            DiscoveryInput::with_contents(UNKNOWN, DZI)
+                .with_kind(DiscoveryInputKind::ObservedResource)
+        } else {
+            DiscoveryInput::new(UNKNOWN)
+        });
+        let (result, requests) =
+            support::discover_inputs(default_registry(), inputs, Default::default(), |uri| {
+                assert_eq!(uri, UNKNOWN);
+                Some(Ok((DZI.to_vec(), None)))
+            });
+        assert_eq!(support::ready_image(result.unwrap()).format, "deepzoom");
+        assert_eq!(requests.len(), usize::from(!supplied));
+    }
+}
+
 #[test]
 fn sibling_pages_precede_deeper_navigation_but_follow_metadata_first() {
     for (first, destination, bytes, format) in [
@@ -587,6 +687,17 @@ fn local_paths_and_only_supported_iframe_sources_are_followed() {
         "deepzoom",
     );
 }
+#[test]
+fn nla_viewer_queries_do_not_hide_the_metadata_route() {
+    image(
+        vec![DiscoveryInput::new(
+            "https://nla.gov.au/nla.obj-123/view?part=1#preview",
+        )],
+        &[("https://nla.gov.au/nla.obj-123/dzi", DZI)],
+        "deepzoom",
+    );
+}
+
 #[test]
 fn a_large_resource_inventory_is_ranked_before_spending_the_read_budget() {
     let metadata = "https://museum.test/proxy?filename=objectimages/painting.dzi";

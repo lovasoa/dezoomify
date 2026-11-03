@@ -495,34 +495,57 @@ fn deferred_frame_observations_precede_permissions_for_unrelated_resources() {
 
 #[test]
 fn a_new_source_session_can_make_an_already_rejected_metadata_url_readable() {
-    const URL: &str = "https://viewer.test/file.dzi";
-    for resources in [1, 2] {
-        let granted = Cell::new(false);
-        let reads = Cell::new(0);
-        let result = futures::executor::block_on(core::default_registry().discover(
-        vec![DiscoveryInput::new(URL)],
-        DiscoveryLimits { resources, ..Default::default() },
-        |_, _| {
-            reads.set(reads.get() + 1);
-            let body = if granted.get() {
-                r#"<Image TileSize="256" Overlap="0" Format="jpg"><Size Width="512" Height="512"/></Image>"#
-            } else { "<html>Sign in</html>" };
-            async move { Ok(response(body)) }
-        },
-        support::parse_html,
-        |interaction| {
-            let inputs = if interaction == Interaction::Allowed && !granted.replace(true) {
-                vec![DiscoveryInput::new(URL).with_kind(dezoomify::model::DiscoveryInputKind::ObservedResource)]
-            } else { Vec::new() };
-            async { Ok(inputs) }
-        },
-    ));
-        if resources == 1 {
-            assert_eq!(result.unwrap_err(), DiscoveryError::ResourceLimitExceeded);
-        } else {
-            assert_eq!(support::ready_image(result.unwrap()).format, "deepzoom");
+    use dezoomify::model::DiscoveryInputKind;
+    for (url, page) in [
+        ("https://viewer.test/file.dzi", None),
+        ("https://viewer.test/opaque", None),
+        (
+            "https://viewer.test/opaque.xml",
+            Some(r#"<script>const metadata = '/opaque.xml';</script>"#),
+        ),
+    ] {
+        for resources in [1, 2] {
+            let granted = Cell::new(false);
+            let reads = Cell::new(0);
+            let input = match page {
+                Some(body) => DiscoveryInput::with_contents("https://viewer.test/page", body),
+                None => DiscoveryInput::new(url),
+            };
+            let result = futures::executor::block_on(core::default_registry().discover(
+                vec![input],
+                DiscoveryLimits {
+                    resources: resources + usize::from(page.is_some()),
+                    ..Default::default()
+                },
+                |_, _| {
+                    reads.set(reads.get() + 1);
+                    let body = if granted.get() {
+                        include_str!("../../../fixtures/deepzoom/basic/image.dzi")
+                    } else {
+                        "<html>Sign in</html>"
+                    };
+                    async move { Ok(response(body)) }
+                },
+                support::parse_html,
+                |interaction| {
+                    let inputs = if interaction == Interaction::Allowed && !granted.replace(true) {
+                        vec![
+                            DiscoveryInput::new(url)
+                                .with_kind(DiscoveryInputKind::ObservedResource),
+                        ]
+                    } else {
+                        Vec::new()
+                    };
+                    async { Ok(inputs) }
+                },
+            ));
+            if resources == 1 {
+                assert_eq!(result.unwrap_err(), DiscoveryError::ResourceLimitExceeded);
+            } else {
+                assert_eq!(support::ready_image(result.unwrap()).format, "deepzoom");
+            }
+            assert_eq!(reads.get(), resources);
         }
-        assert_eq!(reads.get(), resources);
     }
 }
 
@@ -721,7 +744,6 @@ fn live_resource_concurrency_stays_within_the_declared_bound() {
 
 #[test]
 fn shared_format_reads_leave_room_for_other_resources() {
-    use dezoomify::model::DiscoveryInputKind;
     let (release_first, first) = futures::channel::oneshot::channel();
     let (release_second, second) = futures::channel::oneshot::channel();
     let waits = RefCell::new(std::collections::BTreeMap::from([
@@ -733,7 +755,7 @@ fn shared_format_reads_leave_room_for_other_resources() {
     let discovery = registry.discover(
         ["https://test/first", "https://test/second"]
             .into_iter()
-            .map(|url| DiscoveryInput::new(url).with_kind(DiscoveryInputKind::ObservedResource))
+            .map(DiscoveryInput::new)
             .collect(),
         DiscoveryLimits {
             concurrent: 2,

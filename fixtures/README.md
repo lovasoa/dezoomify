@@ -16,8 +16,12 @@ remain exact. No per-fixture registration or generated expectations are needed.
 so the extension snapshot includes them. Headers alone are insufficient.
 For direct inputs, link to the shared viewer template; the server substitutes
 `{{input}}` from `input.txt`, or defaults to `viewer.html`.
+The extension matrix opens the same input as the other products, retaining the
+wrapper for inputs that trigger browser downloads and for URL templates.
 
-Use ordinary files and relative symlinks for static responses. A fixture-local
+Use ordinary files and relative symlinks for static responses. Protocol URLs
+without a recognized extension can link to a suffixed file; the server derives
+its content type from that target. A fixture-local
 `server.js` can export `serve(request, { file, origin }): Response | null`
 (optionally async) for query protocols, authentication, or special responses.
 Return null to yield to another handler or a matching static file; a returned

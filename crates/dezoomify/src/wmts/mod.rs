@@ -15,10 +15,15 @@ const ROUTES: &[DiscoveryRoute] = &[
 pub const SPEC: FormatSpec = FormatSpec::new("wmts", ROUTES).with_display_name("WMTS");
 
 fn is_wmts_url(uri: &str) -> bool {
-    let uri = uri.to_ascii_lowercase();
-    let path = uri.split(['?', '#']).next().unwrap_or(&uri);
-    (path.contains("wmts") && path.ends_with(".xml"))
-        || (uri.contains("service=wmts") && uri.contains("request=getcapabilities"))
+    crate::core::uri::parse_uri(uri).is_ok_and(|url| {
+        let path = url.path().to_ascii_lowercase();
+        (path.contains("wmts") && path.ends_with(".xml"))
+            || (url.query_pairs().any(|(key, value)| {
+                key.eq_ignore_ascii_case("service") && value.eq_ignore_ascii_case("wmts")
+            }) && url.query_pairs().any(|(key, value)| {
+                key.eq_ignore_ascii_case("request") && value.eq_ignore_ascii_case("getcapabilities")
+            }))
+    })
 }
 
 fn decode(resource: crate::core::DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
@@ -62,6 +67,19 @@ mod tests {
     use super::*;
     use crate::Vec2d;
     use crate::test_support::{grid, grid_tile_uri, ready_image};
+
+    #[test]
+    fn capabilities_queries_match_decoded_parameters() {
+        let input =
+            "https://maps.test/service?SERVICE=WMTS&REQUEST=Get%43apabilities&token=exact%2Bvalue";
+        let (catalog, requests) = crate::test_support::discover(
+            SPEC,
+            input,
+            &[(include_bytes!("fixtures/linked-limits.xml"), None)],
+        );
+        assert!(catalog.is_ok());
+        assert_eq!(requests[0].uri, input);
+    }
 
     #[test]
     fn namespaces_links_limits_and_wgs84_bounds_are_handled_together() {

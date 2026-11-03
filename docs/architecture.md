@@ -38,6 +38,8 @@ observations run before speculative reads; each distinct request occupies at
 most one network slot, shared by its decoder continuations. See
 [discovery](../crates/dezoomify/src/core/discovery.rs) and its
 [scheduler](../crates/dezoomify/src/core/discovery/search.rs).
+Resource inventory initiates reads only for recognized URLs; explicit sources,
+format-directed references and supplied contents remain available to parsers.
 Declared source catalogs precede reconstructed format metadata, so a loaded
 canvas does not hide the rest of its manifest. Recognized metadata resources
 precede live page-loader fallback.

@@ -7,7 +7,7 @@ use regex::{Regex, bytes::Regex as BytesRegex};
 
 use crate::Vec2d;
 use crate::core::discovery::{
-    Metadata, Specificity::Low, any, image_url, js_matches, metadata, url_matches, viewer,
+    Metadata, Specificity::Low, any, css, image_url, js_matches, metadata, url_matches, viewer,
     xml_metadata,
 };
 use crate::core::{
@@ -52,7 +52,10 @@ const ROUTES: &[DiscoveryRoute] = &[
     viewer(js_matches(&WDL_MARKER_RE)).decode(follow_wdl_template),
     DiscoveryRoute::regex_link(&DZI_LINK_RE, "$url"),
     DiscoveryRoute::regex_link(&OPEN_DZI_XML_RE, "$url"),
-    DiscoveryRoute::regex_link(&DZI_ATTR_RE, "$url").then_decode(decode_catalog),
+    viewer(css("[dzi]"))
+        .follow_attribute("dzi")
+        .then_decode(decode_catalog),
+    viewer(js_matches(&DZI_MARKER_RE)).try_decode(follow_dzi_attribute),
     DiscoveryRoute::regex_link(&XML_LINK_RE, "$url").specificity(Low),
     metadata(url_matches(is_dzi_url)).decode(decode_catalog),
     xml_metadata::<DziFile>(),
@@ -67,14 +70,12 @@ fn is_tile_url(input: &str) -> bool {
 }
 
 fn is_dzi_url(input: &str) -> bool {
-    input
-        .split(['?', '#'])
-        .next()
-        .is_some_and(|path| path.ends_with(".dzi"))
-        || url::Url::parse(input).is_ok_and(|url| {
-            url.query_pairs()
+    crate::core::uri::parse_uri(input).is_ok_and(|url| {
+        url.path().ends_with(".dzi")
+            || url
+                .query_pairs()
                 .any(|(key, value)| key == "filename" && value.ends_with(".dzi"))
-        })
+    })
 }
 
 static POLONA_ITEM_RE: LazyLock<Regex> =
@@ -97,10 +98,25 @@ static XML_LINK_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
         .expect("constant generic XML link pattern")
 });
 
-static DZI_ATTR_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
-    BytesRegex::new(r#"(?i)\bdzi["']?\s*[:=]\s*["'](?P<url>[^<"']+)["']"#)
-        .expect("constant DZI attribute pattern")
+static DZI_MARKER_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
+    BytesRegex::new(r#"\bdzi["']?\s*[:=]"#).expect("constant DZI property marker")
 });
+
+static DZI_ATTR_RE: LazyLock<Regex> = LazyLock::new(|| {
+    crate::javascript::literal_regex(r#"(?:\bdzi|'dzi'|"dzi")\s*[:=]\s*(?:'([^']*)'|"([^"]*)")"#)
+});
+
+fn follow_dzi_attribute(
+    resource: DiscoveryResource<'_>,
+) -> Option<Result<ParsedResource, DiscoveryError>> {
+    let reference = crate::web_page::script_bodies(resource).find_map(|body| {
+        let visible = crate::javascript::mask(std::str::from_utf8(body).ok()?);
+        crate::javascript::captured(&DZI_ATTR_RE, &visible)
+    })?;
+    Some(Ok(resource
+        .follow_relative(&reference)
+        .decode_with(decode_catalog)))
+}
 
 static WDL_TEMPLATE_RE: LazyLock<BytesRegex> =
     LazyLock::new(|| BytesRegex::new(r#""([^"]+\.dzi)""#).expect("constant WDL template pattern"));
@@ -151,24 +167,20 @@ fn is_polona_item_url(uri: &str) -> bool {
 }
 
 fn is_nla_view_url(uri: &str) -> bool {
-    uri.contains("nla.gov.au/")
-        && uri
-            .rsplit(['?', '#'])
-            .next()
-            .unwrap_or(uri)
-            .ends_with("/view")
+    crate::core::uri::parse_uri(uri).is_ok_and(|url| {
+        url.host_str()
+            .is_some_and(|host| host == "nla.gov.au" || host.ends_with(".nla.gov.au"))
+            && url.path().ends_with("/view")
+    })
 }
 
-#[allow(clippy::unnecessary_wraps)]
 fn nla_metadata(input: &str) -> Result<Request, DiscoveryError> {
     // National Library of Australia viewer pages expose extensionless DZI
     // metadata next to the viewer path: `.../view` becomes `.../dzi`.
-    let base = input.split(['?', '#']).next().unwrap_or(input);
-    let parent = base
-        .trim_end_matches('/')
-        .rfind('/')
-        .map_or(base, |index| &base[..index]);
-    Ok(Request::new(format!("{parent}/dzi")))
+    let url = url::Url::parse(input)
+        .and_then(|url| url.join("dzi"))
+        .map_err(|error| DiscoveryError::InvalidMetadata(error.to_string()))?;
+    Ok(Request::new(url.to_string()))
 }
 
 fn is_polona_json_url(uri: &str) -> bool {

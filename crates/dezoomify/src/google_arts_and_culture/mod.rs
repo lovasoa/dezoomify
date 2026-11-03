@@ -1,7 +1,7 @@
 //! Pure Google Arts & Culture two-stage discovery.
 
 use crate::Vec2d;
-use crate::core::discovery::{url_matches, viewer};
+use crate::core::discovery::{any, url_matches, viewer};
 use crate::core::{
     DiscoveryError, DiscoveryResource, DiscoveryRoute, FormatSpec, Grid, ImagePlan, ParsedResource,
     ProcessingRecipe, Request, ResolvedLevel,
@@ -12,13 +12,20 @@ pub(crate) mod decryption;
 mod tile_info;
 mod url;
 
-const ROUTES: &[DiscoveryRoute] = &[viewer(url_matches(is_google_arts_url)).decode(parse_page)];
+const ROUTES: &[DiscoveryRoute] = &[
+    viewer(url_matches(is_google_arts_url)).decode(parse_page),
+    viewer(any()).try_decode(|resource| parse_page(resource).ok().map(Ok)),
+];
 
 pub const SPEC: FormatSpec =
     FormatSpec::new("google_arts_and_culture", ROUTES).with_display_name("Arts & Culture");
 
 fn is_google_arts_url(uri: &str) -> bool {
-    uri.contains("artsandculture.google.com") || uri.contains("g.co/arts/")
+    crate::core::uri::parse_uri(uri).is_ok_and(|url| match url.host_str() {
+        Some("artsandculture.google.com") => true,
+        Some("g.co") => url.path().starts_with("/arts/"),
+        _ => false,
+    })
 }
 
 fn parse_page(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
@@ -199,12 +206,23 @@ mod tests {
     }
 
     #[test]
-    fn rejects_urls_without_the_required_google_context() {
+    fn unrecognized_inventory_urls_are_not_read() {
         for input in [
             "https://example.com/test",
             "https://lh3.googleusercontent.com/image-id=g",
+            "https://analytics.test/collect?dl=https%3A%2F%2Fartsandculture.google.com%2Fasset%2Ftest",
+            "https://analytics.test/#https://g.co/arts/test",
+            "https://g.co/other/arts/test",
         ] {
-            let (result, requests) = crate::test_support::discover(SPEC, input, &[]);
+            let (result, requests) = crate::test_support::discover_inputs(
+                crate::core::registry_for("google_arts_and_culture").unwrap(),
+                vec![
+                    crate::core::discovery::DiscoveryInput::new(input)
+                        .with_kind(crate::model::DiscoveryInputKind::ObservedResource),
+                ],
+                Default::default(),
+                |_| panic!("unrecognized inventory URL must not be read: {input}"),
+            );
             assert!(
                 matches!(result, Err(DiscoveryError::NoCandidateAccepted { .. })),
                 "{input}"

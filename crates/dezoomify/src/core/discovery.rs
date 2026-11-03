@@ -288,6 +288,8 @@ type UrlPredicate = fn(&str) -> bool;
 
 /// Strength of evidence for discovery work. Content matchers contribute only
 /// after matching available bytes; they never justify speculative reads.
+/// URL-only resource inventory needs Medium or High URL evidence to initiate
+/// a read. Explicit sources and format-directed references remain readable.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Ord, PartialOrd)]
 pub enum Specificity {
     High,
@@ -336,11 +338,9 @@ impl DiscoveryMatch {
     fn matches_url(self, uri: &str) -> bool {
         match self.pattern {
             MatchPattern::Any => true,
-            MatchPattern::UrlSuffix(suffix) => uri
-                .split(['?', '#'])
-                .next()
-                .unwrap_or(uri)
-                .ends_with(suffix),
+            MatchPattern::UrlSuffix(suffix) => {
+                super::uri::parse_uri(uri).is_ok_and(|url| url.path().ends_with(suffix))
+            }
             MatchPattern::UrlPredicate(predicate) => predicate(uri),
             _ => false,
         }
@@ -374,6 +374,8 @@ pub const fn image_url(predicate: UrlPredicate) -> RoutePattern {
 pub const fn any() -> DiscoveryMatch {
     DiscoveryMatch::new(MatchPattern::Any)
 }
+/// Match the parsed path of a URL or local resource name, ignoring its query
+/// and fragment. Requests retain the original reference.
 pub const fn url_suffix(suffix: &'static str) -> DiscoveryMatch {
     DiscoveryMatch::new(MatchPattern::UrlSuffix(suffix))
 }
