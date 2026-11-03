@@ -42,7 +42,7 @@ mod pacing;
 pub mod retry;
 mod run;
 pub use host::Host;
-pub use run::dezoomify;
+pub use run::{Job, dezoomify};
 
 mod javascript;
 mod json_utils;

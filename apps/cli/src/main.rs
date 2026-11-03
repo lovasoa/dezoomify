@@ -526,31 +526,22 @@ fn load_bulk_entries(
     accept_invalid_certs: bool,
 ) -> Result<Vec<(String, Option<String>)>, String> {
     let path = Path::new(bulk_arg);
-    if path.is_file() {
-        let content =
-            std::fs::read_to_string(path).map_err(|e| format!("cannot read bulk file: {e}"))?;
-        // A JSON bulk file is a IIIF collection manifest saved to disk.
-        if let Some(entries) = extract_iiif_collection_urls(&content, Some(bulk_arg)) {
-            return Ok(entries);
-        }
-        return Ok(parse_text_list(&content));
+    let remote = bulk_arg.starts_with("http://") || bulk_arg.starts_with("https://");
+    let content = if path.is_file() {
+        std::fs::read_to_string(path).map_err(|e| format!("cannot read bulk file: {e}"))?
+    } else if remote {
+        fetch_bulk_url(bulk_arg, headers, accept_invalid_certs)?
+    } else {
+        return Err(format!("bulk file not found: {bulk_arg}"));
+    };
+    if let Some(entries) = extract_iiif_collection_urls(&content, Some(bulk_arg)) {
+        return Ok(entries);
     }
-    if bulk_arg.starts_with("http://") || bulk_arg.starts_with("https://") {
-        let body = fetch_bulk_url(bulk_arg, headers, accept_invalid_certs)?;
-        if let Some(entries) = extract_iiif_collection_urls(&body, Some(bulk_arg)) {
-            return Ok(entries);
-        }
-        let listed = parse_text_list(&body);
-        if !listed.is_empty() {
-            return Ok(listed);
-        }
-        // Single IIIF image manifest URL: one entry (the URL itself).
-        if body.trim_start().starts_with('{') {
-            return Ok(vec![(bulk_arg.to_string(), None)]);
-        }
-        return Ok(listed);
+    let entries = parse_text_list(&content);
+    if remote && entries.is_empty() && content.trim_start().starts_with('{') {
+        return Ok(vec![(bulk_arg.to_string(), None)]);
     }
-    Err(format!("bulk file not found: {bulk_arg}"))
+    Ok(entries)
 }
 
 fn fetch_bulk_url(
