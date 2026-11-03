@@ -19,7 +19,11 @@ pub const SPEC: FormatSpec = FormatSpec::new(
 .with_display_name("IIPImage");
 
 fn is_iip(uri: &str) -> bool {
-    uri.ends_with(META) || uri.to_ascii_lowercase().contains("?fif")
+    crate::core::uri::parse_uri(uri).is_ok_and(|url| {
+        url.query_pairs()
+            .next()
+            .is_some_and(|(key, value)| key.eq_ignore_ascii_case("fif") && !value.is_empty())
+    })
 }
 
 fn needs_metadata(uri: &str) -> bool {

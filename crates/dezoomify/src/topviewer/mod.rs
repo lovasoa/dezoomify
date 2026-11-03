@@ -7,7 +7,9 @@ use serde_json::Value;
 use url::Url;
 
 use crate::Vec2d;
-use crate::core::discovery::{Metadata, css, json_metadata, metadata, url_matches, viewer};
+use crate::core::discovery::{
+    Metadata, Specificity::High, css, json_metadata, metadata, url_matches, viewer,
+};
 use crate::core::{
     DiscoveryError, DiscoveryResource, DiscoveryRoute, FormatSpec, ImagePlan, ParsedResource,
     Request, ResolvedLevel, resolve_url_template,
@@ -28,7 +30,7 @@ struct Document {
 }
 
 const ROUTES: &[DiscoveryRoute] = &[
-    viewer(url_matches(is_known_detail_url))
+    viewer(url_matches(is_known_detail_url).specificity(High))
         .resolve_metadata(known_detail_url)
         .then_decode(decode),
     viewer(css("pic-mediabank")).decode(follow_mediabank),
@@ -41,25 +43,37 @@ const ROUTES: &[DiscoveryRoute] = &[
     json_metadata::<Document>(),
 ];
 
-/// Institution URL prefixes and their Memorix image servers. Institution
+/// Institution hosts/path prefixes and their Memorix image servers. Institution
 /// mapping adapted from VDK/Dememorixer's beeldbanken.json (GPL-2.0-or-later
 /// data, compatible with this crate's GPL-3.0-only grant via its or-later
 /// clause): <https://github.com/VDK/Dememorixer/blob/master/beeldbanken.json>
-const MEMORIX_SITES: &[(&str, &str)] = &[
-    ("beeldbankgroningen.nl/beelden/", "gra"),
-    ("salha.nl/bronnen/fotos-en-films/foto-s/", "sha"),
-    ("archief.zaanstad.nl/mediabank/zoek-in-de-beeldbank/", "zaa"),
-    ("erfgoedcentrumzutphen.nl/onderzoeken/beeldbank/", "szu"),
-    ("noord-hollandsarchief.nl/beelden/beeldbank/", "ranh"),
+const MEMORIX_SITES: &[(&str, &str, &str)] = &[
+    ("beeldbankgroningen.nl", "/beelden/", "gra"),
+    ("salha.nl", "/bronnen/fotos-en-films/foto-s/", "sha"),
+    (
+        "archief.zaanstad.nl",
+        "/mediabank/zoek-in-de-beeldbank/",
+        "zaa",
+    ),
+    ("erfgoedcentrumzutphen.nl", "/onderzoeken/beeldbank/", "szu"),
+    ("noord-hollandsarchief.nl", "/beelden/beeldbank/", "ranh"),
 ];
 
 fn known_detail_target(uri: &str) -> Option<String> {
-    let lower = uri.to_lowercase();
+    let url = Url::parse(uri).ok()?;
+    let host = url.host_str()?;
+    let path = url.path().to_ascii_lowercase();
     let server = MEMORIX_SITES
         .iter()
-        .find(|(prefix, _)| lower.contains(prefix))
-        .map(|(_, server)| server)?;
-    let captures = DETAIL_RE.captures(uri)?;
+        .find(|(domain, prefix, _)| {
+            (host == *domain
+                || host
+                    .strip_suffix(domain)
+                    .is_some_and(|subdomain| subdomain.ends_with('.')))
+                && path.starts_with(prefix)
+        })
+        .map(|(_, _, server)| server)?;
+    let captures = DETAIL_RE.captures(url.path())?;
     let record = captures.get(1)?.as_str();
     let media = captures.get(2)?.as_str();
     (record.len() >= 32 && record.len() <= 36 && media.len() == 36)
@@ -256,4 +270,37 @@ fn number(value: &Value, name: &str) -> Result<u32, DiscoveryError> {
         .ok_or_else(|| {
             DiscoveryError::InvalidMetadata(format!("TopViewer metadata has invalid {name}"))
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::known_detail_target;
+
+    #[test]
+    fn institution_routes_require_the_matching_host_and_path() {
+        let detail = concat!(
+            "detail/00000000-0000-0000-0000-000000000001/",
+            "media/00000000-0000-0000-0000-000000000002"
+        );
+        for host in ["beeldbankgroningen.nl", "www.beeldbankgroningen.nl"] {
+            assert_eq!(
+                known_detail_target(&format!("https://{host}/beelden/{detail}?token=a%2Fb")),
+                Some(
+                    concat!(
+                        "https://images.memorix.nl/gra/topviewjson/memorix/",
+                        "00000000-0000-0000-0000-000000000002"
+                    )
+                    .into()
+                )
+            );
+        }
+        for prefix in [
+            "https://unrelated.test/beeldbankgroningen.nl/beelden/",
+            "https://beeldbankgroningen.nl.evil.test/beelden/",
+            "https://evilbeeldbankgroningen.nl/beelden/",
+            "https://unrelated.test/?next=https://beeldbankgroningen.nl/beelden/",
+        ] {
+            assert!(known_detail_target(&format!("{prefix}{detail}")).is_none());
+        }
+    }
 }

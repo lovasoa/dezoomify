@@ -7,7 +7,11 @@ use serde::{Deserialize, de::IntoDeserializer};
 use url::Url;
 
 use crate::Vec2d;
-use crate::core::discovery::{Metadata, css, html_matches, json_metadata, viewer};
+use crate::core::discovery::{
+    Metadata,
+    Specificity::{Low, Medium},
+    css, html_matches, json_metadata, viewer,
+};
 use crate::core::{
     CatalogPlan, DiscoveryError, DiscoveryResource, DiscoveryRoute, FormatSpec, Grid, ImagePlan,
     ParsedResource, Positioned, Request, ResolvedLevel,
@@ -19,11 +23,9 @@ static VIEWER_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
 
 const ROUTES: &[DiscoveryRoute] = &[
     json_metadata::<Document>(),
-    viewer(html_matches(&VIEWER_RE)).decode(follow_viewer_config),
-    viewer(css(
-        "iframe[src*=\".s3.amazonaws.com/web/\" i][src*=\".html\" i]",
-    ))
-    .follow_attribute("src"),
+    viewer(html_matches(&VIEWER_RE).specificity(Medium)).decode(follow_viewer_config),
+    viewer(css("iframe[src*=\".s3.amazonaws.com/web/\" i][src*=\".html\" i]").specificity(Low))
+        .follow_attribute("src"),
 ];
 
 pub const SPEC: FormatSpec =
@@ -344,10 +346,16 @@ mod tests {
     fn viewer_pages_resolve_their_js_configuration() {
         let frame = "https://museum.s3.amazonaws.com/web/image.html?x=1&y=2";
         let page = br#"<iframe src=/other-image></iframe><template><iframe src=https://wrong.s3.amazonaws.com/web/image.html></iframe></template><iframe src='https://museum.s3.amazonaws.com/web/image.html?x=1&amp;y=2'></iframe>"#;
-        let (result, requests) = crate::test_support::discover(
-            SPEC,
+        let mut registry = crate::core::Registry::new();
+        registry.register(SPEC);
+        let (result, requests) = crate::test_support::discover_resources(
+            registry,
             "https://museum.test/",
-            &[(page, None), (MODERN, None)],
+            &[
+                ("https://museum.test/", page),
+                ("https://museum.test/other-image", b"unrelated frame"),
+                (frame, MODERN),
+            ],
         );
         assert!(result.is_ok());
         assert_eq!(
@@ -355,7 +363,11 @@ mod tests {
                 .iter()
                 .map(|request| request.uri.as_str())
                 .collect::<Vec<_>>(),
-            ["https://museum.test/", frame]
+            [
+                "https://museum.test/",
+                "https://museum.test/other-image",
+                frame
+            ]
         );
         for (uri, page, expected) in [
             (

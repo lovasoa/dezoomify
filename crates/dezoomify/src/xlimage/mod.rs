@@ -15,11 +15,10 @@ const ROUTES: &[DiscoveryRoute] = &[metadata(url_matches(is_xlimage_url)).decode
 pub const SPEC: FormatSpec = FormatSpec::new("xlimage", ROUTES).with_display_name("XLimage");
 
 fn is_xlimage_url(uri: &str) -> bool {
-    let path = uri.split_once(['?', '#']).map_or(uri, |(path, _)| path);
-    let name = path.rsplit(['/', '\\']).next().unwrap_or(path);
-    name.rsplit('.').next().is_some_and(|extension| {
-        let extension = extension.to_ascii_lowercase();
-        extension == "imgf" || extension == "imgi"
+    crate::core::uri::parse_uri(uri).is_ok_and(|url| {
+        url.path().rsplit_once('.').is_some_and(|(_, extension)| {
+            extension.eq_ignore_ascii_case("imgf") || extension.eq_ignore_ascii_case("imgi")
+        })
     })
 }
 

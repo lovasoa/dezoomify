@@ -3,9 +3,10 @@ mod support;
 use dezoomify::core::default_registry;
 use dezoomify::core::discovery::{DiscoveryInput, DiscoveryLimits};
 use dezoomify::model::{
-    DiscoveryInputKind, Size, TileSource, ViewerLevel, ViewerObservation, ViewerPyramid,
-    ViewerTileRequest,
+    DiscoveryInputKind, Interaction, ResourceRead, ResourceResponse, Size, TileSource, ViewerLevel,
+    ViewerObservation, ViewerPyramid, ViewerTileRequest,
 };
+use std::cell::RefCell;
 
 fn observation() -> ViewerObservation {
     ViewerObservation {
@@ -120,37 +121,65 @@ fn complete_format_metadata_keeps_loader_only_siblings_without_fetching() {
 }
 
 #[test]
-fn accessible_viewers_precede_weak_resource_reads() {
-    let registry = default_registry();
-    let catalog = futures::executor::block_on(registry.discover(
-        vec![
-            DiscoveryInput::with_contents("https://museum.test/page", "<html></html>"),
-            DiscoveryInput::new("https://analytics.test/script.js")
-                .with_kind(DiscoveryInputKind::ObservedResource),
-            DiscoveryInput::new("https://museum.test/opaque")
-                .with_kind(DiscoveryInputKind::ObservedResource),
-        ],
-        Default::default(),
-        |request, _| async move {
-            panic!(
-                "the live viewer should prevent speculative reads: {}",
-                request.uri
-            )
-        },
-        support::parse_html,
-        |interaction| async move {
-            assert_eq!(interaction, dezoomify::model::Interaction::Forbidden);
-            Ok(vec![
-                DiscoveryInput::with_contents(
-                    "https://museum.test/art#observed",
-                    serde_json::to_vec(&observation()).unwrap(),
-                )
-                .with_kind(DiscoveryInputKind::ObservedViewer),
-            ])
-        },
-    ))
-    .unwrap();
-    assert_eq!(support::ready_image(catalog).format, "viewer");
+fn live_sources_precede_weak_resource_reads() {
+    let metadata = DiscoveryInput::with_contents(
+        "https://museum.test/art#metadata",
+        include_bytes!("../../../fixtures/deepzoom/basic/image.dzi"),
+    )
+    .with_kind(DiscoveryInputKind::ObservedMetadata);
+    let viewer = DiscoveryInput::with_contents(
+        "https://museum.test/art#viewer",
+        serde_json::to_vec(&observation()).unwrap(),
+    )
+    .with_kind(DiscoveryInputKind::ObservedViewer);
+    for (expected, live) in [
+        ("deepzoom", Some(metadata)),
+        ("viewer", Some(viewer)),
+        ("vls", None),
+    ] {
+        let available = live.is_some();
+        let reads = RefCell::new(Vec::new());
+        let registry = default_registry();
+        let catalog = futures::executor::block_on(registry.discover(
+            vec![
+                DiscoveryInput::with_contents("https://museum.test/page", "<html></html>"),
+                DiscoveryInput::new("https://museum.test/zoom/1")
+                    .with_kind(DiscoveryInputKind::ObservedResource),
+            ],
+            Default::default(),
+            |request, interaction| {
+                assert_eq!(interaction, Interaction::Forbidden);
+                reads.borrow_mut().push(request.uri);
+                async {
+                    Ok(ResourceRead::Response {
+                        response: ResourceResponse {
+                            bytes: include_bytes!(
+                                "../../../fixtures/vls/approximate-basic/zoom/1.html"
+                            )
+                            .to_vec(),
+                            final_uri: None,
+                        },
+                    })
+                }
+            },
+            support::parse_html,
+            |interaction| {
+                assert_eq!(interaction, Interaction::Forbidden);
+                let inputs = live.clone().into_iter().collect();
+                async move { Ok(inputs) }
+            },
+        ))
+        .unwrap();
+        assert_eq!(support::ready_image(catalog).format, expected);
+        assert_eq!(
+            *reads.borrow(),
+            if available {
+                vec![]
+            } else {
+                vec!["https://museum.test/zoom/1"]
+            }
+        );
+    }
 }
 
 #[test]

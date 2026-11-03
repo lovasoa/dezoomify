@@ -42,7 +42,15 @@ fn supplied_observations_never_follow_links() {
             contents: Some(r#"<a href="https://must-not-fetch.test/info.json">image</a>"#.into()),
             kind: Some(kind),
         };
-        assert!(futures::executor::block_on(dezoomify(vec![loaded], options(), &host)).is_err());
+        let source = JobInput {
+            url: "https://page.test".into(),
+            contents: Some("<html></html>".into()),
+            kind: None,
+        };
+        let error =
+            futures::executor::block_on(dezoomify(vec![source, loaded], Options::default(), &host))
+                .unwrap_err();
+        assert!(matches!(error, Error::DiscoveryFailed { .. }), "{error:?}");
         assert!(host.fetched.borrow().is_empty());
     }
 }
@@ -690,24 +698,20 @@ fn pause_blocks_new_acquisition_and_retry_waits_until_resume() {
 fn host_selection_follows_catalog_entries_and_rejects_cycles() {
     let mut host = MemoryHost::default();
     host.resources.insert(
+        "https://images.test/list.txt".into(),
+        ResourceResponse {
+            bytes: b"https://images.test/image.dzi".to_vec(),
+            final_uri: None,
+        },
+    );
+    host.resources.insert(
         "https://images.test/image.dzi".into(),
         ResourceResponse {
             bytes: DZI.as_bytes().to_vec(),
             final_uri: None,
         },
     );
-    let inputs = vec![
-        JobInput {
-            url: "https://images.test/list.txt".into(),
-            contents: Some("https://images.test/image.dzi".into()),
-            kind: None,
-        },
-        JobInput {
-            url: "https://images.test/image.dzi".into(),
-            contents: None,
-            kind: Some(DiscoveryInputKind::ObservedResource),
-        },
-    ];
+    let inputs = vec![JobInput::new("https://images.test/list.txt")];
     host.level.set(Some(8));
     let opts = Options {
         max_deferred_follows: 1,

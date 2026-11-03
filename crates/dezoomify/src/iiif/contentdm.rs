@@ -2,9 +2,9 @@ use url::Url;
 
 use crate::core::{DiscoveryError, DiscoveryResource, DiscoveryRoute, ParsedResource, Request};
 
-use crate::core::discovery::{metadata as metadata_route, url_matches, viewer};
+use crate::core::discovery::{Specificity::High, metadata as metadata_route, url_matches, viewer};
 pub(super) const RECORD_ROUTE: DiscoveryRoute =
-    viewer(url_matches(is_record)).resolve_metadata(metadata);
+    viewer(url_matches(is_record).specificity(High)).resolve_metadata(metadata);
 pub(super) const METADATA_ROUTE: DiscoveryRoute =
     metadata_route(url_matches(is_metadata)).decode(follow_info);
 

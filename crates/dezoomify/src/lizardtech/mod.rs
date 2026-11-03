@@ -32,7 +32,11 @@ pub const SPEC: FormatSpec = FormatSpec::new(
 .with_display_name("LizardTech ImageServer");
 
 fn is_lizardtech_url(uri: &str) -> bool {
-    uri.to_ascii_lowercase().contains("/lizardtech/iserv/")
+    crate::core::uri::parse_uri(uri).is_ok_and(|url| {
+        url.path()
+            .to_ascii_lowercase()
+            .contains("/lizardtech/iserv/")
+    })
 }
 
 fn decode(resource: crate::core::DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
