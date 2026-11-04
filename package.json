@@ -12,8 +12,8 @@
     "react-dom": "^19.3.1"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.6.3",
-    "@types/node": "26.6.5",
+    "@biomejs/biome": "2.6.4",
+    "@types/node": "26.6.6",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.2",
@@ -23,7 +23,7 @@
     "sharp": "0.35.5",
     "typescript": "7.0.2",
     "vite": "^8.3.5",
-    "wrangler": "4.152.0"
+    "wrangler": "4.156.0"
   },
   "pnpm": {
     "overrides": {
