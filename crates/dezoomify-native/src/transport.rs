@@ -134,14 +134,15 @@ impl NativeTransport {
             })?;
         let mut builder = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
+            .retry(reqwest::retry::never())
             .connect_timeout(limits.connect_timeout)
             .pool_idle_timeout(Some(POOL_IDLE_TIMEOUT))
             .pool_max_idle_per_host(limits.max_idle_per_host.max(1))
             .http1_only();
         if limits.tls.accept_invalid_certs {
-            builder = builder.danger_accept_invalid_certs(true);
+            builder = builder.tls_danger_accept_invalid_certs(true);
         } else {
-            builder = builder.use_preconfigured_tls(tls_config());
+            builder = builder.tls_backend_preconfigured(tls_config()?);
         }
         let client = builder.build().map_err(|e| {
             Error::Internal(
@@ -278,14 +279,19 @@ impl NativeTransport {
     }
 }
 
-/// Mozilla roots plus the process-default provider (ring, per the workspace
-/// rustls build).
-fn tls_config() -> rustls::ClientConfig {
+/// Mozilla roots and an explicit provider: desktop plugins can enable another
+/// rustls provider, making automatic provider selection ambiguous.
+fn tls_config() -> Result<rustls::ClientConfig, Error> {
     let mut roots = rustls::RootCertStore::empty();
     roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-    rustls::ClientConfig::builder()
-        .with_root_certificates(roots)
-        .with_no_client_auth()
+    let builder = rustls::ClientConfig::builder_with_provider(std::sync::Arc::new(
+        rustls::crypto::aws_lc_rs::default_provider(),
+    ))
+    .with_safe_default_protocol_versions()
+    .map_err(|error| {
+        Error::Internal(format!("TLS protocols could not be configured: {error}").into())
+    })?;
+    Ok(builder.with_root_certificates(roots).with_no_client_auth())
 }
 
 fn is_http_uri(uri: &str) -> bool {

@@ -61,7 +61,7 @@ pub fn audit_js() -> Result<(), String> {
         .status()
         .map_err(|e| {
             format!(
-                "failed to run pnpm audit: {e} (install pnpm 9.12.0 matching packageManager in package.json)"
+                "failed to run pnpm audit: {e} (install pnpm matching packageManager in package.json)"
             )
         })?;
     if !status.success() {

@@ -5,3 +5,27 @@ packages:
   - "apps/extension/tests/browser"
   - "apps/desktop/tests/window-e2e"
   - "tests/**"
+
+overrides:
+  sharp: "0.35.5"
+  undici: "8.12.4"
+
+# Allow the explicitly selected Biome release through pnpm's default age gate.
+minimumReleaseAgeExclude:
+  - "@biomejs/biome@2.6.6"
+  - "@biomejs/cli-android-arm64@2.6.6"
+  - "@biomejs/cli-android-x64@2.6.6"
+  - "@biomejs/cli-darwin-arm64@2.6.6"
+  - "@biomejs/cli-darwin-x64@2.6.6"
+  - "@biomejs/cli-linux-arm64-musl@2.6.6"
+  - "@biomejs/cli-linux-arm64@2.6.6"
+  - "@biomejs/cli-linux-x64-musl@2.6.6"
+  - "@biomejs/cli-linux-x64@2.6.6"
+  - "@biomejs/cli-win32-arm64@2.6.6"
+  - "@biomejs/cli-win32-x64@2.6.6"
+
+allowBuilds:
+  esbuild: true
+  geckodriver: true
+  sharp: true
+  workerd: true
