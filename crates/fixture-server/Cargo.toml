@@ -18,7 +18,7 @@ url.workspace = true
 tokio = { workspace = true, features = ["macros", "io-util", "rt-multi-thread", "net"] }
 hmac.workspace = true
 sha1.workspace = true
-reqwest.workspace = true
+reqwest = { workspace = true, features = ["query"] }
 
 [lints]
 workspace = true

@@ -44,10 +44,13 @@ pub const MAX_CONCURRENT: usize = 16;
 
 /// Bytes currently available to the process according to the operating
 /// system. The native Host samples this to cap its invocation's RAM budget;
-/// availability can change after sampling.
+/// availability can change after sampling. Returns zero if the system probe
+/// cannot be initialized.
 #[must_use]
 pub fn available_memory_bytes() -> u64 {
-    let mut system = sysinfo::System::new();
+    let Ok(mut system) = sysinfo::System::new() else {
+        return 0;
+    };
     system.refresh_memory();
     system.available_memory()
 }

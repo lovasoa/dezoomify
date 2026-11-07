@@ -15,7 +15,7 @@
     "openseadragon3": "npm:openseadragon@3.1.0",
     "openseadragon4": "npm:openseadragon@4.1.1",
     "openseadragon5": "npm:openseadragon@5.0.1",
-    "playwright": "1.64.1",
+    "playwright": "1.65.0",
     "selenium-webdriver": "^4.52.0"
   },
   "license": "GPL-3.0-or-later"

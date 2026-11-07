@@ -67,12 +67,12 @@ sha1 = "0.11"
 aes = "0.9"
 cbc = "0.2"
 thiserror = "2"
-rustls = { version = "0.23", default-features = false, features = ["std", "ring"] }
+rustls = { version = "0.23", default-features = false, features = ["std", "aws-lc-rs"] }
 sha2 = "0.11"
 sysinfo = "0.40"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 tokio = { version = "1", features = ["rt-multi-thread", "net"] }
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-manual-roots", "json"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json"] }
 wasm-bindgen = "0.2"
 wasm-bindgen-test = "0.3"
 serde-wasm-bindgen = "0.6"
