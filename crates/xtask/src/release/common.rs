@@ -137,7 +137,7 @@ pub(crate) fn expected_artifact_name(target: &str, version: &str) -> Option<Stri
     match target {
         "cli-linux-x86_64" => Some(format!("dezoomify-cli-v{version}-linux-x86_64.tar.gz")),
         "desktop-linux-x86_64" => Some("dezoomify-desktop.deb".into()),
-        "desktop-windows-x86_64" => Some("dezoomify-desktop.msi".into()),
+        "desktop-windows-x86_64" => Some("dezoomify-desktop.exe".into()),
         "desktop-macos-aarch64" => Some("dezoomify-desktop.dmg".into()),
         "extension-chromium" => Some(format!("dezoomify-chromium-v{version}.zip")),
         "extension-firefox" => Some(format!("dezoomify-firefox-v{version}.zip")),

@@ -168,7 +168,7 @@ const en = {
   "view.modal.closeTitle": "Close",
   // Desktop-app guidance modal.
   "view.desktop.title": "Dezoomify Desktop App",
-  "view.desktop.download.windows": "Windows installer · x64 (MSI)",
+  "view.desktop.download.windows": "Windows installer · x64 (NSIS)",
   "view.desktop.download.macos": "macOS installer · Apple Silicon (DMG)",
   "view.desktop.download.linux": "Linux installer · x64 (DEB)",
   "view.desktop.step1": "Download the installer above for your system, then install it.",

@@ -1153,7 +1153,7 @@ const RELEASES_URL = "https://github.com/lovasoa/dezoomify/releases/latest";
 function DesktopDownloadLinks({ hints }: { hints?: PlatformHints }) {
   const preferred = detectPlatform(hints);
   const installers = [
-    { platform: "windows", extension: "msi" },
+    { platform: "windows", extension: "exe" },
     { platform: "macos", extension: "dmg" },
     { platform: "linux", extension: "deb" },
   ] as const;

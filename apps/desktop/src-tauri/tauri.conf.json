@@ -45,9 +45,6 @@
       "deb": {}
     },
     "windows": {
-      "wix": {
-        "language": "en-US"
-      },
       "nsis": {
         "languages": [
           "English"

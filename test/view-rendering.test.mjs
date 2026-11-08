@@ -711,7 +711,7 @@ test("desktop handoff shows and copies the discovered URL, handles failure and u
   let dialog = document.querySelector('[role="dialog"]');
   assert.ok(
     dialog.querySelector(
-      'a[href="https://github.com/lovasoa/dezoomify/releases/latest/download/dezoomify-desktop.msi"]',
+      'a[href="https://github.com/lovasoa/dezoomify/releases/latest/download/dezoomify-desktop.exe"]',
     ),
   );
   assert.equal(dialog.querySelector("input").value, source);
