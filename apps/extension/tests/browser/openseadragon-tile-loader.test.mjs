@@ -128,21 +128,21 @@ async function loadFixture(mode) {
   const extent = { width: 256, height: 256 };
   const channelId = crypto.randomUUID();
   TileSession.listenViewerChannel(channelId, [handle]);
-  const responseEvent = `dezoomify-viewer:${channelId}:response`;
+  // Stand in for the isolated bridge: hand over a MessagePort and speak the
+  // channel protocol over it exactly as the extension does.
+  const channel = new MessageChannel();
+  const waiting = new Map();
+  channel.port1.onmessage = (event) => {
+    const message = event.data;
+    if (message?.type !== "result") return;
+    waiting.get(message.id)?.(message.result);
+    waiting.delete(message.id);
+  };
+  window.postMessage(channelId, location.origin, [channel.port2]);
   const send = (message) =>
     new Promise((resolve) => {
-      const onResponse = (event) => {
-        const data = JSON.parse(event.detail);
-        if (data.id !== message.id) return;
-        document.removeEventListener(responseEvent, onResponse);
-        resolve(data.result);
-      };
-      document.addEventListener(responseEvent, onResponse);
-      document.dispatchEvent(
-        new CustomEvent(`dezoomify-viewer:${channelId}:request`, {
-          detail: JSON.stringify(message),
-        }),
-      );
+      waiting.set(message.id, resolve);
+      channel.port1.postMessage(message);
     });
   const result = await send({ type: "read-tile", id: 1, request, extent });
   await send({ type: "close", id: 2 });
@@ -150,7 +150,7 @@ async function loadFixture(mode) {
   if (retired.ok) throw new Error("retired source still loads tiles");
   if (!result.ok) return result.error;
   if (result.url) return { url: result.url, addedGlobals };
-  const bytes = Uint8Array.fromBase64(result.data);
+  const bytes = new Uint8Array(result.buffer);
   const decoded = await createImageBitmap(new Blob([bytes]));
   const canvas = document.createElement("canvas");
   canvas.width = decoded.width;

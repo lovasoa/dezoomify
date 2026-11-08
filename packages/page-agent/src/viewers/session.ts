@@ -19,7 +19,7 @@ import { imageBlob } from "./tile-image.ts";
 import type { MetadataContext, ViewerEvidence } from "./types.ts";
 
 export type ViewerTileResult = { documentUrl: string } & (
-  | { ok: true; bytes: number; data: string }
+  | { ok: true; buffer: ArrayBuffer }
   | { ok: true; url: string }
   | { ok: false; error: JobError }
 );
@@ -80,7 +80,7 @@ export function registerViewer(
       operation = "encoding";
       const blob = await imageBlob(result.image, extent, result.owned);
       lifetime.signal.throwIfAborted();
-      return { documentUrl, ok: true, ...(await encodedTile(blob)) };
+      return { documentUrl, ok: true, ...(await binaryTile(blob)) };
     } catch (cause) {
       const error = lifetime.signal.aborted
         ? new CancelledError()
@@ -95,9 +95,9 @@ export function registerViewer(
   }
 }
 
-async function encodedTile(blob: Blob): Promise<{ bytes: number; data: string }> {
+async function binaryTile(blob: Blob): Promise<{ buffer: ArrayBuffer }> {
   if (blob.size > SOURCE_FETCH_BYTE_LIMIT) throw new SizeLimitError(SOURCE_FETCH_BYTE_LIMIT);
-  return { bytes: blob.size, data: new Uint8Array(await blob.arrayBuffer()).toBase64() };
+  return { buffer: await blob.arrayBuffer() };
 }
 
 /** Direct helpers for page-side tests and the message listener.
@@ -130,68 +130,61 @@ export function releaseViewerTiles(handles: string[]): void {
   }
 }
 
-/** Read only JSON string payloads from the DOM's untrusted event surface. */
-function eventPayload(event: Event): Record<string, unknown> | undefined {
-  const detail = (event as CustomEvent<unknown>).detail;
-  if (typeof detail !== "string") return undefined;
-  try {
-    const value: unknown = JSON.parse(detail);
-    return value && typeof value === "object" && !Array.isArray(value)
-      ? (value as Record<string, unknown>)
-      : undefined;
-  } catch {
-    return undefined;
-  }
-}
+/** How long a scanned session waits for its channel before retiring itself. */
+const CLAIM_TIMEOUT_MS = 30_000;
 
 /** One job-scoped listener owns the captured viewer loaders. The isolated
- * extension world communicates through the shared DOM, using string payloads
- * so Firefox never needs to expose objects across script worlds. */
+ * bridge hands over a MessagePort through one window message; tile bytes then
+ * cross worlds as transferred ArrayBuffers. A session that no bridge claims
+ * retires itself, and closing the port releases the scan's handles. */
 export function listenViewerChannel(channelId: string, handles: string[]): void {
   const owned = new Set(handles);
-  const requestEvent = `dezoomify-viewer:${channelId}:request`;
-  const responseEvent = `dezoomify-viewer:${channelId}:response`;
+  let port: MessagePort | undefined;
   let closed = false;
+  const claim = setTimeout(close, CLAIM_TIMEOUT_MS);
 
-  const reply = (id: number, result: unknown) => {
-    if (!closed)
-      document.dispatchEvent(
-        new CustomEvent(responseEvent, { detail: JSON.stringify({ id, result }) }),
-      );
+  function close(): void {
+    if (closed) return;
+    closed = true;
+    clearTimeout(claim);
+    window.removeEventListener("message", onHandoff);
+    port?.close();
+    releaseViewerTiles(handles);
+  }
+
+  const onHandoff = (event: MessageEvent) => {
+    // An isolated extension world can deliver the handoff with a null source.
+    if (event.source !== window && event.source !== null) return;
+    const handed = event.ports[0];
+    if (event.data !== channelId || !handed) return;
+    window.removeEventListener("message", onHandoff);
+    clearTimeout(claim);
+    port = handed;
+    port.onmessage = onMessage;
+    port.postMessage({ type: "ready", documentUrl: location.href });
   };
-  const isTileCall = (message: Record<string, unknown>) =>
-    message.type === "read-tile" &&
-    typeof message.id === "number" &&
-    Number.isSafeInteger(message.id) &&
-    message.request !== null &&
-    typeof message.request === "object" &&
-    owned.has((message.request as ViewerTileRequest).handle);
 
-  const onRequest = (event: Event) => {
-    const message = eventPayload(event);
-    if (!message) return;
-    if (
-      message.type === "ping" &&
-      typeof message.id === "number" &&
-      Number.isSafeInteger(message.id)
-    ) {
-      reply(message.id, { ok: true, documentUrl: location.href });
-      return;
-    }
+  const onMessage = (event: MessageEvent) => {
+    const message = event.data as Record<string, unknown> | null;
+    if (!message || typeof message !== "object") return;
     if (message.type === "close") {
+      const id = Number.isSafeInteger(message.id) ? (message.id as number) : 0;
       releaseViewerTiles(handles);
-      reply(Number.isSafeInteger(message.id) ? (message.id as number) : 0, {
-        ok: true,
-        documentUrl: location.href,
-      });
-      closed = true;
-      document.removeEventListener(requestEvent, onRequest);
+      port?.postMessage({ type: "result", id, result: { documentUrl: location.href, ok: true } });
+      close();
       return;
     }
-    if (!isTileCall(message)) return;
-    const id = message.id as number;
+    const request = message.request as ViewerTileRequest | null;
+    if (
+      message.type !== "read-tile" ||
+      !Number.isSafeInteger(message.id) ||
+      !request ||
+      typeof request !== "object" ||
+      !owned.has(request.handle)
+    )
+      return;
     void Promise.resolve()
-      .then(() => readViewerTile(message.request as ViewerTileRequest, message.extent as Size))
+      .then(() => readViewerTile(request, message.extent as Size))
       .catch(
         (cause: unknown): ViewerTileResult => ({
           documentUrl: location.href,
@@ -203,7 +196,12 @@ export function listenViewerChannel(channelId: string, handles: string[]): void 
           ),
         }),
       )
-      .then((result) => reply(id, result));
+      .then((result) => {
+        if (closed) return;
+        const transfer = result.ok && "buffer" in result ? [result.buffer] : [];
+        port?.postMessage({ type: "result", id: message.id, result }, transfer);
+      });
   };
-  document.addEventListener(requestEvent, onRequest);
+
+  window.addEventListener("message", onHandoff);
 }

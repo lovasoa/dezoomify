@@ -139,9 +139,7 @@ for (const [name, engine] of [
                 for (let attempt = 0; attempt < 2; attempt++) {
                   const edge = await ViewerScanner.readViewerTile(edgeRequest, { width, height });
                   if (!edge.ok) throw new Error(JSON.stringify(edge));
-                  const image = await createImageBitmap(
-                    new Blob([Uint8Array.fromBase64(edge.data)]),
-                  );
+                  const image = await createImageBitmap(new Blob([edge.buffer]));
                   dimensions.push([image.width, image.height]);
                   image.close();
                 }

@@ -91,9 +91,13 @@ async function acquireTile(page, source, grid, column, row) {
     Math.min(grid.size.height, (row + 1) * grid.tile_size.height + grid.overlap.height) - top;
   const result = await page.evaluate(
     ({ source, grid, column, row, width, height }) =>
-      ViewerScanner.readViewerTile(
-        { handle: source.handle, source_url: source.source_url, level: grid.level, column, row },
-        { width, height },
+      Promise.resolve(
+        ViewerScanner.readViewerTile(
+          { handle: source.handle, source_url: source.source_url, level: grid.level, column, row },
+          { width, height },
+        ),
+      ).then((value) =>
+        value.ok && value.buffer ? { ...value, buffer: [...new Uint8Array(value.buffer)] } : value,
       ),
     { source, grid, column, row, width, height },
   );
@@ -105,7 +109,7 @@ async function acquireTile(page, source, grid, column, row) {
           result.url,
         ),
       )
-    : Buffer.from(result.data, "base64");
+    : Buffer.from(result.buffer);
   const decoded = await sharp(bytes).raw().toBuffer({ resolveWithObject: true });
   assert.deepEqual([decoded.info.width, decoded.info.height], [width, height]);
   for (let offset = 0; offset < decoded.data.length; offset += 4)
