@@ -35,7 +35,7 @@ capabilities.
   provides a Linux x86_64 executable in the `dezoomify-cli` archive. To build
   it from source, see below.
 
-Desktop installers are available as `.msi` for Windows x86_64, `.dmg` for
+Desktop installers are available as `.exe` (NSIS) for Windows x86_64, `.dmg` for
 Apple silicon Macs, and `.deb` for Linux x86_64. They are unsigned, so your
 operating system may ask you to confirm that you trust the installer. Use
 **Help → Check for updates…** to install a signed update after confirmation;
