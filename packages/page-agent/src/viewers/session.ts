@@ -130,6 +130,20 @@ export function releaseViewerTiles(handles: string[]): void {
   }
 }
 
+/** Read only JSON string payloads from the DOM's untrusted event surface. */
+function eventPayload(event: Event): Record<string, unknown> | undefined {
+  const detail = (event as CustomEvent<unknown>).detail;
+  if (typeof detail !== "string") return undefined;
+  try {
+    const value: unknown = JSON.parse(detail);
+    return value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** One job-scoped listener owns the captured viewer loaders. The isolated
  * extension world communicates through the shared DOM, using string payloads
  * so Firefox never needs to expose objects across script worlds. */
@@ -145,19 +159,23 @@ export function listenViewerChannel(channelId: string, handles: string[]): void 
         new CustomEvent(responseEvent, { detail: JSON.stringify({ id, result }) }),
       );
   };
+  const isTileCall = (message: Record<string, unknown>) =>
+    message.type === "read-tile" &&
+    typeof message.id === "number" &&
+    Number.isSafeInteger(message.id) &&
+    message.request !== null &&
+    typeof message.request === "object" &&
+    owned.has((message.request as ViewerTileRequest).handle);
+
   const onRequest = (event: Event) => {
-    const detail = (event as CustomEvent<unknown>).detail;
-    if (typeof detail !== "string") return;
-    let message: Record<string, unknown>;
-    try {
-      const parsed: unknown = JSON.parse(detail);
-      if (!parsed || typeof parsed !== "object") return;
-      message = parsed as Record<string, unknown>;
-    } catch {
-      return;
-    }
-    if (message.type === "ping" && message.id === 0) {
-      reply(0, { ok: true, documentUrl: location.href });
+    const message = eventPayload(event);
+    if (!message) return;
+    if (
+      message.type === "ping" &&
+      typeof message.id === "number" &&
+      Number.isSafeInteger(message.id)
+    ) {
+      reply(message.id, { ok: true, documentUrl: location.href });
       return;
     }
     if (message.type === "close") {
@@ -170,16 +188,8 @@ export function listenViewerChannel(channelId: string, handles: string[]): void 
       document.removeEventListener(requestEvent, onRequest);
       return;
     }
-    if (
-      message.type !== "read-tile" ||
-      !Number.isSafeInteger(message.id) ||
-      typeof message.id !== "number" ||
-      !message.request ||
-      typeof message.request !== "object" ||
-      !owned.has((message.request as ViewerTileRequest).handle)
-    )
-      return;
-    const id = message.id;
+    if (!isTileCall(message)) return;
+    const id = message.id as number;
     void Promise.resolve()
       .then(() => readViewerTile(message.request as ViewerTileRequest, message.extent as Size))
       .catch(

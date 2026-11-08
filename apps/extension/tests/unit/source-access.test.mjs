@@ -298,6 +298,7 @@ test("live tile capabilities stay bound to their exact viewer frame and are rele
   fake.setPortReply((message, options) => {
     assert.equal(options.frameId, 9);
     assert.equal(options.name, "dezoomify-viewer:test-viewer-channel");
+    if (message.type === "ping") return { ok: true, documentUrl: viewerUrl };
     assert.equal(message.type, "read-tile");
     assert.deepEqual(message.request, request);
     assert.deepEqual(message.extent, extent);

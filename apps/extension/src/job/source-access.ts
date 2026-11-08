@@ -537,10 +537,15 @@ export function createSourceAccess(
         const connected = createViewerChannel(port);
         try {
           const ready = await connected.ready(owned);
+          const pong = await connected.ping(owned);
           if (
             !isRecord(ready) ||
             typeof ready.documentUrl !== "string" ||
-            !sameDocumentUrl(ready.documentUrl, frame.documentUrl)
+            !sameDocumentUrl(ready.documentUrl, frame.documentUrl) ||
+            !isRecord(pong) ||
+            pong.ok !== true ||
+            typeof pong.documentUrl !== "string" ||
+            !sameDocumentUrl(pong.documentUrl, frame.documentUrl)
           )
             throw lostFrame(frame);
           return connected;

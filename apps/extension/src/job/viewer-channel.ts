@@ -29,6 +29,18 @@ export function installViewerBridge(channelId: string): { documentUrl: string } 
   const responseEvent = `dezoomify-viewer:${channelId}:response`;
   const dispatch = (message: unknown) =>
     document.dispatchEvent(new CustomEvent(requestEvent, { detail: JSON.stringify(message) }));
+  const eventPayload = (event: Event): Record<string, unknown> | undefined => {
+    const detail = (event as CustomEvent<unknown>).detail;
+    if (typeof detail !== "string") return undefined;
+    try {
+      const value: unknown = JSON.parse(detail);
+      return value && typeof value === "object" && !Array.isArray(value)
+        ? (value as Record<string, unknown>)
+        : undefined;
+    } catch {
+      return undefined;
+    }
+  };
 
   const onConnect = (port: BridgePort) => {
     if (port.name !== `dezoomify-viewer:${channelId}`) return;
@@ -36,39 +48,30 @@ export function installViewerBridge(channelId: string): { documentUrl: string } 
     const pending = new Set<number>();
     let ready = false;
 
+    const onReady = (value: unknown) => {
+      if (!value || typeof value !== "object") return;
+      const result = value as Record<string, unknown>;
+      if (result.ok !== true || typeof result.documentUrl !== "string") return;
+      ready = true;
+      port.postMessage({ type: "ready", documentUrl: result.documentUrl });
+    };
     const onResponse = (event: Event) => {
-      const detail = (event as CustomEvent<unknown>).detail;
-      if (typeof detail !== "string") return;
-      let response: Record<string, unknown>;
-      try {
-        const parsed: unknown = JSON.parse(detail);
-        if (!parsed || typeof parsed !== "object") return;
-        response = parsed as Record<string, unknown>;
-      } catch {
-        return;
-      }
+      const response = eventPayload(event);
+      if (!response) return;
       if (response.id === 0) {
-        const result = response.result as { ok?: unknown; documentUrl?: unknown } | null;
-        if (result?.ok === true && typeof result.documentUrl === "string") {
-          ready = true;
-          port.postMessage({ type: "ready", documentUrl: result.documentUrl });
-        }
+        onReady(response.result);
         return;
       }
-      if (
-        typeof response.id !== "number" ||
-        !Number.isSafeInteger(response.id) ||
-        !pending.delete(response.id)
-      )
-        return;
-      port.postMessage({ type: "result", id: response.id, result: response.result });
+      const id = response.id;
+      if (typeof id !== "number" || !Number.isSafeInteger(id) || !pending.delete(id)) return;
+      port.postMessage({ type: "result", id, result: response.result });
     };
 
     port.onMessage.addListener((value: unknown) => {
       if (!ready || !value || typeof value !== "object") return;
       const message = value as Record<string, unknown>;
       if (
-        message.type !== "read-tile" ||
+        (message.type !== "read-tile" && message.type !== "ping") ||
         typeof message.id !== "number" ||
         !Number.isSafeInteger(message.id) ||
         message.id < 1 ||
@@ -136,6 +139,34 @@ export function createViewerChannel(port: ExtensionPort) {
   port.onMessage.addListener(onMessage);
   port.onDisconnect.addListener(onDisconnect);
 
+  /** A single pending-call path covers readiness and tile acquisition. */
+  function send(
+    command: { type: "ping" } | { type: "read-tile"; request: ViewerTileRequest; extent: Size },
+    signal: AbortSignal,
+  ): Promise<unknown> {
+    if (closed) return Promise.reject(lost());
+    signal.throwIfAborted();
+    const id = ++nextId;
+    return new Promise((resolve, reject) => {
+      const settle = (callback: (value: unknown) => void, value: unknown) => {
+        pending.delete(id);
+        signal.removeEventListener("abort", abort);
+        callback(value);
+      };
+      const abort = () => settle(reject, signal.reason);
+      pending.set(id, {
+        resolve: (value) => settle(resolve, value),
+        reject: (error) => settle(reject, error),
+      });
+      signal.addEventListener("abort", abort, { once: true });
+      try {
+        port.postMessage({ ...command, id });
+      } catch {
+        settle(reject, lost());
+      }
+    });
+  }
+
   return {
     async ready(signal: AbortSignal): Promise<unknown> {
       signal.throwIfAborted();
@@ -155,28 +186,12 @@ export function createViewerChannel(port: ExtensionPort) {
       });
     },
 
+    ping(signal: AbortSignal): Promise<unknown> {
+      return send({ type: "ping" }, signal);
+    },
+
     readTile(request: ViewerTileRequest, extent: Size, signal: AbortSignal): Promise<unknown> {
-      if (closed) return Promise.reject(lost());
-      signal.throwIfAborted();
-      const id = ++nextId;
-      return new Promise((resolve, reject) => {
-        const settle = (callback: (value: unknown) => void, value: unknown) => {
-          pending.delete(id);
-          signal.removeEventListener("abort", abort);
-          callback(value);
-        };
-        const abort = () => settle(reject, signal.reason);
-        pending.set(id, {
-          resolve: (value) => settle(resolve, value),
-          reject: (error) => settle(reject, error),
-        });
-        signal.addEventListener("abort", abort, { once: true });
-        try {
-          port.postMessage({ type: "read-tile", id, request, extent });
-        } catch {
-          settle(reject, lost());
-        }
-      });
+      return send({ type: "read-tile", request, extent }, signal);
     },
 
     dispose(): void {
