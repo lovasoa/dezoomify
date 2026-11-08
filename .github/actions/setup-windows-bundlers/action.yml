@@ -1,5 +1,5 @@
 name: setup-windows-bundlers
-description: Install and expose the pinned NSIS toolchains
+description: Install and expose the pinned NSIS toolchain
 runs:
   using: composite
   steps:
