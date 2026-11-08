@@ -557,7 +557,17 @@ export function createSourceAccess(
     rememberTileFrames(reply.handles, frame);
   }
 
+  /** Re-scanning replaces this frame's old job-owned viewer session. */
+  function retireViewerFrame(frame: SourceFrame): void {
+    tileChannels.get(frame)?.dispose();
+    tileChannels.delete(frame);
+    for (const [handle, owner] of tileFrames) {
+      if (owner === frame) tileFrames.delete(handle);
+    }
+  }
+
   async function scan(signal?: AbortSignal, frame = rootFrame): Promise<CandidateSnapshot> {
+    retireViewerFrame(frame);
     const scanDeadline = Date.now() + timeoutMs;
     let observed: ObservedInput[] = [];
     let images: LoadedImage[] = [];

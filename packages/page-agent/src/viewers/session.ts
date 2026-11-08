@@ -138,8 +138,7 @@ export function listenViewerChannel(channelId: string, handles: string[]): void 
   const onMessage = (event: MessageEvent) => {
     if (event.source !== window) return;
     const message = event.data;
-    if (message?.type !== "dezoomify-viewer-request" || message.channelId !== channelId)
-      return;
+    if (message?.type !== "dezoomify-viewer-request" || message.channelId !== channelId) return;
     if (message.method === "close") {
       window.removeEventListener("message", onMessage);
       releaseViewerTiles(handles);
