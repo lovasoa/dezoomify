@@ -549,10 +549,10 @@ test("desktop guidance downloads directly without leaving the website", async ({
     apiRequests++;
     return route.abort();
   });
-  const installerUrl = "https://github.com/lovasoa/dezoomify/releases/latest/download/dezoomify-desktop.msi";
+  const installerUrl = "https://github.com/lovasoa/dezoomify/releases/latest/download/dezoomify-desktop.exe";
   await page.route(installerUrl, (route) => route.fulfill({
     contentType: "application/octet-stream",
-    headers: { "content-disposition": 'attachment; filename="dezoomify-test.msi"' },
+    headers: { "content-disposition": 'attachment; filename="dezoomify-test.exe"' },
     body: "Mock installer bytes",
   }));
   await page.goto(`${ADDR}/`, { waitUntil: "networkidle" });
@@ -560,13 +560,13 @@ test("desktop guidance downloads directly without leaving the website", async ({
   const dialog = page.getByRole("dialog");
   const downloads = dialog.locator(".dz-modal-download-box");
   await expect(downloads.getByRole("link")).toHaveCount(3);
-  const windows = downloads.getByRole("link", { name: "Windows installer · x64 (MSI)" });
+  const windows = downloads.getByRole("link", { name: "Windows installer · x64 (NSIS)" });
   await expect(windows).toHaveAttribute("href", installerUrl);
   await expect(downloads.getByRole("link", { name: "macOS installer · Apple Silicon (DMG)" })).toHaveAttribute("href", /\/releases\/latest\/download\/dezoomify-desktop\.dmg$/);
   await expect(downloads.getByRole("link", { name: "Linux installer · x64 (DEB)" })).toHaveAttribute("href", /\/releases\/latest\/download\/dezoomify-desktop\.deb$/);
   const pending = page.waitForEvent("download");
   await windows.click();
-  expect((await pending).suggestedFilename()).toBe("dezoomify-test.msi");
+  expect((await pending).suggestedFilename()).toBe("dezoomify-test.exe");
   await expect(page).toHaveURL(`${ADDR}/`);
   expect(apiRequests).toBe(0);
 });
