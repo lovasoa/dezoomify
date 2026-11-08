@@ -136,7 +136,8 @@ export function releaseViewerTiles(handles: string[]): void {
 export function listenViewerChannel(channelId: string, handles: string[]): void {
   const owned = new Set(handles);
   const onMessage = (event: MessageEvent) => {
-    if (event.source !== window) return;
+    // An isolated extension world may deliver postMessage with a null source.
+    if (event.source !== window && event.source !== null) return;
     const message = event.data;
     if (message?.type !== "dezoomify-viewer-request" || message.channelId !== channelId) return;
     if (message.method === "close") {

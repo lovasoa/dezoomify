@@ -30,7 +30,8 @@ export function installViewerBridge(channelId: string): { documentUrl: string } 
     runtime.onConnect.removeListener(onConnect);
     const pending = new Set<number>();
     const onWindowMessage = (event: MessageEvent) => {
-      if (event.source !== window) return;
+      // Firefox can suppress the sender window on extension-originated events.
+    if (event.source !== window && event.source !== null) return;
       const data = event.data;
       if (
         data?.type !== "dezoomify-viewer-response" ||

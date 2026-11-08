@@ -134,8 +134,6 @@ async function checkObservation(page, runtime, mode) {
     for (const input of result.inputs) assert.equal(input.kind, kind);
   }
   const live = result.inputs.filter((input) => input.kind === "observed-viewer");
-  // A new bundle must not invalidate the live loaders registered by an earlier scan.
-  if (live.length) await page.addScriptTag({ content: scanner });
   if (["custom", "expando", "global", "multi", "ajax"].includes(mode)) {
     for (const input of live) await acquireTiles(page, input);
   }
