@@ -13,14 +13,13 @@ import {
 const scanner = (
   await build({
     stdin: {
-      contents: `export {scanViewers} from './viewer-scanner.ts';
-export {readViewerTile,releaseViewerTiles} from './viewers/session.ts';`,
+      contents: `export {installPageAgent,callPageAgent} from '@dezoomify/page-agent';`,
       resolveDir: new URL("../../src/job", import.meta.url).pathname,
     },
     bundle: true,
     write: false,
     format: "iife",
-    globalName: "ViewerScanner",
+    globalName: "PageAgent",
     target: "es2022",
     define: { "import.meta.url": JSON.stringify(import.meta.url) },
   })
@@ -89,15 +88,23 @@ async function acquireTile(page, source, grid, column, row) {
     Math.min(grid.size.width, (column + 1) * grid.tile_size.width + grid.overlap.width) - left;
   const height =
     Math.min(grid.size.height, (row + 1) * grid.tile_size.height + grid.overlap.height) - top;
-  const result = await page.evaluate(
+  const reply = await page.evaluate(
     ({ source, grid, column, row, width, height }) =>
-      ViewerScanner.readViewerTile(
-        { handle: source.handle, source_url: source.source_url, level: grid.level, column, row },
-        { width, height },
-      ),
+      PageAgent.callPageAgent({
+        method: "read-tile",
+        request: {
+          handle: source.handle,
+          source_url: source.source_url,
+          level: grid.level,
+          column,
+          row,
+        },
+        extent: { width, height },
+      }),
     { source, grid, column, row, width, height },
   );
-  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(reply.ok, true, JSON.stringify(reply));
+  const result = reply.result;
   const bytes = result.url
     ? Buffer.from(
         await page.evaluate(
@@ -113,7 +120,9 @@ async function acquireTile(page, source, grid, column, row) {
 }
 
 async function checkObservation(page, runtime, mode) {
-  const result = await page.evaluate(() => ViewerScanner.scanViewers());
+  const result = await page.evaluate(
+    async () => (await PageAgent.callPageAgent({ method: "scan" })).result,
+  );
   if (mode === "image") {
     assert.deepEqual(result.inputs, []);
     assert.deepEqual(result.handles, []);
@@ -158,23 +167,25 @@ async function checkSession(page, input, mode) {
     column: 0,
     row: 0,
   };
+  const readTile = (request) =>
+    PageAgent.callPageAgent({ method: "read-tile", request, extent: { width: 257, height: 257 } });
   if (["failure", "bounds"].includes(mode)) {
-    const failed = await page.evaluate(
-      (request) => ViewerScanner.readViewerTile(request, { width: 257, height: 257 }),
-      request,
-    );
-    if (failed.url) {
-      assert.equal(await page.evaluate(async (url) => (await fetch(url)).status, failed.url), 503);
+    const failed = await page.evaluate(readTile, request);
+    if (failed.ok && failed.result.url) {
+      assert.equal(
+        await page.evaluate(async (url) => (await fetch(url)).status, failed.result.url),
+        503,
+      );
     } else {
       assert.equal(failed.ok, false);
       assert.equal(failed.error.kind, mode === "bounds" ? "internal" : "network-failure");
     }
   }
-  await page.evaluate((handle) => ViewerScanner.releaseViewerTiles([handle]), source.handle);
-  const retired = await page.evaluate(
-    (request) => ViewerScanner.readViewerTile(request, { width: 257, height: 257 }),
-    request,
+  await page.evaluate(
+    (handle) => PageAgent.callPageAgent({ method: "release-tiles", handles: [handle] }),
+    source.handle,
   );
+  const retired = await page.evaluate(readTile, request);
   assert.equal(retired.error.blocked_reason, "source-document-lost");
 }
 
@@ -253,6 +264,7 @@ for (const [name, engine] of [
                 await page.addScriptTag({ content: seadragonLibrary(runtime) });
                 await page.evaluate(createSeadragonViewer, { runtime, mode });
                 await page.addScriptTag({ content: scanner });
+                await page.evaluate(() => PageAgent.installPageAgent());
                 await checkObservation(page, runtime, mode);
                 if (mode === "ajax") checkAjax(requests, runtime);
               } finally {

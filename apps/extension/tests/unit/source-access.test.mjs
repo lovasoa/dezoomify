@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { errorPayload, HttpError } from "@dezoomify/browser-runtime";
-import { findLoadedImage } from "../../src/job/loaded-image.ts";
+import { callPageAgent } from "@dezoomify/page-agent";
 import { createSourceAccess } from "../../src/job/source-access.ts";
 import {
   cancelSourceFetch,
@@ -9,7 +9,6 @@ import {
   inspectSourceDocument,
 } from "../../src/job/source-operations.ts";
 import { collectCandidates, sourceSnapshotLimits } from "../../src/job/source-snapshot.ts";
-import { readViewerTile, releaseViewerTiles } from "../../src/job/viewers/session.ts";
 
 const SOURCE_URL = "https://gallery.example/page?view=1";
 
@@ -96,7 +95,8 @@ test("nested frames use existing grants first, then one deferred permission and 
         data: "AQ==",
       };
     }
-    if (injection.files) return { ok: true, documentUrl, inputs: [] };
+    if (injection.files) return installReply(documentUrl);
+    if (injection.func === callPageAgent) return scanReply(documentUrl);
     calls.push(["scan", frameId]);
     return {
       ...snapshot(documentUrl),
@@ -159,6 +159,20 @@ function snapshot(documentUrl = SOURCE_URL) {
   };
 }
 
+/** A page agent reply, in the envelope a host validates. */
+function pageReply(method, documentUrl, result) {
+  return { method, documentUrl, ok: true, result };
+}
+
+/** What installing the agent reports: the document it runs in. */
+function installReply(documentUrl) {
+  return { documentUrl };
+}
+
+function scanReply(documentUrl, { inputs = [], images = [], handles = [], diagnostics } = {}) {
+  return pageReply("scan", documentUrl, { inputs, images, handles, diagnostics });
+}
+
 test("accessible frames arrive in one batch regardless of inventory order", async () => {
   const left = { frameId: 8, documentUrl: "https://gallery.example/left", token: "left" };
   const right = { frameId: 9, documentUrl: "https://gallery.example/right", token: "right" };
@@ -169,12 +183,11 @@ test("accessible frames arrive in one batch regardless of inventory order", asyn
     const fake = fakeBrowser(async (injection) => {
       const frame = frames.find((frame) => frame.frameId === injection.target.frameIds[0]);
       const documentUrl = frame.documentUrl;
+      if (injection.files) return installReply(documentUrl);
+      if (injection.func === callPageAgent) return scanReply(documentUrl);
       return {
-        documentUrl,
-        ok: true,
-        inputs: injection.files
-          ? []
-          : [{ url: documentUrl, kind: "source", contents: "<html></html>" }],
+        ...snapshot(documentUrl),
+        inputs: [{ url: documentUrl, kind: "source", contents: "<html></html>" }],
       };
     });
     fake.setFrames([{ frameId: 0, documentUrl: SOURCE_URL, token: "root" }, ...frames]);
@@ -206,15 +219,21 @@ test("live tile capabilities stay bound to their exact viewer frame and are rele
   const handle = "test-source";
   const request = { handle, source_url: viewerUrl, level: 10, column: 0, row: 0 };
   const extent = { width: 256, height: 256 };
-  const tile = { ok: true, documentUrl: viewerUrl, data: "AQ==", bytes: 1 };
-  let tileReply = () => tile;
+  const tile = { bytes: 1, data: "AQ==" };
+  let tileReply = () => pageReply("read-tile", viewerUrl, tile);
   const fake = fakeBrowser(async (injection) => {
     const frameId = injection.target.frameIds[0];
     const documentUrl = frameId === 9 ? viewerUrl : SOURCE_URL;
-    if (injection.files)
-      return {
-        ok: true,
-        documentUrl,
+    if (injection.files) return installReply(documentUrl);
+    if (injection.func === callPageAgent) {
+      assert.equal(injection.world, "MAIN");
+      const request = injection.args[0];
+      if (request.method === "read-tile") {
+        assert.equal(frameId, 9);
+        return tileReply();
+      }
+      assert.equal(request.method, "scan");
+      return scanReply(documentUrl, {
         handles: frameId === 9 ? [handle] : [],
         inputs:
           frameId === 9
@@ -226,11 +245,7 @@ test("live tile capabilities stay bound to their exact viewer frame and are rele
                 },
               ]
             : [],
-      };
-    if (injection.func === readViewerTile) {
-      assert.equal(frameId, 9);
-      assert.equal(injection.world, "MAIN");
-      return tileReply();
+      });
     }
     return snapshot(documentUrl);
   });
@@ -257,7 +272,7 @@ test("live tile capabilities stay bound to their exact viewer frame and are rele
       headers: [],
       purpose: "tile",
     };
-    tileReply = () => ({ documentUrl: viewerUrl, ok: true, url: resource.uri });
+    tileReply = () => pageReply("read-tile", viewerUrl, { url: resource.uri });
     assert.deepEqual(
       await source.loadViewerTile(request, extent, new AbortController().signal),
       resource,
@@ -268,7 +283,7 @@ test("live tile capabilities stay bound to their exact viewer frame and are rele
       "javascript:void(0)",
       null,
     ]) {
-      tileReply = () => ({ documentUrl: viewerUrl, ok: true, url: invalid });
+      tileReply = () => pageReply("read-tile", viewerUrl, { url: invalid });
       await assert.rejects(source.loadViewerTile(request, extent, new AbortController().signal), {
         kind: "internal",
       });
@@ -279,7 +294,12 @@ test("live tile capabilities stay bound to their exact viewer frame and are rele
       request: "https://tiles.example/real.jpg",
       retry_after_ms: 2000,
     });
-    tileReply = () => ({ documentUrl: viewerUrl, ok: false, error: errorPayload(refusal) });
+    tileReply = () => ({
+      method: "read-tile",
+      documentUrl: viewerUrl,
+      ok: false,
+      error: errorPayload(refusal),
+    });
     await assert.rejects(
       source.loadViewerTile(request, extent, new AbortController().signal),
       (caught) => {
@@ -309,14 +329,16 @@ test("live tile capabilities stay bound to their exact viewer frame and are rele
     await new Promise((resolve) => setImmediate(resolve));
     controller.abort();
     await cancelled;
-    late.resolve(tile);
+    late.resolve(pageReply("read-tile", viewerUrl, tile));
     source.releaseTiles();
     await assert.rejects(source.loadViewerTile(request, extent, new AbortController().signal), {
       kind: "policy-denied",
       blocked_reason: "source-document-lost",
     });
-    const release = fake.calls.find((call) => call.func === releaseViewerTiles);
-    assert.deepEqual(release.args, [[handle]]);
+    const release = fake.calls.find(
+      (call) => call.func === callPageAgent && call.args[0].method === "release-tiles",
+    );
+    assert.deepEqual(release.args[0].handles, [handle]);
     assert.deepEqual(release.target.frameIds, [9]);
   } finally {
     source.dispose();
@@ -419,7 +441,11 @@ test("native document targets prevent a frame's session from rebinding after a s
       kind: "network-failure",
       detail: "The targeted document no longer exists",
     });
-    assert.equal(fake.calls.length, 2, "no fetch executes in the replacement document");
+    assert.equal(
+      fake.calls.length,
+      3, // agent install, agent scan, document snapshot
+      "no fetch executes in the replacement document",
+    );
   } finally {
     source.dispose();
   }
@@ -464,21 +490,22 @@ test("delayed viewer findings preserve document evidence", async (t) => {
   };
   const fake = fakeBrowser(async (injection) => {
     if (injection.files) {
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-      assert.deepEqual(injection.files, ["/viewer-scanner.js"]);
+      assert.deepEqual(injection.files, ["/page-agent.js"]);
       assert.equal(injection.world, "MAIN");
       assert.equal(injection.func, undefined);
       assert.equal(injection.args, undefined);
-      return {
-        ok: true,
-        documentUrl: SOURCE_URL,
+      return installReply(SOURCE_URL);
+    }
+    if (injection.func === callPageAgent) {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      return scanReply(SOURCE_URL, {
         inputs: [
           { ...observation, extra: "discard this" },
           { ...observation, contents: {} },
           { ...observation, url: "javascript:bad" },
         ],
         diagnostics: { rejected: 0, truncated: false },
-      };
+      });
     }
     assert.equal(injection.world ?? "ISOLATED", "ISOLATED");
     return snapshot();
@@ -522,20 +549,20 @@ test("single-image recovery validates viewer originals and rejects replaced fram
   const fake = fakeBrowser(async (injection) => {
     const frameId = injection.target.frameIds[0];
     const documentUrl = frameId === 8 ? viewerUrl : SOURCE_URL;
-    if (injection.files)
-      return {
-        ok: true,
-        documentUrl,
-        inputs: [],
+    if (injection.files) return installReply(documentUrl);
+    if (injection.func === callPageAgent) {
+      const request = injection.args[0];
+      if (request.method === "find-loaded-image") {
+        assert.ok(request.images.length <= 1);
+        return pageReply("find-loaded-image", documentUrl, request.images[0]);
+      }
+      assert.equal(request.method, "scan");
+      return scanReply(documentUrl, {
         images:
           frameId === 8
             ? [image, { ...image, width: -1 }, { ...image, url: "javascript:bad" }]
             : [],
-      };
-    if (injection.func === findLoadedImage) {
-      const images = injection.args[0];
-      assert.ok(images.length <= 1);
-      return { documentUrl, image: images[0] };
+      });
     }
     return snapshot(documentUrl);
   });
@@ -567,7 +594,8 @@ test("single-image recovery validates viewer originals and rejects replaced fram
 
 test("job-page source access calls injected scan and fetch with inferred argument shapes", async () => {
   const fake = fakeBrowser(async ({ func, args }) => {
-    if (!func) return { ...snapshot(), inputs: [] };
+    if (!func) return installReply(SOURCE_URL);
+    if (func === callPageAgent) return scanReply(SOURCE_URL);
     if (func === collectCandidates) {
       assert.deepEqual(args, [sourceSnapshotLimits]);
       return snapshot();
@@ -600,10 +628,12 @@ test("job-page source access calls injected scan and fetch with inferred argumen
     assert.deepEqual([...result.bytes], [1, 2, 3]);
     assert.equal(result.contentType, "text/html");
     assert.equal(result.http, 200);
-    assert.equal(fake.calls.length, 3);
+    // Agent install, agent scan, document snapshot, then the source fetch.
+    assert.equal(fake.calls.length, 4);
     assert.deepEqual(
       fake.calls.map((call) => call.target),
       [
+        { tabId: 9, frameIds: [0] },
         { tabId: 9, frameIds: [0] },
         { tabId: 9, frameIds: [0] },
         { tabId: 9, frameIds: [0] },

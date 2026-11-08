@@ -15,10 +15,13 @@ export class ViewerCollector {
   private readonly seenViewers = new Set<object>();
   private readonly seenSources = new Set<object>();
   private readonly seenElements = new Set<Element>();
-  constructor(
-    private readonly state: ScanState,
-    private readonly access: PageAccess,
-  ) {}
+  private readonly state: ScanState;
+  private readonly access: PageAccess;
+
+  constructor(state: ScanState, access: PageAccess) {
+    this.state = state;
+    this.access = access;
+  }
 
   roots(root: PageObject): PageObject[] {
     for (const adapter of adapters) {

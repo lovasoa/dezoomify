@@ -4,20 +4,20 @@ export interface LoadedImage {
   height: number;
 }
 
-/** Injected without module closures. Prefer identified viewer originals over
- * incidental DOM images; supplied candidates must belong to live scanned documents.
- * Read intrinsic sizes without fetching or decoding. */
-export function findLoadedImage(viewerImages: LoadedImage[] = []) {
+/** Prefer identified viewer originals over incidental DOM images; supplied
+ * candidates must belong to live scanned documents. Read intrinsic sizes without
+ * fetching or decoding. */
+export function findLoadedImage(viewerImages: LoadedImage[] = []): LoadedImage | undefined {
   let image: LoadedImage | undefined;
   for (const candidate of viewerImages) select(candidate);
-  if (image) return { documentUrl: location.href, image };
+  if (image) return image;
   for (const img of document.images) {
     const { naturalWidth: width, naturalHeight: height } = img;
     const url = img.currentSrc || img.src;
     if (img.complete && Math.min(width, height) >= 512 && width * height >= 2_000_000)
       select({ url, width, height });
   }
-  return { documentUrl: location.href, image };
+  return image;
 
   function select(candidate: LoadedImage) {
     const { url, width, height } = candidate;
@@ -35,7 +35,7 @@ export function findLoadedImage(viewerImages: LoadedImage[] = []) {
 }
 
 /** A second fallback: one explicit image download, without guessing its dimensions. */
-export function findImageDownloadLink() {
+export function findImageDownloadLink(): string | undefined {
   const urls = new Set<string>();
   for (const link of document.querySelectorAll<HTMLAnchorElement>("a[download][href]")) {
     const url = URL.parse(link.href);
@@ -47,5 +47,5 @@ export function findImageDownloadLink() {
     )
       urls.add(url.href);
   }
-  return { documentUrl: location.href, url: urls.size === 1 ? [...urls][0] : undefined };
+  return urls.size === 1 ? [...urls][0] : undefined;
 }

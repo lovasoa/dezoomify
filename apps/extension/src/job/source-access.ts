@@ -13,6 +13,13 @@ import {
   validateByteRangeResponse,
   validateRequestHeaders,
 } from "@dezoomify/browser-runtime";
+import {
+  callPageAgent,
+  type LoadedImage,
+  type PageRequest,
+  type PageResponse,
+  type PageResults,
+} from "@dezoomify/page-agent";
 import type {
   Interaction,
   JobInput,
@@ -23,10 +30,8 @@ import type {
 } from "@dezoomify/wasm-bindings";
 import type { PublicPath, WxtBrowser } from "wxt/browser";
 import { transportError } from "../runtime/fetch.ts";
-import { findImageDownloadLink, findLoadedImage, type LoadedImage } from "./loaded-image.ts";
 import { cancelSourceFetch, fetchSource, inspectSourceDocument } from "./source-operations.ts";
 import { collectCandidates, type SourceSnapshot, sourceSnapshotLimits } from "./source-snapshot.ts";
-import { readViewerTile, releaseViewerTiles } from "./viewers/session.ts";
 
 type SourceApi = Pick<WxtBrowser, "tabs" | "scripting">;
 type SourceFrame = { frameId: number; documentUrl: string; token?: string; documentId?: string };
@@ -68,13 +73,13 @@ function viewerResource(uri: unknown): ResourceRequest {
   return { uri, headers: [], purpose: "tile" };
 }
 
-function viewerBytes(result: Record<string, unknown>): ArrayBuffer {
+function viewerBytes(result: unknown): ArrayBuffer {
   if (
-    result.ok !== true ||
+    !isRecord(result) ||
     typeof result.data !== "string" ||
     result.data.length > MAX_BASE64_CHARS ||
-    !Number.isSafeInteger(result.bytes) ||
     typeof result.bytes !== "number" ||
+    !Number.isSafeInteger(result.bytes) ||
     result.bytes < 0 ||
     result.bytes > SOURCE_FETCH_BYTE_LIMIT
   )
@@ -150,6 +155,22 @@ function validImage(value: unknown): value is LoadedImage | undefined {
       typeof value.height === "number" &&
       Number.isSafeInteger(value.height) &&
       value.height > 0)
+  );
+}
+
+/** Validate an untrusted page reply envelope before its result is read. Payload
+ * fields stay untrusted; each caller checks the values it takes from `result`. */
+function isPageReply<R extends PageRequest>(
+  value: unknown,
+  request: R,
+  expectedUrl: string,
+): value is PageResponse<R["method"]> {
+  return (
+    isRecord(value) &&
+    value.method === request.method &&
+    typeof value.documentUrl === "string" &&
+    sameDocumentUrl(value.documentUrl, expectedUrl) &&
+    (value.ok === true || (value.ok === false && isJobError(value.error)))
   );
 }
 
@@ -254,16 +275,16 @@ function memoryDiagnostics(value: unknown): MemoryDiagnostics | undefined {
   return memory;
 }
 
-function memoryScanReply(reply: unknown): {
+function memoryScanReply(result: unknown): {
   observed: ObservedInput[];
   images: LoadedImage[];
   memory?: MemoryDiagnostics;
 } {
-  if (!isRecord(reply) || !Array.isArray(reply.inputs) || reply.inputs.length > 100)
+  if (!isRecord(result) || !Array.isArray(result.inputs) || result.inputs.length > 100)
     return { observed: [], images: [] };
   const images =
-    Array.isArray(reply.images) && reply.images.length <= 100
-      ? reply.images
+    Array.isArray(result.images) && result.images.length <= 100
+      ? result.images
           .filter(
             (image): image is LoadedImage =>
               validImage(image) &&
@@ -274,9 +295,9 @@ function memoryScanReply(reply: unknown): {
           .map(({ url, width, height }) => ({ url, width, height }))
       : [];
   return {
-    observed: observedInputs(reply.inputs),
+    observed: observedInputs(result.inputs),
     images,
-    memory: memoryDiagnostics(reply.diagnostics),
+    memory: memoryDiagnostics(result.diagnostics),
   };
 }
 
@@ -509,21 +530,62 @@ export function createSourceAccess(
     );
   }
 
+  /** Dispatch one page operation into a frame's main world under an existing
+   * bound and return its result. The reply envelope is checked here and the
+   * agent's typed failure is thrown; the result itself stays untrusted and each
+   * caller validates the values it reads. */
+  async function pageCall<R extends PageRequest>(
+    frame: SourceFrame,
+    request: R,
+    owned: AbortSignal,
+  ): Promise<PageResults[R["method"]]> {
+    const reply = await injectUnchecked(
+      { func: callPageAgent, args: [request], world: "MAIN" },
+      owned,
+      undefined,
+      frame,
+    );
+    if (!isPageReply<R>(reply, request, frame.documentUrl))
+      throw new InternalError("Invalid page agent response");
+    if (!reply.ok) throw errorFromPayload(reply.error);
+    return reply.result;
+  }
+
+  /** `pageCall` bounded on its own, for a caller with no outer bound. */
+  function pageOperation<R extends PageRequest>(
+    frame: SourceFrame,
+    request: R,
+    signal?: AbortSignal,
+    deadlineAt = Date.now() + timeoutMs,
+  ): Promise<PageResults[R["method"]]> {
+    return bounded((owned) => pageCall(frame, request, owned), signal, undefined, deadlineAt);
+  }
+
   async function scan(signal?: AbortSignal, frame = rootFrame): Promise<CandidateSnapshot> {
     const scanDeadline = Date.now() + timeoutMs;
     let observed: ObservedInput[] = [];
     let images: LoadedImage[] = [];
     let memory: MemoryDiagnostics | undefined;
     try {
-      const reply = await inject(
-        { files: ["/viewer-scanner.js"], world: "MAIN" },
+      // Evaluating the agent bundle installs the entry point every later page
+      // call reaches. Re-injection is idempotent: handles an earlier injection
+      // registered stay valid until their own job retires them.
+      const result = await bounded(
+        async (owned) => {
+          await injectUnchecked(
+            { files: ["/page-agent.js"], world: "MAIN" },
+            owned,
+            undefined,
+            frame,
+          );
+          return pageCall(frame, { method: "scan" }, owned);
+        },
         signal,
         undefined,
         scanDeadline,
-        frame,
       );
-      ({ observed, images, memory } = memoryScanReply(reply));
-      rememberTileFrames(isRecord(reply) ? reply.handles : undefined, frame);
+      ({ observed, images, memory } = memoryScanReply(result));
+      rememberTileFrames(result.handles, frame);
     } catch (error) {
       // A memory scan is optional evidence; source loss/cancellation still
       // fails the following normal scan through the same lifetime guard.
@@ -821,26 +883,8 @@ export function createSourceAccess(
     const frame = tileFrames.get(request.handle);
     if (!frame || !sameDocumentUrl(request.source_url, frame.documentUrl))
       throw transportError("source-lost", "viewer source is no longer available");
-    const result = await inject(
-      {
-        func: readViewerTile,
-        args: [request, extent],
-        world: "MAIN",
-      },
-      signal,
-      undefined,
-      Date.now() + timeoutMs,
-      frame,
-    );
-    if (
-      !isRecord(result) ||
-      typeof result.documentUrl !== "string" ||
-      !sameDocumentUrl(result.documentUrl, frame.documentUrl)
-    )
-      throw new InternalError("Invalid viewer tile response document");
-    if (result.ok === false && isJobError(result.error)) throw errorFromPayload(result.error);
-    if (result.ok === true && "url" in result) return viewerResource(result.url);
-    return viewerBytes(result);
+    const result = await pageOperation(frame, { method: "read-tile", request, extent }, signal);
+    return isRecord(result) && "url" in result ? viewerResource(result.url) : viewerBytes(result);
   }
 
   function dispose() {
@@ -864,8 +908,8 @@ export function createSourceAccess(
       void browserApi.scripting
         .executeScript({
           target: target(frame),
-          func: releaseViewerTiles,
-          args: [handles],
+          func: callPageAgent,
+          args: [{ method: "release-tiles", handles } satisfies PageRequest],
           world: "MAIN",
         })
         .catch(() => {});
@@ -876,15 +920,10 @@ export function createSourceAccess(
     scan,
     loadedImage,
     async imageDownloadLink(signal: AbortSignal) {
-      const reply = await inject({ func: findImageDownloadLink, args: [] }, signal);
-      if (
-        reply.url !== undefined &&
-        (typeof reply.url !== "string" ||
-          reply.url.length > MAX_URL_LENGTH ||
-          !isPublicHttpUrl(reply.url))
-      )
+      const url = await pageOperation(rootFrame, { method: "find-image-link" }, signal);
+      if (url !== undefined && (url.length > MAX_URL_LENGTH || !isPublicHttpUrl(url)))
         throw transportError("bad-url", "invalid image download link");
-      return reply.url;
+      return url;
     },
     observations,
     fetch,
@@ -911,9 +950,9 @@ export function createSourceAccess(
         if (!candidates.length) continue;
         images.push(...(await liveImages(frame, candidates, owned)));
       }
-      const reply = await injectUnchecked({ func: findLoadedImage, args: [images] }, owned);
-      if (!validImage(reply.image)) throw transportError("bad-url", "invalid loaded image result");
-      return reply.image;
+      const result = await pageCall(rootFrame, { method: "find-loaded-image", images }, owned);
+      if (!validImage(result)) throw transportError("bad-url", "invalid loaded image result");
+      return result;
     }, signal);
   }
 

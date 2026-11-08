@@ -104,13 +104,4 @@ export interface ScanDiagnostics {
   frames: string[];
 }
 
-export interface ScanResult {
-  ok: true;
-  documentUrl: string;
-  inputs: ObservedInput[];
-  images: LoadedImage[];
-  handles: string[];
-  diagnostics: ScanDiagnostics;
-}
-
 export type PageRealm = Window & typeof globalThis;

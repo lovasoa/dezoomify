@@ -10,14 +10,13 @@ const tile = readFileSync(new URL("../../../../fixtures/tiles/0-0.png", import.m
 const scanner = (
   await build({
     stdin: {
-      contents: `export {scanViewers} from './viewer-scanner.ts';
-export {readViewerTile,releaseViewerTiles} from './viewers/session.ts';`,
+      contents: `export {installPageAgent,callPageAgent} from '@dezoomify/page-agent';`,
       resolveDir: new URL("../../src/job", import.meta.url).pathname,
     },
     bundle: true,
     write: false,
     format: "iife",
-    globalName: "ViewerScanner",
+    globalName: "PageAgent",
     target: "es2022",
     define: { "import.meta.url": JSON.stringify(import.meta.url) },
   })
@@ -104,7 +103,10 @@ for (const [name, engine] of [
             await page.addScriptTag({ content: library });
             await page.evaluate(createViewer, fixture);
             await page.addScriptTag({ content: scanner });
-            const result = await page.evaluate(() => ViewerScanner.scanViewers());
+            await page.evaluate(() => PageAgent.installPageAgent());
+            const result = await page.evaluate(
+              async () => (await PageAgent.callPageAgent({ method: "scan" })).result,
+            );
             if (fixture.protocol === "wms") {
               assert.equal(result.inputs.length, 0, "geographic WMS has no finite image pyramid");
               continue;
@@ -128,7 +130,9 @@ for (const [name, engine] of [
               async ({ handle, level, size, tileSize }) => {
                 const request = { handle, source_url: location.href, level, column: 0, row: 0 };
                 const extent = { width: 256, height: 256 };
-                const result = await ViewerScanner.readViewerTile(request, extent);
+                const readTile = (request, extent) =>
+                  PageAgent.callPageAgent({ method: "read-tile", request, extent });
+                const result = await readTile(request, extent);
                 const x = Math.ceil(size.width / tileSize) - 1;
                 const y = Math.ceil(size.height / tileSize) - 1;
                 const width = size.width - x * tileSize;
@@ -137,23 +141,23 @@ for (const [name, engine] of [
                 const dimensions = [];
                 // A second read must leave the cached drawable usable by its viewer.
                 for (let attempt = 0; attempt < 2; attempt++) {
-                  const edge = await ViewerScanner.readViewerTile(edgeRequest, { width, height });
+                  const edge = await readTile(edgeRequest, { width, height });
                   if (!edge.ok) throw new Error(JSON.stringify(edge));
                   const image = await createImageBitmap(
-                    new Blob([Uint8Array.fromBase64(edge.data)]),
+                    new Blob([Uint8Array.fromBase64(edge.result.data)]),
                   );
                   dimensions.push([image.width, image.height]);
                   image.close();
                 }
                 corpusSuspendLoading();
-                const pending = ViewerScanner.readViewerTile(request, extent);
-                ViewerScanner.releaseViewerTiles([handle]);
+                const pending = readTile(request, extent);
+                PageAgent.callPageAgent({ method: "release-tiles", handles: [handle] });
                 return {
                   result,
                   dimensions,
                   cancelled: await pending,
                   tileState: corpusPendingTileState(),
-                  retired: await ViewerScanner.readViewerTile(request, extent),
+                  retired: await readTile(request, extent),
                 };
               },
               {

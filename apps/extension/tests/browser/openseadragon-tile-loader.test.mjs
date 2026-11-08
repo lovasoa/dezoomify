@@ -7,9 +7,10 @@ import { chromium, firefox } from "playwright";
 
 const bundle = await build({
   stdin: {
-    contents: `export {openTileSource,readViewerTile,releaseViewerTiles} from './openseadragon/session.ts';
-export {registerViewer} from './viewers/session.ts';`,
-    resolveDir: fileURLToPath(new URL("../../src/job", import.meta.url)),
+    contents: `export {openTileSource} from './openseadragon/session.ts';
+export {registerViewer} from './viewers/session.ts';
+export {installPageAgent,callPageAgent} from './agent.ts';`,
+    resolveDir: fileURLToPath(new URL("../../../../packages/page-agent/src", import.meta.url)),
   },
   bundle: true,
   write: false,
@@ -126,11 +127,14 @@ async function loadFixture(mode) {
   const handle = JSON.parse(metadata.input.contents).dezoomify_viewer.handle;
   const request = { handle, source_url: location.href, level: 8, column: 0, row: 0 };
   const extent = { width: 256, height: 256 };
-  const result = await TileSession.readViewerTile(request, extent);
-  TileSession.releaseViewerTiles([handle]);
-  const retired = await TileSession.readViewerTile(request, extent);
+  const readTile = (request, extent) =>
+    TileSession.callPageAgent({ method: "read-tile", request, extent });
+  const reply = await readTile(request, extent);
+  await TileSession.callPageAgent({ method: "release-tiles", handles: [handle] });
+  const retired = await readTile(request, extent);
   if (retired.ok) throw new Error("retired source still loads tiles");
-  if (!result.ok) return result.error;
+  if (!reply.ok) return reply.error;
+  const result = reply.result;
   if (result.url) return { url: result.url, addedGlobals };
   const bytes = Uint8Array.fromBase64(result.data);
   const decoded = await createImageBitmap(new Blob([bytes]));
@@ -191,6 +195,7 @@ for (const [name, engine] of [
         content: `(()=>{${library}\nwindow.OpenSeadragon=OpenSeadragon;})()`,
       });
       await page.addScriptTag({ content: bundle.outputFiles[0].text });
+      await page.evaluate(() => TileSession.installPageAgent());
       await page.evaluate(() => {
         Object.defineProperty(window, "__dezoomifyOpenSeadragon", { value: "page-owned" });
       });

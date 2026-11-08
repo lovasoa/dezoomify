@@ -6,12 +6,16 @@ import { build } from "esbuild";
 import { chromium, firefox } from "playwright";
 
 const bundle = await build({
-  entryPoints: [fileURLToPath(new URL("../../src/job/viewer-scanner.ts", import.meta.url))],
+  stdin: {
+    contents: `export {installPageAgent,callPageAgent} from '@dezoomify/page-agent';`,
+    resolveDir: fileURLToPath(new URL("./", import.meta.url)),
+  },
   bundle: true,
   write: false,
   format: "iife",
-  globalName: "ViewerScanner",
+  globalName: "PageAgent",
   target: "es2022",
+  define: { "import.meta.url": JSON.stringify(import.meta.url) },
 });
 const scannerScript = bundle.outputFiles[0].text;
 
@@ -298,7 +302,8 @@ for (const [name, engine] of [
                 channel.port2.postMessage(null);
               }
               ${scannerScript}
-              const result = await ViewerScanner.scanViewers();
+              PageAgent.installPageAgent();
+              const result = (await PageAgent.callPageAgent({ method: "scan" })).result;
               return { result, taskRan };
             })()`);
           const result = measured.result;
@@ -306,7 +311,8 @@ for (const [name, engine] of [
             assert.equal(result.diagnostics.documents, 1, "the parent scans only its document");
             const child = await scope.evaluate(`(async () => {
               ${scannerScript}
-              return ViewerScanner.scanViewers();
+              PageAgent.installPageAgent();
+              return (await PageAgent.callPageAgent({ method: "scan" })).result;
             })()`);
             assert.equal(child.inputs.length, 1, "the inventory can scan the HTTP child directly");
             assert.equal(child.diagnostics.documents, 1);

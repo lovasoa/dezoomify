@@ -1,6 +1,7 @@
 import type { ObservedInput } from "@dezoomify/wasm-bindings";
 import type { LoadedImage } from "../loaded-image.ts";
-import type { ScanDiagnostics, ScanResult, StopReason, ViewerEvidence } from "./types.ts";
+import type { ScanResult } from "../messages.ts";
+import type { ScanDiagnostics, StopReason, ViewerEvidence } from "./types.ts";
 
 export const scanLimits = {
   documents: 16,
@@ -105,8 +106,6 @@ export class ScanState {
   result(): ScanResult {
     this.diagnostics.elapsedMs = performance.now() - this.started;
     return {
-      ok: true,
-      documentUrl: this.documentUrl,
       inputs: this.inputs,
       images: this.images,
       handles: [...this.handles],

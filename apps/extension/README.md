@@ -35,7 +35,7 @@ Request permissions synchronously from a visible action to preserve user
 activation. HTTP refusals must not open permission prompts. Keep injected
 operations finite, cancellable, and validated at the job-page boundary.
 
-The [viewer scanner](src/job/viewers/traversal.ts) shares traversal, limits and
+The [viewer scanner](../../packages/page-agent/src/viewers/traversal.ts) shares traversal, limits and
 deduplication across OpenSeadragon and OpenLayers adapters. Work limits bound
 the search; fixed-step yielding keeps it responsive without making findings
 depend on scheduling delays. The source operation retains its overall timeout.
@@ -47,7 +47,7 @@ Ordinary OpenSeadragon image sources contribute their original URL to the same
 single-image fallback as large DOM images, after tiled discovery is exhausted.
 The browser downloads that original directly rather than exporting page pixels.
 
-The shared [tile session](src/job/viewers/session.ts) retains page loaders in
+The shared [tile session](../../packages/page-agent/src/viewers/session.ts) retains page loaders in
 closures behind document-bound capabilities, released on retirement. Ordinary
 OpenSeadragon image GETs return URLs lazily for the normal resource transport;
 blob URLs are read in their source page. Custom downloaders and AJAX sources
