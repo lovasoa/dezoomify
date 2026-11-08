@@ -520,7 +520,7 @@ export function createSourceAccess(
     deadlineAt: number,
   ): Promise<void> {
     const channelId = reply.channelId;
-    if (typeof channelId !== "string" || !/^[\\w-]{1,128}$/.test(channelId))
+    if (typeof channelId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(channelId))
       throw new InternalError("Invalid viewer channel ID");
     const channel = await bounded(
       async (owned) => {
