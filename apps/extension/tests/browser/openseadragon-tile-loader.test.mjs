@@ -8,7 +8,7 @@ import { chromium, firefox } from "playwright";
 const bundle = await build({
   stdin: {
     contents: `export {openTileSource,readViewerTile,releaseViewerTiles} from './openseadragon/session.ts';
-export {registerViewer} from './viewers/session.ts';`,
+export {listenViewerChannel,registerViewer} from './viewers/session.ts';`,
     resolveDir: fileURLToPath(new URL("../../../../packages/page-agent/src", import.meta.url)),
   },
   bundle: true,
@@ -126,8 +126,26 @@ async function loadFixture(mode) {
   const handle = JSON.parse(metadata.input.contents).dezoomify_viewer.handle;
   const request = { handle, source_url: location.href, level: 8, column: 0, row: 0 };
   const extent = { width: 256, height: 256 };
-  const result = await TileSession.readViewerTile(request, extent);
-  TileSession.releaseViewerTiles([handle]);
+  const channelId = crypto.randomUUID();
+  TileSession.listenViewerChannel(channelId, [handle]);
+  const send = (message) =>
+    new Promise((resolve) => {
+      const onMessage = (event) => {
+        if (
+          event.source !== window ||
+          event.data?.type !== "dezoomify-viewer-response" ||
+          event.data?.channelId !== channelId ||
+          event.data?.id !== message.id
+        )
+          return;
+        window.removeEventListener("message", onMessage);
+        resolve(event.data.result);
+      };
+      window.addEventListener("message", onMessage);
+      window.postMessage({ type: "dezoomify-viewer-request", channelId, ...message }, location.origin);
+    });
+  const result = await send({ method: "read-tile", id: 1, request, extent });
+  await send({ method: "close", id: 2 });
   const retired = await TileSession.readViewerTile(request, extent);
   if (retired.ok) throw new Error("retired source still loads tiles");
   if (!result.ok) return result.error;
@@ -197,8 +215,7 @@ for (const [name, engine] of [
       const ordinary = await page.evaluate(loadFixture, "image");
       assert.deepEqual(ordinary, {
         url: "https://tiles.fixture.invalid/tiles/8/0_0.png?mode=image",
-        // A single document-scoped handle registry replaces the old event bus.
-        addedGlobals: ["__dezoomify_viewer_loaders__"],
+        addedGlobals: [],
       });
       assert.ok(
         !requests.some((request) => request.url().includes("mode=image")),
@@ -265,10 +282,10 @@ for (const [name, engine] of [
         );
       }
       assert.equal((await page.evaluate(loadFixture, "oversized")).kind, "size-limit");
-      assert.deepEqual(
-        await page.evaluate(() => [...window.__dezoomify_viewer_loaders__.keys()]),
-        [],
-        "released viewer handles must not remain in the registry",
+      assert.equal(
+        await page.evaluate(() => "__dezoomify_viewer_loaders__" in window),
+        false,
+        "live viewers must not install a page global",
       );
       assert.equal(await page.evaluate(() => window.__dezoomifyOpenSeadragon), "page-owned");
     } finally {

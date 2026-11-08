@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { errorPayload, HttpError } from "@dezoomify/browser-runtime";
-import { readViewerTile, releaseViewerTiles } from "@dezoomify/page-agent";
 import { findLoadedImage } from "../../src/job/loaded-image.ts";
 import { createSourceAccess } from "../../src/job/source-access.ts";
 import {
@@ -10,6 +9,7 @@ import {
   inspectSourceDocument,
 } from "../../src/job/source-operations.ts";
 import { collectCandidates, sourceSnapshotLimits } from "../../src/job/source-snapshot.ts";
+import { installViewerBridge } from "../../src/job/viewer-channel.ts";
 
 const SOURCE_URL = "https://gallery.example/page?view=1";
 
@@ -18,9 +18,15 @@ function fakeBrowser(execute) {
   const calls = [];
   let url = SOURCE_URL;
   let frames = () => [{ frameId: 0, documentUrl: SOURCE_URL, token: "root", frames: [] }];
+  let portReply = () => assert.fail("unexpected viewer channel request");
+  const ports = [];
   return {
     listeners,
     calls,
+    ports,
+    setPortReply(fn) {
+      portReply = fn;
+    },
     setFrames(value) {
       frames = typeof value === "function" ? value : () => value;
     },
@@ -30,6 +36,47 @@ function fakeBrowser(execute) {
     api: {
       tabs: {
         get: async (tabId) => ({ id: tabId, url }),
+        connect(tabId, options) {
+          const onMessage = new Set();
+          const onDisconnect = new Set();
+          const frame = frames().find((value) => value.frameId === options.frameId);
+          if (!frame) throw new Error("No frame for viewer channel");
+          let disconnected = false;
+          const emit = (message) => {
+            if (!disconnected) for (const listener of onMessage) listener(message);
+          };
+          const port = {
+            tabId,
+            options,
+            messages: [],
+            get disconnected() {
+              return disconnected;
+            },
+            onMessage: {
+              addListener(fn) { onMessage.add(fn); },
+              removeListener(fn) { onMessage.delete(fn); },
+            },
+            onDisconnect: {
+              addListener(fn) { onDisconnect.add(fn); },
+              removeListener(fn) { onDisconnect.delete(fn); },
+            },
+            postMessage(message) {
+              if (disconnected) throw new Error("Disconnected port");
+              port.messages.push(message);
+              void Promise.resolve()
+                .then(() => portReply(message, options))
+                .then((result) => emit({ type: "result", id: message.id, result }));
+            },
+            disconnect() {
+              if (disconnected) return;
+              disconnected = true;
+              for (const listener of onDisconnect) listener(port);
+            },
+          };
+          ports.push(port);
+          queueMicrotask(() => emit({ type: "ready", documentUrl: frame.documentUrl }));
+          return port;
+        },
         onUpdated: {
           addListener(fn) {
             listeners.updated.push(fn);
@@ -215,6 +262,7 @@ test("live tile capabilities stay bound to their exact viewer frame and are rele
       return {
         ok: true,
         documentUrl,
+        channelId: frameId === 9 ? "test-viewer-channel" : undefined,
         handles: frameId === 9 ? [handle] : [],
         inputs:
           frameId === 9
@@ -227,10 +275,11 @@ test("live tile capabilities stay bound to their exact viewer frame and are rele
               ]
             : [],
       };
-    if (injection.func === readViewerTile) {
+    if (injection.func === installViewerBridge) {
       assert.equal(frameId, 9);
-      assert.equal(injection.world, "MAIN");
-      return tileReply();
+      assert.equal(injection.world, "ISOLATED");
+      assert.deepEqual(injection.args, ["test-viewer-channel"]);
+      return { documentUrl };
     }
     return snapshot(documentUrl);
   });
@@ -238,6 +287,14 @@ test("live tile capabilities stay bound to their exact viewer frame and are rele
     { frameId: 0, documentUrl: SOURCE_URL, token: "root" },
     { frameId: 9, documentUrl: viewerUrl, token: "viewer" },
   ]);
+  fake.setPortReply((message, options) => {
+    assert.equal(options.frameId, 9);
+    assert.equal(options.name, "dezoomify-viewer:test-viewer-channel");
+    assert.equal(message.type, "read-tile");
+    assert.deepEqual(message.request, request);
+    assert.deepEqual(message.extent, extent);
+    return tileReply();
+  });
   const source = createSourceAccess(fake.api, { tabId: 9, documentUrl: SOURCE_URL });
   try {
     const observe = source.observations({
@@ -315,9 +372,12 @@ test("live tile capabilities stay bound to their exact viewer frame and are rele
       kind: "policy-denied",
       blocked_reason: "source-document-lost",
     });
-    const release = fake.calls.find((call) => call.func === releaseViewerTiles);
-    assert.deepEqual(release.args, [[handle]]);
-    assert.deepEqual(release.target.frameIds, [9]);
+    assert.equal(fake.ports.length, 1, "the viewer frame gets one Port for every tile");
+    assert.equal(fake.ports[0].options.frameId, 9);
+    assert.equal(fake.ports[0].disconnected, true, "job retirement closes the Port");
+    assert.ok(
+      fake.calls.every((call) => call.func !== installViewerBridge || call.world === "ISOLATED"),
+    );
   } finally {
     source.dispose();
   }

@@ -13,7 +13,6 @@ import {
   validateByteRangeResponse,
   validateRequestHeaders,
 } from "@dezoomify/browser-runtime";
-import { readViewerTile, releaseViewerTiles } from "@dezoomify/page-agent";
 import type {
   Interaction,
   JobInput,
@@ -27,6 +26,7 @@ import { transportError } from "../runtime/fetch.ts";
 import { findImageDownloadLink, findLoadedImage, type LoadedImage } from "./loaded-image.ts";
 import { cancelSourceFetch, fetchSource, inspectSourceDocument } from "./source-operations.ts";
 import { collectCandidates, type SourceSnapshot, sourceSnapshotLimits } from "./source-snapshot.ts";
+import { createViewerChannel, installViewerBridge } from "./viewer-channel.ts";
 
 type SourceApi = Pick<WxtBrowser, "tabs" | "scripting">;
 type SourceFrame = { frameId: number; documentUrl: string; token?: string; documentId?: string };
@@ -300,6 +300,7 @@ export function createSourceAccess(
   const rootFrame: SourceFrame = { frameId: 0, documentUrl };
   const sessionFrames = new Map<string, SourceFrame>([[sourceOrigin, rootFrame]]);
   const tileFrames = new Map<string, SourceFrame>();
+  const tileChannels = new Map<SourceFrame, ReturnType<typeof createViewerChannel>>();
   const singleImageFrames = new Map<SourceFrame, LoadedImage[]>();
   const timeoutMs = options.timeoutMs ?? 30_000;
   const lifetime = new AbortController();
@@ -523,7 +524,39 @@ export function createSourceAccess(
         frame,
       );
       ({ observed, images, memory } = memoryScanReply(reply));
-      rememberTileFrames(isRecord(reply) ? reply.handles : undefined, frame);
+      if (isRecord(reply) && Array.isArray(reply.handles) && reply.handles.length > 0) {
+        const channelId = reply.channelId;
+        if (typeof channelId !== "string" || !/^[\\w-]{1,128}$/.test(channelId))
+          throw new InternalError("Invalid viewer channel ID");
+        const channel = await bounded(async (owned) => {
+          await injectUnchecked(
+            { func: installViewerBridge, args: [channelId], world: "ISOLATED" },
+            owned,
+            undefined,
+            frame,
+          );
+          const port = browserApi.tabs.connect(tabId, {
+            frameId: frame.frameId,
+            name: `dezoomify-viewer:${channelId}`,
+          });
+          const connected = createViewerChannel(port);
+          try {
+            const ready = await connected.ready(owned);
+            if (
+              !isRecord(ready) ||
+              typeof ready.documentUrl !== "string" ||
+              !sameDocumentUrl(ready.documentUrl, frame.documentUrl)
+            )
+              throw lostFrame(frame);
+            return connected;
+          } catch (error) {
+            connected.dispose();
+            throw error;
+          }
+        }, signal, undefined, scanDeadline);
+        tileChannels.set(frame, channel);
+        rememberTileFrames(reply.handles, frame);
+      }
     } catch (error) {
       // A memory scan is optional evidence; source loss/cancellation still
       // fails the following normal scan through the same lifetime guard.
@@ -821,17 +854,11 @@ export function createSourceAccess(
     const frame = tileFrames.get(request.handle);
     if (!frame || !sameDocumentUrl(request.source_url, frame.documentUrl))
       throw transportError("source-lost", "viewer source is no longer available");
-    const result = await inject(
-      {
-        func: readViewerTile,
-        args: [request, extent],
-        world: "MAIN",
-      },
-      signal,
-      undefined,
-      Date.now() + timeoutMs,
-      frame,
-    );
+    const channel = tileChannels.get(frame);
+    if (!channel) throw transportError("source-lost", "viewer source is no longer available");
+    // One Port per scanned frame, with bounded and independently cancellable
+    // request/reply calls; the page's loader is not aborted when a caller stops waiting.
+    const result = await bounded((owned) => channel.readTile(request, extent, owned), signal);
     if (
       !isRecord(result) ||
       typeof result.documentUrl !== "string" ||
@@ -853,23 +880,9 @@ export function createSourceAccess(
   /** Retire page tile handles and single-image candidates before the next job scans. */
   function releaseTiles() {
     singleImageFrames.clear();
-    const frames = new Map<SourceFrame, string[]>();
-    for (const [handle, frame] of tileFrames) {
-      const handles = frames.get(frame) ?? [];
-      handles.push(handle);
-      frames.set(frame, handles);
-    }
     tileFrames.clear();
-    for (const [frame, handles] of frames) {
-      void browserApi.scripting
-        .executeScript({
-          target: target(frame),
-          func: releaseViewerTiles,
-          args: [handles],
-          world: "MAIN",
-        })
-        .catch(() => {});
-    }
+    for (const channel of tileChannels.values()) channel.dispose();
+    tileChannels.clear();
   }
 
   return {

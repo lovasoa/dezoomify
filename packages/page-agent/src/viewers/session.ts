@@ -28,13 +28,9 @@ interface Session {
   load: (request: ViewerTileRequest, extent: Size) => Promise<ViewerTileResult>;
 }
 
-/** Keep viewer handles across scanner reinjection; only an explicit release or
- * document teardown retires them. */
-function liveLoaders(): Map<string, Session> {
-  const globals = globalThis as { __dezoomify_viewer_loaders__?: Map<string, Session> };
-  globals.__dezoomify_viewer_loaders__ ??= new Map();
-  return globals.__dezoomify_viewer_loaders__;
-}
+/** Loader closures belong to this scanner injection, not to the page's global
+ * object. A job-scoped message listener below is the only way back in. */
+const loaders = new Map<string, Session>();
 export type ViewerTile = { image: unknown; owned?: boolean } | { url: string };
 export type ViewerLoader = (
   level: number,
@@ -53,7 +49,7 @@ export function registerViewer(
 ): ViewerEvidence {
   const id = crypto.getRandomValues(new Uint32Array(4)).join("-");
   const lifetime = new AbortController();
-  liveLoaders().set(id, { lifetime, load });
+  loaders.set(id, { lifetime, load });
   const observation: ViewerObservation = {
     dezoomify_viewer: { source_url: context.documentUrl, handle: id, levels },
   };
@@ -104,14 +100,13 @@ async function encodedTile(blob: Blob): Promise<{ bytes: number; data: string }>
   return { bytes: blob.size, data: new Uint8Array(await blob.arrayBuffer()).toBase64() };
 }
 
-/** Injected directly into the main world. Keep this function self-contained:
- * the loader closure itself was already registered by the bundled scanner. */
+/** Direct helpers for page-side tests and the message listener.
+ * They never cross an extension execution boundary themselves. */
 export function readViewerTile(
   request: ViewerTileRequest,
   extent: Size,
 ): Promise<ViewerTileResult> | ViewerTileResult {
-  const globals = globalThis as { __dezoomify_viewer_loaders__?: Map<string, Session> };
-  const session = globals.__dezoomify_viewer_loaders__?.get(request.handle);
+  const session = loaders.get(request.handle);
   return session
     ? session.load(request, extent)
     : {
@@ -125,15 +120,67 @@ export function readViewerTile(
       };
 }
 
-/** Injected directly into the main world; unknown handles are safe to release. */
+/** Retire a scan's handles, aborting only that scan's outstanding loader work. */
 export function releaseViewerTiles(handles: string[]): void {
-  const globals = globalThis as { __dezoomify_viewer_loaders__?: Map<string, Session> };
-  const sessions = globals.__dezoomify_viewer_loaders__;
-  if (!sessions) return;
   for (const handle of handles) {
-    const session = sessions.get(handle);
+    const session = loaders.get(handle);
     if (!session) continue;
-    sessions.delete(handle);
+    loaders.delete(handle);
     session.lifetime.abort();
   }
+}
+
+/** Keep this scan's loaders available to the isolated content-script bridge.
+ * The random channel ID makes a later scan independent of earlier listeners.
+ * No page global or permanent agent is installed. */
+export function listenViewerChannel(channelId: string, handles: string[]): void {
+  const owned = new Set(handles);
+  const onMessage = (event: MessageEvent) => {
+    if (event.source !== window) return;
+    const message = event.data;
+    if (
+      !message ||
+      message.type !== "dezoomify-viewer-request" ||
+      message.channelId !== channelId
+    )
+      return;
+    if (message.method === "close") {
+      window.removeEventListener("message", onMessage);
+      releaseViewerTiles(handles);
+      if (Number.isSafeInteger(message.id))
+        window.postMessage(
+          {
+            type: "dezoomify-viewer-response",
+            channelId,
+            id: message.id,
+            result: { documentUrl: location.href, ok: true },
+          },
+          location.origin,
+        );
+      return;
+    }
+    if (
+      message.method !== "read-tile" ||
+      !Number.isSafeInteger(message.id) ||
+      !message.request ||
+      !owned.has(message.request.handle)
+    )
+      return;
+    void Promise.resolve()
+      .then(() => readViewerTile(message.request, message.extent))
+      .catch((cause: unknown): ViewerTileResult => ({
+        documentUrl: location.href,
+        ok: false,
+        error: errorPayload(
+          isJobError(cause) ? cause : new InternalError(`Invalid viewer request: ${unknownDetail(cause)}`),
+        ),
+      }))
+      .then((result) => {
+        window.postMessage(
+          { type: "dezoomify-viewer-response", channelId, id: message.id, result },
+          location.origin,
+        );
+      });
+  };
+  window.addEventListener("message", onMessage);
 }

@@ -1,19 +1,22 @@
 # page-agent
 
-Viewer discovery and live tile access that run inside the inspected page.
+Viewer discovery and live tile access run inside the inspected page's main
+JavaScript world, independent of extension permissions and host SDKs.
 
-The browser extension bundles `scanViewers` as `viewer-scanner.js` for the
-page's main world. The scanner retains the live viewer loaders it discovers
-in a document-global registry of opaque handles. The extension invokes the
-self-contained `readViewerTile` and `releaseViewerTiles` functions directly
-through `scripting.executeScript`; the registry survives later scans in the
-same document, but no agent service needs installation.
+The extension injects `viewer-scanner.js` only when a job needs to inspect a
+document. The scanner finds viewers and registers their live tile loaders in
+module-local state. If any live viewers are found, it creates a job-scoped
+message listener and returns a random channel ID with its observations.
 
-This package owns viewer adapters, traversal, and the handle registry.
-The extension owns injection, source/document validation, permission prompts,
-networking, job lifetimes, and ordinary DOM-image fallbacks. Values returned
-from an inspected page are untrusted and must be validated by the host.
+The extension uses one long-lived `tabs.connect` Port per scanned frame with
+live viewers. An isolated-world bridge forwards tile messages via
+`window.postMessage`; the page listener calls the retained loaders. Closing
+the Port releases the scan's handles and aborts its loaders. There is no page
+global registry or generic cross-host agent service.
 
-The runtime must remain independently bundleable and must not access host
-APIs such as `chrome.*` or Tauri. Browser tests exercise the same
-scanner and serialized tile functions used by the extension.
+The extension retains ownership of browser permissions, document identity,
+request validation, networking, retries, and the job lifecycle. Replies from
+the page must always be treated as untrusted.
+
+The package remains bundleable as one script and may not import extension or
+desktop APIs. Browser tests cover live viewer adapters and message transport.

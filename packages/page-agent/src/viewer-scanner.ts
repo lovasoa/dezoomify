@@ -1,5 +1,6 @@
 import { ScanState } from "./viewers/scan-state.ts";
 import { PageTraversal } from "./viewers/traversal.ts";
+import { listenViewerChannel } from "./viewers/session.ts";
 import type { ScanResult } from "./viewers/types.ts";
 
 /** Run only on explicit source access, in the page's main world. Work limits
@@ -11,5 +12,9 @@ export async function scanViewers(): Promise<ScanResult> {
   } catch {
     state.diagnostics.rejected++;
   }
-  return state.result();
+  const result = state.result();
+  if (result.handles.length === 0) return result;
+  const channelId = crypto.randomUUID();
+  listenViewerChannel(channelId, result.handles);
+  return { ...result, channelId };
 }

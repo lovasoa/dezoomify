@@ -115,6 +115,8 @@ export interface ScanResult {
   inputs: ObservedInput[];
   images: LoadedImage[];
   handles: string[];
+  /** Job-scoped page listener for live tile requests; absent if no live handles. */
+  channelId?: string;
   diagnostics: ScanDiagnostics;
 }
 
