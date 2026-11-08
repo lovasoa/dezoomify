@@ -9,8 +9,8 @@
 //! `bundle.targets` stays `all` and the CLI selects the host bundle):
 //! Linux builds `deb` via the prebuilt Tauri CLI
 //! (`pnpm --filter ./apps/desktop exec tauri build --bundles deb`) (needs
-//! `dpkg-deb` plus the generated PNG icons); Windows builds `msi`/`nsis`
-//! (needs WebView2 plus WiX for msi and NSIS for nsis plus `icon.ico`);
+//! `dpkg-deb` plus the generated PNG icons); Windows builds `nsis`
+//! (needs WebView2, NSIS, and `icon.ico`);
 //! macOS builds `app`/`dmg` (needs the Xcode Command Line Tools plus `icon.icns`).
 //! A target is available only when its recipe and host tools are present;
 //! otherwise bundling fails closed naming the exact prerequisites.
@@ -474,7 +474,7 @@ fn tauri_system_ready() -> bool {
 }
 
 /// The bundler set for this host. Linux produces a real `deb`; Windows
-/// produces `msi`/`nsis`; macOS produces `app`/`dmg`. Any other host has no
+/// produces `nsis`; macOS produces `app`/`dmg`. Any other host has no
 /// bundle recipe.
 #[cfg(target_os = "linux")]
 fn bundle_targets() -> &'static [&'static str] {
@@ -483,7 +483,7 @@ fn bundle_targets() -> &'static [&'static str] {
 
 #[cfg(target_os = "windows")]
 fn bundle_targets() -> &'static [&'static str] {
-    &["msi", "nsis"]
+    &["nsis"]
 }
 
 #[cfg(target_os = "macos")]
@@ -544,14 +544,10 @@ fn check_bundle_prereqs() -> Result<(), String> {
     }
     #[cfg(target_os = "windows")]
     {
-        let wix = has_cmd("candle", &["-?"]);
         let nsis = has_cmd("makensis", &["-VERSION"]);
         let root = super::repo_root();
         let ico = root.join("apps/desktop/src-tauri/icons/icon.ico");
         let mut missing: Vec<&str> = Vec::new();
-        if !wix {
-            missing.push("WiX v3 (candle.exe/light.exe for the msi target)");
-        }
         if !nsis {
             missing.push("NSIS (makensis for the nsis target)");
         }
@@ -584,7 +580,7 @@ fn check_bundle_prereqs() -> Result<(), String> {
     }
     #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
     return Err(
-        "desktop bundling has no recipe for this host (Linux deb, Windows msi/nsis, macOS dmg only)"
+        "desktop bundling has no recipe for this host (Linux deb, Windows nsis, macOS dmg only)"
             .to_string(),
     );
     #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
@@ -855,7 +851,7 @@ fn bundle() -> Result<(), String> {
     let targets = bundle_targets();
     if targets.is_empty() {
         return Err(
-            "desktop bundling has no recipe for this host (Linux deb, Windows msi/nsis, macOS dmg only)"
+            "desktop bundling has no recipe for this host (Linux deb, Windows nsis, macOS dmg only)"
                 .to_string(),
         );
     }
