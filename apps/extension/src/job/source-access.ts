@@ -531,7 +531,7 @@ export function createSourceAccess(
         });
         const connected = createViewerChannel(port, frame.documentUrl);
         try {
-          const ready = await connected.ready(owned);
+          const ready = await connected.ready;
           if (
             !isRecord(ready) ||
             typeof ready.documentUrl !== "string" ||
@@ -867,12 +867,7 @@ export function createSourceAccess(
     // One Port per scanned session, with bounded and independently cancellable
     // request/reply calls; the page's loader is not aborted when a caller stops waiting.
     const result = await bounded((owned) => channel.readTile(request, extent, owned), signal);
-    if (
-      !isRecord(result) ||
-      typeof result.documentUrl !== "string" ||
-      !sameDocumentUrl(result.documentUrl, channel.documentUrl)
-    )
-      throw new InternalError("Invalid viewer tile response document");
+    if (!isRecord(result)) throw new InternalError("Invalid viewer tile response");
     if (result.ok === false && isJobError(result.error)) throw errorFromPayload(result.error);
     if (result.ok === true && "url" in result) return viewerResource(result.url);
     return viewerBytes(result);

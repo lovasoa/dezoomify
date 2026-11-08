@@ -119,25 +119,8 @@ export function createViewerChannel(port: ExtensionPort, documentUrl: string) {
   return {
     documentUrl,
 
-    /** Resolve with the page listener's readiness reply, or fail when the
-     * document is gone or the caller's signal stops waiting. */
-    ready(signal: AbortSignal): Promise<unknown> {
-      signal.throwIfAborted();
-      return new Promise((resolve, reject) => {
-        const abort = () => reject(signal.reason);
-        signal.addEventListener("abort", abort, { once: true });
-        readyPromise.then(
-          (value) => {
-            signal.removeEventListener("abort", abort);
-            resolve(value);
-          },
-          (error) => {
-            signal.removeEventListener("abort", abort);
-            reject(error);
-          },
-        );
-      });
-    },
+    /** The page listener's readiness reply. Callers bound their own wait. */
+    ready: readyPromise,
 
     readTile,
 

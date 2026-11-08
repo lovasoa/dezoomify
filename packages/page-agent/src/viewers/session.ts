@@ -2,7 +2,6 @@ import {
   CancelledError,
   errorPayload,
   InternalError,
-  InvalidInputError,
   isJobError,
   SizeLimitError,
   SOURCE_FETCH_BYTE_LIMIT,
@@ -18,11 +17,10 @@ import type {
 import { imageBlob } from "./tile-image.ts";
 import type { MetadataContext, ViewerEvidence } from "./types.ts";
 
-export type ViewerTileResult = { documentUrl: string } & (
+export type ViewerTileResult =
   | { ok: true; buffer: ArrayBuffer }
   | { ok: true; url: string }
-  | { ok: false; error: JobError }
-);
+  | { ok: false; error: JobError };
 interface Session {
   lifetime: AbortController;
   load: (request: ViewerTileRequest, extent: Size) => Promise<ViewerTileResult>;
@@ -66,21 +64,19 @@ export function registerViewer(
   };
 
   async function load(request: ViewerTileRequest, extent: Size): Promise<ViewerTileResult> {
-    const documentUrl = location.href;
     let operation = "loading";
     try {
-      if (request.handle !== id || request.source_url !== context.documentUrl)
-        throw new InvalidInputError("Viewer tile belongs to a different source document");
       lifetime.signal.throwIfAborted();
       const result = await loader(request.level, request.column, request.row, lifetime.signal);
       if ("url" in result) {
         lifetime.signal.throwIfAborted();
-        return { documentUrl, ok: true, url: result.url };
+        return { ok: true, url: result.url };
       }
       operation = "encoding";
       const blob = await imageBlob(result.image, extent, result.owned);
       lifetime.signal.throwIfAborted();
-      return { documentUrl, ok: true, ...(await binaryTile(blob)) };
+      if (blob.size > SOURCE_FETCH_BYTE_LIMIT) throw new SizeLimitError(SOURCE_FETCH_BYTE_LIMIT);
+      return { ok: true, buffer: await blob.arrayBuffer() };
     } catch (cause) {
       const error = lifetime.signal.aborted
         ? new CancelledError()
@@ -90,14 +86,9 @@ export function registerViewer(
               `Unexpected exception while ${operation} viewer tile (level ${request.level}, column ${request.column}, row ${request.row}): ${unknownDetail(cause)}`,
               { cause },
             );
-      return { documentUrl, ok: false, error: errorPayload(error) };
+      return { ok: false, error: errorPayload(error) };
     }
   }
-}
-
-async function binaryTile(blob: Blob): Promise<{ buffer: ArrayBuffer }> {
-  if (blob.size > SOURCE_FETCH_BYTE_LIMIT) throw new SizeLimitError(SOURCE_FETCH_BYTE_LIMIT);
-  return { buffer: await blob.arrayBuffer() };
 }
 
 /** Direct helpers for page-side tests and the message listener.
@@ -110,7 +101,6 @@ export function readViewerTile(
   return session
     ? session.load(request, extent)
     : {
-        documentUrl: location.href,
         ok: false,
         error: {
           kind: "policy-denied",
@@ -170,7 +160,7 @@ export function listenViewerChannel(channelId: string, handles: string[]): void 
     if (message.type === "close") {
       const id = Number.isSafeInteger(message.id) ? (message.id as number) : 0;
       releaseViewerTiles(handles);
-      port?.postMessage({ type: "result", id, result: { documentUrl: location.href, ok: true } });
+      port?.postMessage({ type: "result", id, result: { ok: true } });
       close();
       return;
     }
@@ -187,7 +177,6 @@ export function listenViewerChannel(channelId: string, handles: string[]): void 
       .then(() => readViewerTile(request, message.extent as Size))
       .catch(
         (cause: unknown): ViewerTileResult => ({
-          documentUrl: location.href,
           ok: false,
           error: errorPayload(
             isJobError(cause)

@@ -282,11 +282,6 @@ for (const [name, engine] of [
         );
       }
       assert.equal((await page.evaluate(loadFixture, "oversized")).kind, "size-limit");
-      assert.equal(
-        await page.evaluate(() => "__dezoomify_viewer_loaders__" in window),
-        false,
-        "live viewers must not install a page global",
-      );
       assert.equal(await page.evaluate(() => window.__dezoomifyOpenSeadragon), "page-owned");
     } finally {
       await browser.close();

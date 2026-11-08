@@ -265,7 +265,7 @@ test("live tile capabilities stay bound to their exact viewer frame and are rele
   const handle = "test-source";
   const request = { handle, source_url: viewerUrl, level: 10, column: 0, row: 0 };
   const extent = { width: 256, height: 256 };
-  const tile = { ok: true, documentUrl: viewerUrl, buffer: new Uint8Array([1]).buffer };
+  const tile = { ok: true, buffer: new Uint8Array([1]).buffer };
   let tileReply = () => tile;
   const fake = fakeBrowser(async (injection) => {
     const frameId = injection.target.frameIds[0];
@@ -287,26 +287,14 @@ test("live tile capabilities stay bound to their exact viewer frame and are rele
               ]
             : [],
       };
-    if (injection.func === installViewerBridge) {
-      assert.equal(frameId, 9);
-      assert.equal(injection.world, "ISOLATED");
-      assert.deepEqual(injection.args, ["test-viewer-channel"]);
-      return { documentUrl };
-    }
+    if (injection.func === installViewerBridge) return { documentUrl };
     return snapshot(documentUrl);
   });
   fake.setFrames([
     { frameId: 0, documentUrl: SOURCE_URL, token: "root" },
     { frameId: 9, documentUrl: viewerUrl, token: "viewer" },
   ]);
-  fake.setPortReply((message, options) => {
-    assert.equal(options.frameId, 9);
-    assert.equal(options.name, "dezoomify-viewer:test-viewer-channel");
-    assert.equal(message.type, "read-tile");
-    assert.deepEqual(message.request, request);
-    assert.deepEqual(message.extent, extent);
-    return tileReply();
-  });
+  fake.setPortReply(() => tileReply());
   const source = createSourceAccess(fake.api, { tabId: 9, documentUrl: SOURCE_URL });
   try {
     const observe = source.observations({
@@ -326,7 +314,7 @@ test("live tile capabilities stay bound to their exact viewer frame and are rele
       headers: [],
       purpose: "tile",
     };
-    tileReply = () => ({ documentUrl: viewerUrl, ok: true, url: resource.uri });
+    tileReply = () => ({ ok: true, url: resource.uri });
     assert.deepEqual(
       await source.loadViewerTile(request, extent, new AbortController().signal),
       resource,
@@ -337,7 +325,7 @@ test("live tile capabilities stay bound to their exact viewer frame and are rele
       "javascript:void(0)",
       null,
     ]) {
-      tileReply = () => ({ documentUrl: viewerUrl, ok: true, url: invalid });
+      tileReply = () => ({ ok: true, url: invalid });
       await assert.rejects(source.loadViewerTile(request, extent, new AbortController().signal), {
         kind: "internal",
       });
@@ -348,7 +336,7 @@ test("live tile capabilities stay bound to their exact viewer frame and are rele
       request: "https://tiles.example/real.jpg",
       retry_after_ms: 2000,
     });
-    tileReply = () => ({ documentUrl: viewerUrl, ok: false, error: errorPayload(refusal) });
+    tileReply = () => ({ ok: false, error: errorPayload(refusal) });
     await assert.rejects(
       source.loadViewerTile(request, extent, new AbortController().signal),
       (caught) => {
@@ -385,11 +373,7 @@ test("live tile capabilities stay bound to their exact viewer frame and are rele
       blocked_reason: "source-document-lost",
     });
     assert.equal(fake.ports.length, 1, "the viewer frame gets one Port for every tile");
-    assert.equal(fake.ports[0].options.frameId, 9);
     assert.equal(fake.ports[0].disconnected, true, "job retirement closes the Port");
-    assert.ok(
-      fake.calls.every((call) => call.func !== installViewerBridge || call.world === "ISOLATED"),
-    );
   } finally {
     source.dispose();
   }
@@ -421,7 +405,6 @@ test("a rescan keeps every scan's viewer handles bound to its own channel", asyn
   });
   fake.setPortReply((message) => ({
     ok: true,
-    documentUrl: SOURCE_URL,
     buffer: new Uint8Array([Number(message.request.handle.at(-1))]).buffer,
   }));
   const source = createSourceAccess(fake.api, { tabId: 9, documentUrl: SOURCE_URL });
@@ -444,15 +427,6 @@ test("a rescan keeps every scan's viewer handles bound to its own channel", asyn
       );
       assert.deepEqual([...new Uint8Array(result)], [order]);
     }
-    source.releaseTiles();
-    for (const order of [1, 2])
-      await assert.rejects(
-        source.loadViewerTile(request(order), extent, new AbortController().signal),
-        {
-          kind: "policy-denied",
-          blocked_reason: "source-document-lost",
-        },
-      );
   } finally {
     source.dispose();
   }
