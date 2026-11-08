@@ -138,11 +138,7 @@ export function listenViewerChannel(channelId: string, handles: string[]): void 
   const onMessage = (event: MessageEvent) => {
     if (event.source !== window) return;
     const message = event.data;
-    if (
-      !message ||
-      message.type !== "dezoomify-viewer-request" ||
-      message.channelId !== channelId
-    )
+    if (message?.type !== "dezoomify-viewer-request" || message.channelId !== channelId)
       return;
     if (message.method === "close") {
       window.removeEventListener("message", onMessage);
@@ -168,13 +164,17 @@ export function listenViewerChannel(channelId: string, handles: string[]): void 
       return;
     void Promise.resolve()
       .then(() => readViewerTile(message.request, message.extent))
-      .catch((cause: unknown): ViewerTileResult => ({
-        documentUrl: location.href,
-        ok: false,
-        error: errorPayload(
-          isJobError(cause) ? cause : new InternalError(`Invalid viewer request: ${unknownDetail(cause)}`),
-        ),
-      }))
+      .catch(
+        (cause: unknown): ViewerTileResult => ({
+          documentUrl: location.href,
+          ok: false,
+          error: errorPayload(
+            isJobError(cause)
+              ? cause
+              : new InternalError(`Invalid viewer request: ${unknownDetail(cause)}`),
+          ),
+        }),
+      )
       .then((result) => {
         window.postMessage(
           { type: "dezoomify-viewer-response", channelId, id: message.id, result },

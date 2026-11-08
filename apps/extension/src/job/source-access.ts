@@ -510,6 +510,53 @@ export function createSourceAccess(
     );
   }
 
+  /** Establish the frame's one Port only if a scan found live viewer handles.
+   * The initial scanner and bridge installations still use their existing
+   * document checks, and the Port handshake confirms the receiving document. */
+  async function connectFrameViewerChannel(
+    frame: SourceFrame,
+    reply: Record<string, unknown>,
+    signal: AbortSignal | undefined,
+    deadlineAt: number,
+  ): Promise<void> {
+    const channelId = reply.channelId;
+    if (typeof channelId !== "string" || !/^[\\w-]{1,128}$/.test(channelId))
+      throw new InternalError("Invalid viewer channel ID");
+    const channel = await bounded(
+      async (owned) => {
+        await injectUnchecked(
+          { func: installViewerBridge, args: [channelId], world: "ISOLATED" },
+          owned,
+          undefined,
+          frame,
+        );
+        const port = browserApi.tabs.connect(tabId, {
+          frameId: frame.frameId,
+          name: `dezoomify-viewer:${channelId}`,
+        });
+        const connected = createViewerChannel(port);
+        try {
+          const ready = await connected.ready(owned);
+          if (
+            !isRecord(ready) ||
+            typeof ready.documentUrl !== "string" ||
+            !sameDocumentUrl(ready.documentUrl, frame.documentUrl)
+          )
+            throw lostFrame(frame);
+          return connected;
+        } catch (error) {
+          connected.dispose();
+          throw error;
+        }
+      },
+      signal,
+      undefined,
+      deadlineAt,
+    );
+    tileChannels.set(frame, channel);
+    rememberTileFrames(reply.handles, frame);
+  }
+
   async function scan(signal?: AbortSignal, frame = rootFrame): Promise<CandidateSnapshot> {
     const scanDeadline = Date.now() + timeoutMs;
     let observed: ObservedInput[] = [];
@@ -524,39 +571,8 @@ export function createSourceAccess(
         frame,
       );
       ({ observed, images, memory } = memoryScanReply(reply));
-      if (isRecord(reply) && Array.isArray(reply.handles) && reply.handles.length > 0) {
-        const channelId = reply.channelId;
-        if (typeof channelId !== "string" || !/^[\\w-]{1,128}$/.test(channelId))
-          throw new InternalError("Invalid viewer channel ID");
-        const channel = await bounded(async (owned) => {
-          await injectUnchecked(
-            { func: installViewerBridge, args: [channelId], world: "ISOLATED" },
-            owned,
-            undefined,
-            frame,
-          );
-          const port = browserApi.tabs.connect(tabId, {
-            frameId: frame.frameId,
-            name: `dezoomify-viewer:${channelId}`,
-          });
-          const connected = createViewerChannel(port);
-          try {
-            const ready = await connected.ready(owned);
-            if (
-              !isRecord(ready) ||
-              typeof ready.documentUrl !== "string" ||
-              !sameDocumentUrl(ready.documentUrl, frame.documentUrl)
-            )
-              throw lostFrame(frame);
-            return connected;
-          } catch (error) {
-            connected.dispose();
-            throw error;
-          }
-        }, signal, undefined, scanDeadline);
-        tileChannels.set(frame, channel);
-        rememberTileFrames(reply.handles, frame);
-      }
+      if (isRecord(reply) && Array.isArray(reply.handles) && reply.handles.length > 0)
+        await connectFrameViewerChannel(frame, reply, signal, scanDeadline);
     } catch (error) {
       // A memory scan is optional evidence; source loss/cancellation still
       // fails the following normal scan through the same lifetime guard.

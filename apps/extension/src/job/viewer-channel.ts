@@ -33,8 +33,7 @@ export function installViewerBridge(channelId: string): { documentUrl: string } 
       if (event.source !== window) return;
       const data = event.data;
       if (
-        !data ||
-        data.type !== "dezoomify-viewer-response" ||
+        data?.type !== "dezoomify-viewer-response" ||
         data.channelId !== channelId ||
         !Number.isSafeInteger(data.id) ||
         !pending.delete(data.id)

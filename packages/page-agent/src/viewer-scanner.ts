@@ -1,6 +1,6 @@
 import { ScanState } from "./viewers/scan-state.ts";
-import { PageTraversal } from "./viewers/traversal.ts";
 import { listenViewerChannel } from "./viewers/session.ts";
+import { PageTraversal } from "./viewers/traversal.ts";
 import type { ScanResult } from "./viewers/types.ts";
 
 /** Run only on explicit source access, in the page's main world. Work limits

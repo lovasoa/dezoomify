@@ -142,7 +142,10 @@ async function loadFixture(mode) {
         resolve(event.data.result);
       };
       window.addEventListener("message", onMessage);
-      window.postMessage({ type: "dezoomify-viewer-request", channelId, ...message }, location.origin);
+      window.postMessage(
+        { type: "dezoomify-viewer-request", channelId, ...message },
+        location.origin,
+      );
     });
   const result = await send({ method: "read-tile", id: 1, request, extent });
   await send({ method: "close", id: 2 });

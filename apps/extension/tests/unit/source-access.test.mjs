@@ -53,12 +53,20 @@ function fakeBrowser(execute) {
               return disconnected;
             },
             onMessage: {
-              addListener(fn) { onMessage.add(fn); },
-              removeListener(fn) { onMessage.delete(fn); },
+              addListener(fn) {
+                onMessage.add(fn);
+              },
+              removeListener(fn) {
+                onMessage.delete(fn);
+              },
             },
             onDisconnect: {
-              addListener(fn) { onDisconnect.add(fn); },
-              removeListener(fn) { onDisconnect.delete(fn); },
+              addListener(fn) {
+                onDisconnect.add(fn);
+              },
+              removeListener(fn) {
+                onDisconnect.delete(fn);
+              },
             },
             postMessage(message) {
               if (disconnected) throw new Error("Disconnected port");
