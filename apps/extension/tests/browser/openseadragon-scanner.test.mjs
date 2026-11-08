@@ -6,7 +6,11 @@ import { build } from "esbuild";
 import { chromium, firefox } from "playwright";
 
 const bundle = await build({
-  entryPoints: [fileURLToPath(new URL("../../../../packages/page-agent/src/viewer-scanner.ts", import.meta.url))],
+  entryPoints: [
+    fileURLToPath(
+      new URL("../../../../packages/page-agent/src/viewer-scanner.ts", import.meta.url),
+    ),
+  ],
   bundle: true,
   write: false,
   format: "iife",

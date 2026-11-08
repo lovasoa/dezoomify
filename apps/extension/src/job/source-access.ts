@@ -13,6 +13,7 @@ import {
   validateByteRangeResponse,
   validateRequestHeaders,
 } from "@dezoomify/browser-runtime";
+import { readViewerTile, releaseViewerTiles } from "@dezoomify/page-agent";
 import type {
   Interaction,
   JobInput,
@@ -26,8 +27,6 @@ import { transportError } from "../runtime/fetch.ts";
 import { findImageDownloadLink, findLoadedImage, type LoadedImage } from "./loaded-image.ts";
 import { cancelSourceFetch, fetchSource, inspectSourceDocument } from "./source-operations.ts";
 import { collectCandidates, type SourceSnapshot, sourceSnapshotLimits } from "./source-snapshot.ts";
-import { readViewerTile, releaseViewerTiles } from "@dezoomify/page-agent";
-
 type SourceApi = Pick<WxtBrowser, "tabs" | "scripting">;
 type SourceFrame = { frameId: number; documentUrl: string; token?: string; documentId?: string };
 type DiagnosticValue = number | boolean | string | string[];

@@ -1,4 +1,4 @@
 export { scanViewers } from "./viewer-scanner.ts";
-export { readViewerTile, releaseViewerTiles } from "./viewers/session.ts";
 export type { ViewerTileResult } from "./viewers/session.ts";
+export { readViewerTile, releaseViewerTiles } from "./viewers/session.ts";
 export type { LoadedImage, ScanDiagnostics, ScanResult } from "./viewers/types.ts";

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { errorPayload, HttpError } from "@dezoomify/browser-runtime";
+import { readViewerTile, releaseViewerTiles } from "@dezoomify/page-agent";
 import { findLoadedImage } from "../../src/job/loaded-image.ts";
 import { createSourceAccess } from "../../src/job/source-access.ts";
 import {
@@ -9,8 +10,6 @@ import {
   inspectSourceDocument,
 } from "../../src/job/source-operations.ts";
 import { collectCandidates, sourceSnapshotLimits } from "../../src/job/source-snapshot.ts";
-import { readViewerTile, releaseViewerTiles } from "@dezoomify/page-agent";
-
 const SOURCE_URL = "https://gallery.example/page?view=1";
 
 function fakeBrowser(execute) {
