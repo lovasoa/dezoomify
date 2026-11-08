@@ -147,6 +147,49 @@
       }
     },
     {
+      "includes": ["packages/page-agent/src/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedGlobals": {
+              "level": "error",
+              "options": {
+                "deniedGlobals": {
+                  "chrome": "The in-page runtime runs inside foreign documents; extension APIs are host territory.",
+                  "browser": "The in-page runtime runs inside foreign documents; extension APIs are host territory.",
+                  "__TAURI_INTERNALS__": "The in-page runtime runs inside foreign documents; desktop globals are host territory.",
+                  "__TAURI_EVENT__": "The in-page runtime runs inside foreign documents; desktop globals are host territory.",
+                  "__TAURI__": "The in-page runtime runs inside foreign documents; desktop globals are host territory."
+                }
+              }
+            },
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": ["wxt", "wxt/*", "@tauri-apps/*", "react", "chrome", "chrome/*"],
+                    "message": "The in-page runtime must not import a host SDK; hosts inject capabilities."
+                  },
+                  {
+                    "group": [
+                      "@dezoomify/extension",
+                      "@dezoomify/extension/*",
+                      "@dezoomify/desktop",
+                      "@dezoomify/desktop/*",
+                      "**/apps/extension/**",
+                      "**/apps/desktop/**"
+                    ],
+                    "message": "Products never import each other; shared code belongs in a package."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
       "includes": ["apps/desktop/src/**"],
       "linter": {
         "rules": {
