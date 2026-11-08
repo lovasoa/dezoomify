@@ -197,7 +197,8 @@ for (const [name, engine] of [
       const ordinary = await page.evaluate(loadFixture, "image");
       assert.deepEqual(ordinary, {
         url: "https://tiles.fixture.invalid/tiles/8/0_0.png?mode=image",
-        addedGlobals: [],
+        // A single document-scoped handle registry replaces the old event bus.
+        addedGlobals: ["__dezoomify_viewer_loaders__"],
       });
       assert.ok(
         !requests.some((request) => request.url().includes("mode=image")),
@@ -264,6 +265,11 @@ for (const [name, engine] of [
         );
       }
       assert.equal((await page.evaluate(loadFixture, "oversized")).kind, "size-limit");
+      assert.deepEqual(
+        await page.evaluate(() => [...window.__dezoomify_viewer_loaders__.keys()]),
+        [],
+        "released viewer handles must not remain in the registry",
+      );
       assert.equal(await page.evaluate(() => window.__dezoomifyOpenSeadragon), "page-owned");
     } finally {
       await browser.close();
