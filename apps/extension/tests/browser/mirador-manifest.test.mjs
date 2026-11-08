@@ -14,7 +14,7 @@ const tile = readFileSync(new URL("../../../../fixtures/tiles/0-0.png", import.m
 const scanner = (
   await build({
     stdin: {
-      contents: `export {installPageAgent,callPageAgent} from '@dezoomify/page-agent';
+      contents: `export {scanViewers} from '@dezoomify/page-agent';
 export {collectCandidates,sourceSnapshotLimits} from './source-snapshot.ts';
 export {BrowserHost,selectionLimitsFor} from '@dezoomify/browser-runtime';`,
       resolveDir: new URL("../../src/job/", import.meta.url).pathname,
@@ -59,9 +59,8 @@ for (const [name, engine] of [
       await page.goto(`${origin}/YSD/detail/002463024.html`, { waitUntil: "networkidle" });
       await page.waitForSelector(".openseadragon-canvas", { state: "attached" });
       await page.addScriptTag({ content: scanner });
-      await page.evaluate(() => Inspector.installPageAgent());
       const result = await page.evaluate(async () => {
-        const scan = (await Inspector.callPageAgent({ method: "scan" })).result;
+        const scan = await Inspector.scanViewers();
         const snapshot = Inspector.collectCandidates(Inspector.sourceSnapshotLimits);
         const wasm = await import("/__wasm/dezoomify-wasm.js");
         await wasm.default();

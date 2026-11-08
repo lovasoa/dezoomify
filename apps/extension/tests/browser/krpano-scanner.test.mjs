@@ -6,14 +6,11 @@ import { chromium, firefox } from "playwright";
 
 const scanner = (
   await build({
-    stdin: {
-      contents: `export {installPageAgent,callPageAgent} from '@dezoomify/page-agent';`,
-      resolveDir: new URL("./", import.meta.url).pathname,
-    },
+    entryPoints: [new URL("../../../../packages/page-agent/src/viewer-scanner.ts", import.meta.url).pathname],
     bundle: true,
     write: false,
     format: "iife",
-    globalName: "PageAgent",
+    globalName: "ViewerScanner",
     target: "es2022",
     define: { "import.meta.url": JSON.stringify(import.meta.url) },
   })
@@ -82,7 +79,6 @@ for (const [name, engine] of [
           await page.goto(`${origin}/viewer.html`);
           await page.evaluate(prepare, mode);
           await page.addScriptTag({ content: scanner });
-          await page.evaluate(() => PageAgent.installPageAgent());
           const result = await page.evaluate(async () => {
             let networkCalls = 0;
             window.fetch = () => {
@@ -93,7 +89,7 @@ for (const [name, engine] of [
               networkCalls++;
               throw new Error("scan must not request resources");
             };
-            const scan = (await PageAgent.callPageAgent({ method: "scan" })).result;
+            const scan = await ViewerScanner.scanViewers();
             const xml =
               scan.inputs[0] &&
               new DOMParser().parseFromString(scan.inputs[0].contents, "text/xml");

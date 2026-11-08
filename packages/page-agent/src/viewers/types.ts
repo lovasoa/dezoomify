@@ -1,5 +1,10 @@
 import type { ObservedInput } from "@dezoomify/wasm-bindings";
-import type { LoadedImage } from "../loaded-image.ts";
+/** Candidate original image discovered in an inspected viewer. */
+export interface LoadedImage {
+  url: string;
+  width: number;
+  height: number;
+}
 
 export type ViewerEvidence = { input: ObservedInput; handle?: string } | { image: LoadedImage };
 
@@ -102,6 +107,15 @@ export interface ScanDiagnostics {
   versions: string;
   stopped: string;
   frames: string[];
+}
+
+export interface ScanResult {
+  ok: true;
+  documentUrl: string;
+  inputs: ObservedInput[];
+  images: LoadedImage[];
+  handles: string[];
+  diagnostics: ScanDiagnostics;
 }
 
 export type PageRealm = Window & typeof globalThis;

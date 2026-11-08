@@ -1,12 +1,4 @@
-export { callPageAgent, installPageAgent } from "./agent.ts";
-export type { LoadedImage } from "./loaded-image.ts";
-export type {
-  PageAgent,
-  PageMethod,
-  PageRequest,
-  PageResponse,
-  PageResults,
-  ScanResult,
-  ViewerTileResult,
-} from "./messages.ts";
-export type { ScanDiagnostics } from "./viewers/types.ts";
+export { scanViewers } from "./viewer-scanner.ts";
+export { readViewerTile, releaseViewerTiles } from "./viewers/session.ts";
+export type { ViewerTileResult } from "./viewers/session.ts";
+export type { LoadedImage, ScanDiagnostics, ScanResult } from "./viewers/types.ts";
