@@ -27,6 +27,7 @@ import { transportError } from "../runtime/fetch.ts";
 import { findImageDownloadLink, findLoadedImage, type LoadedImage } from "./loaded-image.ts";
 import { cancelSourceFetch, fetchSource, inspectSourceDocument } from "./source-operations.ts";
 import { collectCandidates, type SourceSnapshot, sourceSnapshotLimits } from "./source-snapshot.ts";
+
 type SourceApi = Pick<WxtBrowser, "tabs" | "scripting">;
 type SourceFrame = { frameId: number; documentUrl: string; token?: string; documentId?: string };
 type DiagnosticValue = number | boolean | string | string[];

@@ -10,6 +10,7 @@ import {
   inspectSourceDocument,
 } from "../../src/job/source-operations.ts";
 import { collectCandidates, sourceSnapshotLimits } from "../../src/job/source-snapshot.ts";
+
 const SOURCE_URL = "https://gallery.example/page?view=1";
 
 function fakeBrowser(execute) {
