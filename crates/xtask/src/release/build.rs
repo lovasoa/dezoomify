@@ -135,9 +135,7 @@ fn build_desktop_artifact(target: &str, target_os: &str, out: &Path) -> Result<(
     crate::desktop::build_desktop(&[])?;
     let (subdir, extension, arch_token): (&str, &str, Option<&str>) = match target {
         "desktop-linux-x86_64" => ("deb", "deb", None),
-        // The Windows recipe also produces the nsis setup binary alongside
-        // the msi; only the msi is the release artifact.
-        "desktop-windows-x86_64" => ("msi", "msi", None),
+        "desktop-windows-x86_64" => ("nsis", "exe", None),
         "desktop-macos-aarch64" => ("dmg", "dmg", Some("aarch64")),
         _ => return Err(format!("target '{target}' has no build recipe")),
     };
@@ -170,7 +168,7 @@ fn build_desktop_artifact(target: &str, target_os: &str, out: &Path) -> Result<(
     std::fs::copy(&hits[0], out).map_err(|e| format!("copy {}: {e}", hits[0].display()))?;
     let (subdir, extension) = match target {
         "desktop-linux-x86_64" => ("deb", "deb"),
-        "desktop-windows-x86_64" => ("msi", "msi"),
+        "desktop-windows-x86_64" => ("nsis", "exe"),
         "desktop-macos-aarch64" => ("macos", "app.tar.gz"),
         _ => return Err(format!("missing updater recipe for {target}")),
     };
