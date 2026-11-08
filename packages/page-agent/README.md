@@ -9,8 +9,8 @@ module-local state. If any live viewers are found, it creates a job-scoped
 message listener and returns a random channel ID with its observations.
 
 The extension uses one long-lived `tabs.connect` Port per scanned frame with
-live viewers. An isolated-world bridge forwards tile messages via
-`window.postMessage`; the page listener calls the retained loaders. Closing
+live viewers. An isolated-world bridge forwards requests through two job-scoped DOM custom
+events. A ping verifies the page listener before any tile request. Closing
 the Port releases the scan's handles and aborts its loaders. There is no page
 global registry or generic cross-host agent service.
 

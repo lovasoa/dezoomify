@@ -128,27 +128,24 @@ async function loadFixture(mode) {
   const extent = { width: 256, height: 256 };
   const channelId = crypto.randomUUID();
   TileSession.listenViewerChannel(channelId, [handle]);
+  const responseEvent = `dezoomify-viewer:${channelId}:response`;
   const send = (message) =>
     new Promise((resolve) => {
-      const onMessage = (event) => {
-        if (
-          event.source !== window ||
-          event.data?.type !== "dezoomify-viewer-response" ||
-          event.data?.channelId !== channelId ||
-          event.data?.id !== message.id
-        )
-          return;
-        window.removeEventListener("message", onMessage);
-        resolve(event.data.result);
+      const onResponse = (event) => {
+        const data = JSON.parse(event.detail);
+        if (data.id !== message.id) return;
+        document.removeEventListener(responseEvent, onResponse);
+        resolve(data.result);
       };
-      window.addEventListener("message", onMessage);
-      window.postMessage(
-        { type: "dezoomify-viewer-request", channelId, ...message },
-        location.origin,
+      document.addEventListener(responseEvent, onResponse);
+      document.dispatchEvent(
+        new CustomEvent(`dezoomify-viewer:${channelId}:request`, {
+          detail: JSON.stringify(message),
+        }),
       );
     });
-  const result = await send({ method: "read-tile", id: 1, request, extent });
-  await send({ method: "close", id: 2 });
+  const result = await send({ type: "read-tile", id: 1, request, extent });
+  await send({ type: "close", id: 2 });
   const retired = await TileSession.readViewerTile(request, extent);
   if (retired.ok) throw new Error("retired source still loads tiles");
   if (!result.ok) return result.error;

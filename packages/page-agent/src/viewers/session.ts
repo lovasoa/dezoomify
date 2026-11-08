@@ -130,40 +130,58 @@ export function releaseViewerTiles(handles: string[]): void {
   }
 }
 
-/** Keep this scan's loaders available to the isolated content-script bridge.
- * The random channel ID makes a later scan independent of earlier listeners.
- * No page global or permanent agent is installed. */
+/** One job-scoped listener owns the captured viewer loaders. The isolated
+ * extension world communicates through the shared DOM, using string payloads
+ * so Firefox never needs to expose objects across script worlds. */
 export function listenViewerChannel(channelId: string, handles: string[]): void {
   const owned = new Set(handles);
-  const onMessage = (event: MessageEvent) => {
-    // An isolated extension world may deliver postMessage with a null source.
-    if (event.source !== window && event.source !== null) return;
-    const message = event.data;
-    if (message?.type !== "dezoomify-viewer-request" || message.channelId !== channelId) return;
-    if (message.method === "close") {
-      window.removeEventListener("message", onMessage);
+  const requestEvent = `dezoomify-viewer:${channelId}:request`;
+  const responseEvent = `dezoomify-viewer:${channelId}:response`;
+  let closed = false;
+
+  const reply = (id: number, result: unknown) => {
+    if (!closed)
+      document.dispatchEvent(
+        new CustomEvent(responseEvent, { detail: JSON.stringify({ id, result }) }),
+      );
+  };
+  const onRequest = (event: Event) => {
+    const detail = (event as CustomEvent<unknown>).detail;
+    if (typeof detail !== "string") return;
+    let message: Record<string, unknown>;
+    try {
+      const parsed: unknown = JSON.parse(detail);
+      if (!parsed || typeof parsed !== "object") return;
+      message = parsed as Record<string, unknown>;
+    } catch {
+      return;
+    }
+    if (message.type === "ping" && message.id === 0) {
+      reply(0, { ok: true, documentUrl: location.href });
+      return;
+    }
+    if (message.type === "close") {
       releaseViewerTiles(handles);
-      if (Number.isSafeInteger(message.id))
-        window.postMessage(
-          {
-            type: "dezoomify-viewer-response",
-            channelId,
-            id: message.id,
-            result: { documentUrl: location.href, ok: true },
-          },
-          location.origin,
-        );
+      reply(Number.isSafeInteger(message.id) ? (message.id as number) : 0, {
+        ok: true,
+        documentUrl: location.href,
+      });
+      closed = true;
+      document.removeEventListener(requestEvent, onRequest);
       return;
     }
     if (
-      message.method !== "read-tile" ||
+      message.type !== "read-tile" ||
       !Number.isSafeInteger(message.id) ||
+      typeof message.id !== "number" ||
       !message.request ||
-      !owned.has(message.request.handle)
+      typeof message.request !== "object" ||
+      !owned.has((message.request as ViewerTileRequest).handle)
     )
       return;
+    const id = message.id;
     void Promise.resolve()
-      .then(() => readViewerTile(message.request, message.extent))
+      .then(() => readViewerTile(message.request as ViewerTileRequest, message.extent as Size))
       .catch(
         (cause: unknown): ViewerTileResult => ({
           documentUrl: location.href,
@@ -175,12 +193,7 @@ export function listenViewerChannel(channelId: string, handles: string[]): void 
           ),
         }),
       )
-      .then((result) => {
-        window.postMessage(
-          { type: "dezoomify-viewer-response", channelId, id: message.id, result },
-          location.origin,
-        );
-      });
+      .then((result) => reply(id, result));
   };
-  window.addEventListener("message", onMessage);
+  document.addEventListener(requestEvent, onRequest);
 }

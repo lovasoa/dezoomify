@@ -4,13 +4,13 @@ import type { WxtBrowser } from "wxt/browser";
 
 type ExtensionPort = ReturnType<WxtBrowser["tabs"]["connect"]>;
 
-/** Installed once per scanned frame, in the extension's ISOLATED world.
- * This function is self-contained because executeScript serializes its body.
- * The page never receives a Port or any extension APIs. */
+/** Injected once into the isolated world of a scanned frame. The Port talks
+ * to the extension; paired DOM events talk to the page's MAIN world. */
 export function installViewerBridge(channelId: string): { documentUrl: string } {
   type BridgePort = {
     name: string;
     postMessage(message: unknown): void;
+    disconnect(): void;
     onMessage: { addListener(fn: (message: unknown) => void): void };
     onDisconnect: { addListener(fn: () => void): void };
   };
@@ -25,25 +25,47 @@ export function installViewerBridge(channelId: string): { documentUrl: string } 
   const runtime = globals.browser?.runtime ?? globals.chrome?.runtime;
   if (!runtime) throw new Error("Extension runtime is unavailable in the source frame");
 
+  const requestEvent = `dezoomify-viewer:${channelId}:request`;
+  const responseEvent = `dezoomify-viewer:${channelId}:response`;
+  const dispatch = (message: unknown) =>
+    document.dispatchEvent(new CustomEvent(requestEvent, { detail: JSON.stringify(message) }));
+
   const onConnect = (port: BridgePort) => {
     if (port.name !== `dezoomify-viewer:${channelId}`) return;
     runtime.onConnect.removeListener(onConnect);
     const pending = new Set<number>();
-    const onWindowMessage = (event: MessageEvent) => {
-      // Firefox can suppress the sender window on extension-originated events.
-    if (event.source !== window && event.source !== null) return;
-      const data = event.data;
+    let ready = false;
+
+    const onResponse = (event: Event) => {
+      const detail = (event as CustomEvent<unknown>).detail;
+      if (typeof detail !== "string") return;
+      let response: Record<string, unknown>;
+      try {
+        const parsed: unknown = JSON.parse(detail);
+        if (!parsed || typeof parsed !== "object") return;
+        response = parsed as Record<string, unknown>;
+      } catch {
+        return;
+      }
+      if (response.id === 0) {
+        const result = response.result as { ok?: unknown; documentUrl?: unknown } | null;
+        if (result?.ok === true && typeof result.documentUrl === "string") {
+          ready = true;
+          port.postMessage({ type: "ready", documentUrl: result.documentUrl });
+        }
+        return;
+      }
       if (
-        data?.type !== "dezoomify-viewer-response" ||
-        data.channelId !== channelId ||
-        !Number.isSafeInteger(data.id) ||
-        !pending.delete(data.id)
+        typeof response.id !== "number" ||
+        !Number.isSafeInteger(response.id) ||
+        !pending.delete(response.id)
       )
         return;
-      port.postMessage({ type: "result", id: data.id, result: data.result });
+      port.postMessage({ type: "result", id: response.id, result: response.result });
     };
+
     port.onMessage.addListener((value: unknown) => {
-      if (!value || typeof value !== "object") return;
+      if (!ready || !value || typeof value !== "object") return;
       const message = value as Record<string, unknown>;
       if (
         message.type !== "read-tile" ||
@@ -54,28 +76,15 @@ export function installViewerBridge(channelId: string): { documentUrl: string } 
       )
         return;
       pending.add(message.id);
-      window.postMessage(
-        {
-          type: "dezoomify-viewer-request",
-          channelId,
-          method: "read-tile",
-          id: message.id,
-          request: message.request,
-          extent: message.extent,
-        },
-        location.origin,
-      );
+      dispatch(value);
     });
     port.onDisconnect.addListener(() => {
       pending.clear();
-      window.removeEventListener("message", onWindowMessage);
-      window.postMessage(
-        { type: "dezoomify-viewer-request", channelId, method: "close" },
-        location.origin,
-      );
+      document.removeEventListener(responseEvent, onResponse);
+      dispatch({ type: "close" });
     });
-    window.addEventListener("message", onWindowMessage);
-    port.postMessage({ type: "ready", documentUrl: location.href });
+    document.addEventListener(responseEvent, onResponse);
+    dispatch({ type: "ping", id: 0 });
   };
   runtime.onConnect.addListener(onConnect);
   return { documentUrl: location.href };
