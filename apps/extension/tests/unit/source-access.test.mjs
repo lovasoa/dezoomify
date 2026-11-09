@@ -13,6 +13,24 @@ import { installViewerBridge } from "../../src/job/viewer-channel.ts";
 
 const SOURCE_URL = "https://gallery.example/page?view=1";
 
+/** One scanned live viewer, opaque to the extension beyond transport bounds. */
+const viewerObservation = (handle, url) => ({
+  kind: "observed-viewer",
+  url,
+  viewer: {
+    handle,
+    levels: [
+      {
+        level: 0,
+        size: { width: 256, height: 256 },
+        tile_size: { width: 256, height: 256 },
+        overlap: { width: 0, height: 0 },
+        grid_size: { width: 1, height: 1 },
+      },
+    ],
+  },
+});
+
 function fakeBrowser(execute) {
   const listeners = { updated: [], removed: [] };
   const calls = [];
@@ -276,16 +294,7 @@ test("live tile capabilities stay bound to their exact viewer frame and are rele
         documentUrl,
         channelId: frameId === 9 ? "test-viewer-channel" : undefined,
         handles: frameId === 9 ? [handle] : [],
-        inputs:
-          frameId === 9
-            ? [
-                {
-                  kind: "observed-viewer",
-                  url: viewerUrl,
-                  contents: JSON.stringify({ dezoomify_viewer: { handle, source_url: viewerUrl } }),
-                },
-              ]
-            : [],
+        inputs: frameId === 9 ? [viewerObservation(handle, viewerUrl)] : [],
       };
     if (injection.func === installViewerBridge) return { documentUrl };
     return snapshot(documentUrl);
@@ -390,15 +399,7 @@ test("a rescan keeps every scan's viewer handles bound to its own channel", asyn
         documentUrl: SOURCE_URL,
         channelId: `channel-${scans}`,
         handles: [`handle-${scans}`],
-        inputs: [
-          {
-            kind: "observed-viewer",
-            url: SOURCE_URL,
-            contents: JSON.stringify({
-              dezoomify_viewer: { handle: `handle-${scans}`, source_url: SOURCE_URL },
-            }),
-          },
-        ],
+        inputs: [viewerObservation(`handle-${scans}`, SOURCE_URL)],
       };
     }
     return snapshot();

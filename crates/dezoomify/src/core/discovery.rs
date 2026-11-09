@@ -13,6 +13,7 @@ use super::tile_plan::TileSourceError;
 use super::uri::resolve_relative;
 use crate::model::{
     DiscoveryInputKind, Error, HtmlDocument, HtmlElement, HtmlQuery, Interaction, JobInput,
+    ViewerPyramid,
 };
 static SCRIPT_MARKUP: LazyLock<regex::Regex> = LazyLock::new(|| {
     regex::Regex::new(r"(?i)<(?:script|base|body)\b").expect("constant markup pattern")
@@ -24,6 +25,8 @@ pub struct DiscoveryInput {
     pub url: String,
     pub contents: Option<Vec<u8>>,
     pub kind: DiscoveryInputKind,
+    /// Typed live-viewer grids; only with kind [`DiscoveryInputKind::ObservedViewer`].
+    pub viewer: Option<ViewerPyramid>,
 }
 
 impl From<JobInput> for DiscoveryInput {
@@ -32,6 +35,7 @@ impl From<JobInput> for DiscoveryInput {
             url: input.url,
             contents: input.contents.map(String::into_bytes),
             kind: input.kind.unwrap_or_default(),
+            viewer: input.viewer,
         }
     }
 }
@@ -43,6 +47,7 @@ impl DiscoveryInput {
             url: url.into(),
             contents: None,
             kind: DiscoveryInputKind::Source,
+            viewer: None,
         }
     }
 
@@ -52,6 +57,7 @@ impl DiscoveryInput {
             url: url.into(),
             contents: Some(contents.into()),
             kind: DiscoveryInputKind::Source,
+            viewer: None,
         }
     }
 

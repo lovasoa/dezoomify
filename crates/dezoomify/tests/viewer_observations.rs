@@ -4,50 +4,59 @@ use dezoomify::core::default_registry;
 use dezoomify::core::discovery::{DiscoveryInput, DiscoveryLimits};
 use dezoomify::model::{
     DiscoveryInputKind, Interaction, ResourceRead, ResourceResponse, Size, TileSource, ViewerLevel,
-    ViewerObservation, ViewerPyramid, ViewerTileRequest,
+    ViewerPyramid, ViewerTileRequest,
 };
 use std::cell::RefCell;
 
-fn observation() -> ViewerObservation {
-    ViewerObservation {
-        dezoomify_viewer: ViewerPyramid {
-            source_url: "https://museum.test/art".into(),
-            handle: "123".into(),
-            levels: vec![ViewerLevel {
-                level: 7,
-                size: Size {
-                    width: 513,
-                    height: 257,
-                },
-                tile_size: Size {
-                    width: 256,
-                    height: 128,
-                },
-                overlap: Size {
-                    width: 0,
-                    height: 0,
-                },
-                grid_size: Size {
-                    width: 3,
-                    height: 3,
-                },
-            }],
-        },
+const PAGE: &str = "https://museum.test/art";
+
+fn pyramid() -> ViewerPyramid {
+    ViewerPyramid {
+        handle: "123".into(),
+        levels: vec![ViewerLevel {
+            level: 7,
+            size: Size {
+                width: 513,
+                height: 257,
+            },
+            tile_size: Size {
+                width: 256,
+                height: 128,
+            },
+            overlap: Size {
+                width: 0,
+                height: 0,
+            },
+            grid_size: Size {
+                width: 3,
+                height: 3,
+            },
+        }],
+    }
+}
+
+fn typed(url: &str, pyramid: ViewerPyramid) -> DiscoveryInput {
+    DiscoveryInput {
+        url: url.into(),
+        contents: None,
+        kind: DiscoveryInputKind::ObservedViewer,
+        viewer: Some(pyramid),
     }
 }
 
 fn discover(
-    observation: ViewerObservation,
+    pyramid: ViewerPyramid,
+) -> Result<dezoomify::core::DiscoveryCatalog, dezoomify::core::DiscoveryError> {
+    discover_at(PAGE, pyramid)
+}
+
+fn discover_at(
+    url: &str,
+    pyramid: ViewerPyramid,
 ) -> Result<dezoomify::core::DiscoveryCatalog, dezoomify::core::DiscoveryError> {
     support::discover_inputs(
         default_registry(),
-        vec![
-            DiscoveryInput::with_contents(
-                "https://museum.test/art#observed",
-                serde_json::to_vec(&observation).unwrap(),
-            )
-            .with_kind(DiscoveryInputKind::ObservedViewer),
-        ],
+        vec![typed(url, pyramid)],
         DiscoveryLimits::default(),
         |_| panic!("complete observations must not fetch metadata"),
     )
@@ -55,10 +64,35 @@ fn discover(
 }
 
 #[test]
+fn viewers_on_one_page_stay_distinct_and_duplicates_do_not_add_choices() {
+    let mut second = pyramid();
+    second.handle = "456".into();
+    let (catalog, requests) = support::discover_inputs(
+        default_registry(),
+        vec![
+            typed(PAGE, pyramid()),
+            typed(PAGE, second),
+            typed(PAGE, pyramid()),
+        ],
+        DiscoveryLimits::default(),
+        |uri| panic!("typed observations must not fetch: {uri}"),
+    );
+    let catalog = catalog.unwrap();
+    assert_eq!(catalog.len(), 2);
+    assert!(
+        catalog
+            .entries()
+            .iter()
+            .all(|entry| matches!(entry, dezoomify::core::DiscoveredEntry::Ready(image) if image.format == "viewer"))
+    );
+    assert!(requests.is_empty());
+}
+
+#[test]
 fn live_grids_share_edge_geometry_and_keep_the_viewer_canonical() {
-    let image = support::ready_image(discover(observation()).unwrap());
+    let image = support::ready_image(discover(pyramid()).unwrap());
     assert_eq!(image.format, "viewer");
-    assert_eq!(image.source_url.as_deref(), Some("https://museum.test/art"));
+    assert_eq!(image.source_url.as_deref(), Some(PAGE));
     let dezoomify::core::TileSource::Grid(grid) = &image.levels[0].source else {
         panic!("viewer grid")
     };
@@ -71,7 +105,7 @@ fn live_grids_share_edge_geometry_and_keep_the_viewer_canonical() {
         tiles[8].source,
         TileSource::Viewer(ViewerTileRequest {
             handle: "123".into(),
-            source_url: "https://museum.test/art".into(),
+            source_url: PAGE.into(),
             level: 7,
             column: 2,
             row: 2,
@@ -88,11 +122,7 @@ fn complete_format_metadata_keeps_loader_only_siblings_without_fetching() {
     let (catalog, requests) = support::discover_inputs(
         default_registry(),
         vec![
-            DiscoveryInput::with_contents(
-                "https://museum.test/art#observed",
-                serde_json::to_vec(&observation()).unwrap(),
-            )
-            .with_kind(DiscoveryInputKind::ObservedViewer),
+            typed(PAGE, pyramid()),
             DiscoveryInput::new("https://museum.test/image/info.json")
                 .with_kind(DiscoveryInputKind::ObservedResource),
             DiscoveryInput::new("https://museum.test/image/0,0,256,256/256,256/0/default.png")
@@ -127,11 +157,7 @@ fn live_sources_precede_weak_resource_reads() {
         include_bytes!("../../../fixtures/deepzoom/basic/image.dzi"),
     )
     .with_kind(DiscoveryInputKind::ObservedMetadata);
-    let viewer = DiscoveryInput::with_contents(
-        "https://museum.test/art#viewer",
-        serde_json::to_vec(&observation()).unwrap(),
-    )
-    .with_kind(DiscoveryInputKind::ObservedViewer);
+    let viewer = typed(PAGE, pyramid());
     for (expected, live) in [
         ("deepzoom", Some(metadata)),
         ("viewer", Some(viewer)),
@@ -192,11 +218,7 @@ fn recognized_metadata_precedes_a_live_loader_and_failure_keeps_the_loader_avail
         let (result, requests) = support::discover_inputs(
             default_registry(),
             vec![
-                DiscoveryInput::with_contents(
-                    "https://museum.test/art#observed",
-                    serde_json::to_vec(&observation()).unwrap(),
-                )
-                .with_kind(DiscoveryInputKind::ObservedViewer),
+                typed(PAGE, pyramid()),
                 DiscoveryInput::new(uri).with_kind(DiscoveryInputKind::ObservedResource),
             ],
             Default::default(),
@@ -226,16 +248,21 @@ fn inconsistent_or_unbounded_observations_are_rejected() {
         "capability",
         "levels",
     ] {
-        let mut observation = observation();
-        let pyramid = &mut observation.dezoomify_viewer;
+        let mut pyramid = pyramid();
         match invalid {
             "grid" => pyramid.levels[0].grid_size.width = 2,
             "size" => pyramid.levels[0].tile_size.height = 0,
             "duplicates" => pyramid.levels.push(pyramid.levels[0].clone()),
-            "foreign" => pyramid.source_url = "file:///private".into(),
-            "capability" => pyramid.handle = "https://museum.test/art".into(),
+            "foreign" => {
+                assert!(
+                    discover_at("file:///private", pyramid.clone()).is_err(),
+                    "{invalid}"
+                );
+                continue;
+            }
+            "capability" => pyramid.handle = PAGE.into(),
             _ => pyramid.levels = vec![pyramid.levels[0].clone(); 65],
         }
-        assert!(discover(observation).is_err(), "{invalid}");
+        assert!(discover(pyramid).is_err(), "{invalid}");
     }
 }

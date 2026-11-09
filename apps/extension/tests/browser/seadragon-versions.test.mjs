@@ -70,19 +70,19 @@ async function tileResponse(route) {
 }
 
 async function acquireTiles(page, input) {
-  const source = JSON.parse(input.contents).dezoomify_viewer;
+  const source = input.viewer;
   // Read the full-resolution grid and one fractional-size lower level.
   const levels = source.levels.filter((grid) => [8, 10].includes(grid.level));
   for (const grid of levels) {
     for (let row = 0; row < grid.grid_size.height; row++) {
       for (let column = 0; column < grid.grid_size.width; column++) {
-        await acquireTile(page, source, grid, column, row);
+        await acquireTile(page, input.url, source, grid, column, row);
       }
     }
   }
 }
 
-async function acquireTile(page, source, grid, column, row) {
+async function acquireTile(page, sourceUrl, source, grid, column, row) {
   const left = Math.max(0, column * grid.tile_size.width - grid.overlap.width);
   const top = Math.max(0, row * grid.tile_size.height - grid.overlap.height);
   const width =
@@ -90,16 +90,16 @@ async function acquireTile(page, source, grid, column, row) {
   const height =
     Math.min(grid.size.height, (row + 1) * grid.tile_size.height + grid.overlap.height) - top;
   const result = await page.evaluate(
-    ({ source, grid, column, row, width, height }) =>
+    ({ source, sourceUrl, grid, column, row, width, height }) =>
       Promise.resolve(
         ViewerScanner.readViewerTile(
-          { handle: source.handle, source_url: source.source_url, level: grid.level, column, row },
+          { handle: source.handle, source_url: sourceUrl, level: grid.level, column, row },
           { width, height },
         ),
       ).then((value) =>
         value.ok && value.buffer ? { ...value, buffer: [...new Uint8Array(value.buffer)] } : value,
       ),
-    { source, grid, column, row, width, height },
+    { source, sourceUrl, grid, column, row, width, height },
   );
   assert.equal(result.ok, true, JSON.stringify(result));
   const bytes = result.url
@@ -154,10 +154,10 @@ async function checkObservation(page, runtime, mode) {
 }
 
 async function checkSession(page, input, mode) {
-  const source = JSON.parse(input.contents).dezoomify_viewer;
+  const source = input.viewer;
   const request = {
     handle: source.handle,
-    source_url: source.source_url,
+    source_url: input.url,
     level: 10,
     column: 0,
     row: 0,
