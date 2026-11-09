@@ -115,7 +115,8 @@ export interface ScanResult {
   inputs: ObservedInput[];
   images: LoadedImage[];
   handles: string[];
-  /** Job-scoped page listener for live tile requests; absent if no live handles. */
+  /** Job-scoped page channel for live tile requests, generated and attached
+   * by the host after a scan finds handles; absent if it found none. */
   channelId?: string;
   diagnostics: ScanDiagnostics;
 }

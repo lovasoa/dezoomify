@@ -5,11 +5,13 @@ import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import { chromium, firefox } from "playwright";
 
+const pageAgent = fileURLToPath(new URL("../../../../packages/page-agent/src", import.meta.url));
 const bundle = await build({
   stdin: {
-    contents: `export {openTileSource,readViewerTile,releaseViewerTiles} from './openseadragon/session.ts';
-export {listenViewerChannel,registerViewer} from './viewers/session.ts';`,
-    resolveDir: fileURLToPath(new URL("../../../../packages/page-agent/src", import.meta.url)),
+    contents: `export {openTileSource,readViewerTile,releaseViewerTiles} from '${pageAgent}/openseadragon/session.ts';
+export {registerViewer} from '${pageAgent}/viewers/session.ts';
+export {attachViewerTransport} from '${fileURLToPath(new URL("../../src/viewer-transport.ts", import.meta.url))}';`,
+    resolveDir: pageAgent,
   },
   bundle: true,
   write: false,
@@ -127,7 +129,13 @@ async function loadFixture(mode) {
   const request = { handle, source_url: location.href, level: 8, column: 0, row: 0 };
   const extent = { width: 256, height: 256 };
   const channelId = crypto.randomUUID();
-  TileSession.listenViewerChannel(channelId, [handle]);
+  // Attach the extension transport exactly as the scanner entrypoint does,
+  // so the listener shares this injection's loader map.
+  TileSession.attachViewerTransport(channelId, {
+    handles: [handle],
+    read: TileSession.readViewerTile,
+    dispose: () => TileSession.releaseViewerTiles([handle]),
+  });
   // Stand in for the isolated bridge: hand over a MessagePort and speak the
   // channel protocol over it exactly as the extension does.
   const channel = new MessageChannel();

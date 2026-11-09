@@ -27,7 +27,8 @@ interface Session {
 }
 
 /** Loader closures belong to this scanner injection, not to the page's global
- * object. A job-scoped message listener below is the only way back in. */
+ * object. A host-attached channel in the same injection is the only way back
+ * in; callers must wire one per scan to keep its loaders reachable. */
 const loaders = new Map<string, Session>();
 export type ViewerTile = { image: unknown; owned?: boolean } | { url: string };
 export type ViewerLoader = (
@@ -118,79 +119,4 @@ export function releaseViewerTiles(handles: string[]): void {
     loaders.delete(handle);
     session.lifetime.abort();
   }
-}
-
-/** How long a scanned session waits for its channel before retiring itself. */
-const CLAIM_TIMEOUT_MS = 30_000;
-
-/** One job-scoped listener owns the captured viewer loaders. The isolated
- * bridge hands over a MessagePort through one window message; tile bytes then
- * cross worlds as transferred ArrayBuffers. A session that no bridge claims
- * retires itself, and closing the port releases the scan's handles. */
-export function listenViewerChannel(channelId: string, handles: string[]): void {
-  const owned = new Set(handles);
-  let port: MessagePort | undefined;
-  let closed = false;
-  const claim = setTimeout(close, CLAIM_TIMEOUT_MS);
-
-  function close(): void {
-    if (closed) return;
-    closed = true;
-    clearTimeout(claim);
-    window.removeEventListener("message", onHandoff);
-    port?.close();
-    releaseViewerTiles(handles);
-  }
-
-  const onHandoff = (event: MessageEvent) => {
-    // An isolated extension world can deliver the handoff with a null source.
-    if (event.source !== window && event.source !== null) return;
-    const handed = event.ports[0];
-    if (event.data !== channelId || !handed) return;
-    window.removeEventListener("message", onHandoff);
-    clearTimeout(claim);
-    port = handed;
-    port.onmessage = onMessage;
-    port.postMessage({ type: "ready", documentUrl: location.href });
-  };
-
-  const onMessage = (event: MessageEvent) => {
-    const message = event.data as Record<string, unknown> | null;
-    if (!message || typeof message !== "object") return;
-    if (message.type === "close") {
-      const id = Number.isSafeInteger(message.id) ? (message.id as number) : 0;
-      releaseViewerTiles(handles);
-      port?.postMessage({ type: "result", id, result: { ok: true } });
-      close();
-      return;
-    }
-    const request = message.request as ViewerTileRequest | null;
-    if (
-      message.type !== "read-tile" ||
-      !Number.isSafeInteger(message.id) ||
-      !request ||
-      typeof request !== "object" ||
-      !owned.has(request.handle)
-    )
-      return;
-    void Promise.resolve()
-      .then(() => readViewerTile(request, message.extent as Size))
-      .catch(
-        (cause: unknown): ViewerTileResult => ({
-          ok: false,
-          error: errorPayload(
-            isJobError(cause)
-              ? cause
-              : new InternalError(`Invalid viewer request: ${unknownDetail(cause)}`),
-          ),
-        }),
-      )
-      .then((result) => {
-        if (closed) return;
-        const transfer = result.ok && "buffer" in result ? [result.buffer] : [];
-        port?.postMessage({ type: "result", id: message.id, result }, transfer);
-      });
-  };
-
-  window.addEventListener("message", onHandoff);
 }
