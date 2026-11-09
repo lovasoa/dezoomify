@@ -289,9 +289,10 @@ export const it = {
     "Questa attività non è più attiva da {host}. Ricomincia con un indirizzo nuovo.",
   "desktop.msg.thisPicture": "questa immagine",
   "desktop.msg.dimsPixels": "{a} per {b} pixel",
-  "desktop.msg.needAbout": " Serve circa {need} di memoria",
   "desktop.output.canvasLimit":
-    "Questa immagine richiede più memoria di quella disponibile ({dims},{need}; limite {limit}). Salva una versione più piccola con Larghezza max (CLI: --max-width), oppure scegli una cartella di tessere. Da {host}.",
+    "L’elaborazione di questa immagine ha superato il limite di memoria dell’app. Questo limite è distinto dalla memoria totale del computer. Prova una dimensione più piccola nel menu Dimensione oppure scegli il formato cartella di tessere IIIF.",
+  "view.fail.memoryLimit":
+    "L’elaborazione di questa immagine ha superato il limite di memoria. Prova una dimensione più piccola e scaricala di nuovo.",
   "desktop.tile.failed":
     "Impossibile recuperare un frammento da {host}. Controlla l’immagine originale e riprova.",
   "view.discovery.none":
