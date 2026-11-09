@@ -122,7 +122,7 @@ for (const [name, engine] of [
               width: fixture.tileSize,
               height: fixture.tileSize,
             });
-            assert.equal(observed.source_url, page.url());
+            assert.equal(result.inputs[0].url, page.url());
             assert.deepEqual(result.handles, [observed.handle]);
             const loaded = await page.evaluate(
               async ({ handle, level, size, tileSize }) => {

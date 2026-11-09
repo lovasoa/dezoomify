@@ -579,12 +579,11 @@ pub struct JobInput {
 /// sources are available under the requested interaction policy.
 pub type JobInputs = Vec<JobInput>;
 
-/// The reusable source is the viewer page. The opaque handle names an owned
-/// loader capability scoped to that exact document and job.
+/// The enclosing input's `url` names the viewer page. The opaque handle names
+/// an owned loader capability scoped to that exact document and job.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub struct ViewerPyramid {
-    pub source_url: String,
     pub handle: String,
     pub levels: Vec<ViewerLevel>,
 }
@@ -1785,7 +1784,6 @@ mod tests {
             contents: None,
             kind: Some(DiscoveryInputKind::ObservedViewer),
             viewer: Some(ViewerPyramid {
-                source_url: "https://museum.test/art".into(),
                 handle: "123".into(),
                 levels: Vec::new(),
             }),

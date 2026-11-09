@@ -111,9 +111,6 @@ function validCandidate(value: unknown): value is JobInput {
 function validViewerPayload(viewer: unknown): boolean {
   return (
     isRecord(viewer) &&
-    typeof viewer.source_url === "string" &&
-    viewer.source_url.length <= MAX_URL_LENGTH &&
-    isPublicHttpUrl(viewer.source_url) &&
     typeof viewer.handle === "string" &&
     /^[\w-]{1,128}$/.test(viewer.handle) &&
     Array.isArray(viewer.levels) &&

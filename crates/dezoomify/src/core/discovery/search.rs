@@ -109,7 +109,7 @@ impl Search {
         let mut accepted = false;
         for mut input in inputs {
             if let Some(pyramid) = input.viewer.take() {
-                accepted |= self.observe_viewer(pyramid, specs)?;
+                accepted |= self.observe_viewer(&input.url, pyramid, specs)?;
                 continue;
             }
             let specificity = input_specificity(&input);
@@ -125,8 +125,10 @@ impl Search {
 
     /// Compile a typed live-viewer observation immediately. Observations are
     /// never fetched and match no URL evidence; each handle contributes once.
+    /// The input's `url` names the page that supplied the pyramid.
     fn observe_viewer(
         &mut self,
+        source_url: &str,
         pyramid: ViewerPyramid,
         specs: &[FormatSpec],
     ) -> Result<bool, DiscoveryError> {
@@ -153,12 +155,8 @@ impl Search {
         // rank as if consumed through one read hop, so pending concrete
         // metadata at the same strength still outranks and delays them.
         let priority = Priority(Specificity::Medium, 1, self.order, index);
-        let ViewerPyramid {
-            source_url,
-            handle,
-            levels,
-        } = pyramid;
-        match compile_pyramid(&source_url, handle, levels) {
+        let ViewerPyramid { handle, levels } = pyramid;
+        match compile_pyramid(source_url, handle, levels) {
             Ok(parsed) => {
                 self.accept(Branch {
                     spec,

@@ -612,19 +612,18 @@ export interface LimitContext {
 }
 
 /**
- * The meaning of the existing compression setting for a codec.
- */
-export type OutputControl = { kind: "quality"; minimum: number; warning_below: number } | { kind: "effort" } | { kind: "none" };
-
-/**
- * The reusable source is the viewer page. The opaque handle names an owned
- * loader capability scoped to that exact document and job.
+ * The enclosing input's `url` names the viewer page. The opaque handle names
+ * an owned loader capability scoped to that exact document and job.
  */
 export interface ViewerPyramid {
-    source_url: string;
     handle: string;
     levels: ViewerLevel[];
 }
+
+/**
+ * The meaning of the existing compression setting for a codec.
+ */
+export type OutputControl = { kind: "quality"; minimum: number; warning_below: number } | { kind: "effort" } | { kind: "none" };
 
 /**
  * The shared failure context, defined once instead of per variant:

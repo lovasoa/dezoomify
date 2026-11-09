@@ -19,7 +19,6 @@ const viewerObservation = (handle, url) => ({
   url,
   viewer: {
     handle,
-    source_url: url,
     levels: [
       {
         level: 0,

@@ -53,7 +53,7 @@ export function registerViewer(
     input: {
       kind: "observed-viewer",
       url: context.documentUrl,
-      viewer: { source_url: context.documentUrl, handle: id, levels },
+      viewer: { handle: id, levels },
     },
   };
 
