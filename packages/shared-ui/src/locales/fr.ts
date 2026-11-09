@@ -288,9 +288,10 @@ export const fr = {
     "Cette tâche n’est plus active depuis {host}. Recommencez avec une adresse récente.",
   "desktop.msg.thisPicture": "cette image",
   "desktop.msg.dimsPixels": "{a} par {b} pixels",
-  "desktop.msg.needAbout": " Elle a besoin d’environ {need} de mémoire",
   "desktop.output.canvasLimit":
-    "Cette image nécessite plus de mémoire que la quantité disponible ({dims},{need} ; limite {limit}). Enregistrez une version plus petite avec Largeur max (CLI : --max-width), ou choisissez un dossier de tuiles. Depuis {host}.",
+    "Le traitement de cette image a dépassé la limite de mémoire de l’application. Cette limite est distincte de la mémoire totale de votre ordinateur. Essayez une taille plus petite dans le menu Taille, ou choisissez le format dossier de tuiles IIIF.",
+  "view.fail.memoryLimit":
+    "Le traitement de cette image a dépassé la limite de mémoire. Essayez une taille d’image plus petite et relancez le téléchargement.",
   "desktop.tile.failed":
     "Impossible de récupérer un fragment depuis {host}. Vérifiez l’image source et réessayez.",
   "view.discovery.none":
