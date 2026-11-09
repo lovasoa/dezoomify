@@ -8,6 +8,7 @@ import {
   isJobError,
   plainMessageFor,
 } from "../packages/shared-ui/src/failure.ts";
+import { setLocale } from "../packages/shared-ui/src/i18n.ts";
 import {
   presentFailure,
   presentIdle,
@@ -45,6 +46,27 @@ test("codec dimension failures use the registry for validation and guidance", ()
     isJobError({ kind: "limit-exceeded", limit: { reason: { "codec-side": "unknown" } } }),
     false,
   );
+});
+
+test("memory limit guidance explains the desktop budget and offers relevant recovery", () => {
+  const error = {
+    kind: "limit-exceeded",
+    limit: { reason: "memory", bytes_required: 2725716617, bytes_available: 2713193676 },
+  };
+  setLocale("fr");
+  try {
+    const desktop = plainMessageFor(error, "museum.test", "desktop");
+    assert.match(desktop, /limite de mémoire de l’application/);
+    assert.match(desktop, /mémoire totale de votre ordinateur/);
+    assert.match(desktop, /menu Taille/);
+    assert.match(desktop, /tuiles IIIF/);
+    assert.doesNotMatch(desktop, /2\.5 GiB|cette image,|JPEG/);
+    const website = plainMessageFor(error, "museum.test", "website");
+    assert.match(website, /taille d’image plus petite/);
+    assert.doesNotMatch(website, /tuiles IIIF/);
+  } finally {
+    setLocale("en");
+  }
 });
 
 test("native output preparation uses pixel progress and does not pause compression", () => {

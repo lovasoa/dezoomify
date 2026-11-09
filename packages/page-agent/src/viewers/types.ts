@@ -1,4 +1,4 @@
-import type { ObservedInput } from "@dezoomify/wasm-bindings";
+import type { JobInput } from "@dezoomify/wasm-bindings";
 /** Candidate original image discovered in an inspected viewer. */
 export interface LoadedImage {
   url: string;
@@ -6,7 +6,7 @@ export interface LoadedImage {
   height: number;
 }
 
-export type ViewerEvidence = { input: ObservedInput; handle?: string } | { image: LoadedImage };
+export type ViewerEvidence = { input: JobInput } | { image: LoadedImage };
 
 export interface SourceGeometry {
   width: number;
@@ -112,7 +112,7 @@ export interface ScanDiagnostics {
 export interface ScanResult {
   ok: true;
   documentUrl: string;
-  inputs: ObservedInput[];
+  inputs: JobInput[];
   images: LoadedImage[];
   handles: string[];
   /** Job-scoped page channel for live tile requests, generated and attached

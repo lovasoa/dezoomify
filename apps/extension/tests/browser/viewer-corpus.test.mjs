@@ -115,14 +115,14 @@ for (const [name, engine] of [
               `${fixture.name}: ${JSON.stringify(result.diagnostics)}`,
             );
             assert.equal(result.inputs[0].kind, "observed-viewer");
-            const observed = JSON.parse(result.inputs[0].contents).dezoomify_viewer;
+            const observed = result.inputs[0].viewer;
             const largest = observed.levels.at(-1);
             assert.deepEqual(largest.size, { width: fixture.width, height: fixture.height });
             assert.deepEqual(largest.tile_size, {
               width: fixture.tileSize,
               height: fixture.tileSize,
             });
-            assert.equal(observed.source_url, page.url());
+            assert.equal(result.inputs[0].url, page.url());
             assert.deepEqual(result.handles, [observed.handle]);
             const loaded = await page.evaluate(
               async ({ handle, level, size, tileSize }) => {

@@ -379,9 +379,10 @@ const en = {
   "desktop.job.gone": "This job is no longer active from {host}. Start again with a fresh address.",
   "desktop.msg.thisPicture": "this picture",
   "desktop.msg.dimsPixels": "{a} by {b} pixels",
-  "desktop.msg.needAbout": " It needs about {need} of memory",
   "desktop.output.canvasLimit":
-    "This picture needs more memory than is available ({dims},{need}; limit {limit}). Save a smaller version with Max width (CLI: --max-width), or choose a tile folder. From {host}.",
+    "Processing this image exceeded the app’s memory limit. This limit is separate from your computer’s total RAM. Try a smaller size in the Size menu, or choose the IIIF tile folder format.",
+  "view.fail.memoryLimit":
+    "Processing this image exceeded the memory limit. Try a smaller image size and download it again.",
   "desktop.output.codecLimit":
     "This picture ({dims}) is too large for {format}, which allows at most {maxSide} pixels per side. Save it as PNG instead. From {host}.",
   "desktop.tile.failed":

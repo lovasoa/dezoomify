@@ -7,16 +7,6 @@ import { outputCodecs } from "@dezoomify/wasm-bindings/codecs";
 import { type I18nKey, t } from "./i18n.ts";
 import type { ViewContext } from "./view-types.ts";
 
-// Human-readable byte counts for limit copy (exact bytes plus a
-// GiB/MiB approximation).
-function formatBytes(bytes: number): string {
-  const GIB = 1024 ** 3;
-  const MIB = 1024 ** 2;
-  if (bytes >= GIB) return `${(bytes / GIB).toFixed(1)} GiB (${bytes} bytes)`;
-  if (bytes >= MIB) return `${(bytes / MIB).toFixed(1)} MiB (${bytes} bytes)`;
-  return `${bytes} bytes`;
-}
-
 /**
  * One headline key per error kind; adding a Rust variant makes this record
  * incomplete until it is listed. Kinds whose copy needs extra facts resolve
@@ -323,7 +313,7 @@ export function plainMessageFor(
   switch (cause.kind) {
     // Structured limit facts come from `limit`; display prose is never parsed.
     case "limit-exceeded":
-      return limitMessage(cause.limit, host);
+      return limitMessage(cause.limit, host, product);
     case "rate-limited":
       return t(rateKey(cause.transport));
     case "http-error": {
@@ -346,6 +336,7 @@ export function plainMessageFor(
 function limitMessage(
   limit: Extract<JobError, { kind: "limit-exceeded" }>["limit"],
   host: string,
+  product: ViewContext["product"],
 ): string {
   const dims = limit.dimensions
     ? t("desktop.msg.dimsPixels", {
@@ -353,14 +344,6 @@ function limitMessage(
         b: String(limit.dimensions.height),
       })
     : t("desktop.msg.thisPicture");
-  const need =
-    limit.bytes_required !== undefined
-      ? t("desktop.msg.needAbout", { need: formatBytes(limit.bytes_required) })
-      : "";
-  const available =
-    limit.bytes_available !== undefined
-      ? formatBytes(limit.bytes_available)
-      : "currently available memory";
   const format = limit.reason === "memory" ? null : limit.reason["codec-side"];
   const codec = outputCodecs.find((codec) => codec.format === format);
   if (codec?.max_side) {
@@ -371,12 +354,7 @@ function limitMessage(
       host,
     });
   }
-  return t("desktop.output.canvasLimit", {
-    dims,
-    need,
-    limit: available,
-    host,
-  });
+  return t(product === "desktop" ? "desktop.output.canvasLimit" : "view.fail.memoryLimit");
 }
 
 function httpMessage(
