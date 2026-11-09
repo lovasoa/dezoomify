@@ -73,7 +73,7 @@ impl NativeHost<'_> {
             return Ok(None);
         }
         let pixels = self.tile(&ResourceTile::try_from(tile.clone())?).await?;
-        let image = &pixels.decoded.image;
+        let image = &pixels.image;
         if image.width() < size.width || image.height() < size.height {
             return Ok(None);
         }

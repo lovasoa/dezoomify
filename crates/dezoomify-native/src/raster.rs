@@ -1,8 +1,8 @@
-//! Concrete encoder worker: own contiguous strips, then read and compress.
+//! Encoder worker: read immutable strips from disk staging and compress them.
 use crate::{
     host::Controls,
     output::StagedFile,
-    pixel_pipe::{MemoryBudget, PixelPipe, PixelStrip},
+    pixel_pipe::{PixelPipe, PixelStrip},
 };
 use dezoomify::model::{Error, OutputFormat, OutputLayout, Size};
 use std::{
@@ -22,21 +22,28 @@ impl EncoderTask {
         size: Size,
         format: OutputFormat,
         compression: u8,
-        budget: Arc<MemoryBudget>,
+        memory_hint: u64,
         controls: Controls,
     ) -> Result<Self, Error> {
         if size.width == 0 || size.height == 0 {
             return Err(Error::InvalidState("empty raster dimensions".into()));
         }
         crate::imaging::check_dimensions(format, &size)?;
-        let pipe = PixelPipe::new(size.clone(), budget);
-        let work = crate::imaging::encoder_workspace(format, &size);
-        let workspace = pipe.budget.reserve(work)?;
+        if format.codec().layout == OutputLayout::Buffered {
+            crate::tile_output::memory_check(
+                crate::imaging::encoder_workspace(format, &size),
+                memory_hint,
+            )?;
+        }
+        let directory = destination
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
+        let pipe = PixelPipe::new(size, directory)?;
         let staging = StagedFile::new(destination)?;
         controls.watch(&pipe);
         let reader = Arc::clone(&pipe);
         let task = tokio::task::spawn_blocking(move || {
-            let _workspace = workspace;
             let result = encode(staging, &reader, format, compression, &controls);
             if let Err(error) = &result {
                 reader.fail(error.clone());
@@ -255,10 +262,6 @@ fn encode(
     if matches!(format, OutputFormat::Png | OutputFormat::Jpeg)
         && (icc.is_some() || (format == OutputFormat::Png && exif.is_some()))
     {
-        let metadata_bytes = icc.as_ref().map_or(0, Vec::len) + exif.as_ref().map_or(0, Vec::len);
-        let _metadata_memory = pipe
-            .budget
-            .reserve(metadata_bytes as u64 * 4 + (128 << 10))?;
         let bytes = metadata_header(format, icc.as_deref(), exif.as_deref())?;
         let offset = if format == OutputFormat::Png {
             33
@@ -424,10 +427,7 @@ mod tests {
     use super::*;
     use crate::{
         imaging::DecodedTile,
-        pixel_pipe::{
-            tests::{placement, put},
-            ReceivedPixels,
-        },
+        pixel_pipe::tests::{placement, put},
     };
     fn raster_formats() -> impl Iterator<Item = OutputFormat> {
         dezoomify::model::OUTPUT_CODECS
@@ -473,7 +473,7 @@ mod tests {
         } else {
             8 << 20
         };
-        EncoderTask::start(path, size, format, 5, MemoryBudget::new(cap), controls).unwrap()
+        EncoderTask::start(path, size, format, 5, cap, controls).unwrap()
     }
     async fn publish(task: EncoderTask, destination: &Path) -> Vec<u8> {
         task.pipe.finish(&[]).unwrap();
@@ -493,6 +493,44 @@ mod tests {
             )
             .unwrap();
         std::fs::read(destination).unwrap()
+    }
+
+    #[tokio::test]
+    async fn reversed_tiles_encode_png_without_a_raster_memory_budget() {
+        let directory = directory();
+        let destination = directory.join("reversed.png");
+        let source = image::RgbaImage::from_fn(1024, 1024, |x, y| {
+            image::Rgba([x as u8, y as u8, (x ^ y) as u8, 255])
+        });
+        let task = EncoderTask::start(
+            &destination,
+            Size {
+                width: 1024,
+                height: 1024,
+            },
+            OutputFormat::Png,
+            5,
+            1,
+            Controls::default(),
+        )
+        .unwrap();
+        for y in (0..1024).step_by(256).rev() {
+            for x in (0..1024).step_by(256).rev() {
+                put(
+                    &task.pipe,
+                    y * 1024 + x,
+                    x,
+                    y,
+                    image::imageops::crop_imm(&source, x, y, 256, 256).to_image(),
+                );
+            }
+        }
+        let bytes = publish(task, &destination).await;
+        assert_eq!(
+            image::load_from_memory(&bytes).unwrap().into_rgba8(),
+            source
+        );
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[tokio::test]
@@ -526,15 +564,11 @@ mod tests {
                     .place(
                         x,
                         &placement(x, 0),
-                        ReceivedPixels::new(
-                            DecodedTile {
-                                image: image::imageops::crop_imm(&source, x, 0, 1, 1).to_image(),
-                                icc_profile: (x == 1).then(|| icc.clone()),
-                                exif_metadata: (x == 0).then(|| exif.clone()),
-                            },
-                            task.pipe.budget.reserve(4).unwrap(),
-                        )
-                        .unwrap(),
+                        DecodedTile {
+                            image: image::imageops::crop_imm(&source, x, 0, 1, 1).to_image(),
+                            icc_profile: (x == 1).then(|| icc.clone()),
+                            exif_metadata: (x == 0).then(|| exif.clone()),
+                        },
                     )
                     .unwrap();
             }
@@ -603,7 +637,6 @@ mod tests {
                     Controls::default(),
                 );
                 let pipe = Arc::clone(&task.pipe);
-                let budget = Arc::clone(&pipe.budget);
                 for y in (0..height).step_by(5).collect::<Vec<_>>().into_iter().rev() {
                     for x in (0..width).step_by(5).collect::<Vec<_>>().into_iter().rev() {
                         put(
@@ -657,15 +690,6 @@ mod tests {
                 assert_eq!(pipe.queued_strips(), 0);
                 assert_eq!(pipe.consumed(), u64::from(width) * u64::from(height));
                 drop(pipe);
-                assert_eq!(budget.current(), 0, "all allocations released");
-                assert!(
-                    budget.peak()
-                        <= if format.codec().layout == OutputLayout::Buffered {
-                            32 << 20
-                        } else {
-                            8 << 20
-                        }
-                );
             }
         }
         std::fs::remove_dir_all(directory).unwrap();
@@ -709,7 +733,6 @@ mod tests {
         let directory = directory();
         for compression in [0, 5, 99, 100] {
             let destination = directory.join(format!("quality-{compression}.avif"));
-            let budget = MemoryBudget::new(32 << 20);
             let task = EncoderTask::start(
                 &destination,
                 Size {
@@ -718,7 +741,7 @@ mod tests {
                 },
                 OutputFormat::Avif,
                 compression,
-                Arc::clone(&budget),
+                32 << 20,
                 Controls::default(),
             )
             .unwrap();
@@ -751,7 +774,6 @@ mod tests {
                     );
                 }
             }
-            assert_eq!(budget.current(), 0);
         }
         std::fs::remove_dir_all(directory).unwrap();
     }

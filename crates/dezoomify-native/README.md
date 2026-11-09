@@ -7,13 +7,15 @@ Desktop acquisitions await user approval before optional retries.
 
 ## Memory and output
 
-Raster encoding can run while tiles arrive. Keep composition on producer-owned
-pixels: the encoder reads exclusively owned strips without per-pixel locking.
-Unknown geometry and automatic format selection can require more buffering;
-explicit output formats can reduce memory use.
+Raster composition uses a private disk-backed canvas beside the destination.
+The OS caches file pages; only active tiles and the encoder's current strip
+need application buffers. Completed strips freeze before encoding, so downloads
+can arrive out of order without waiting for the encoder or retaining queued pixels
+in RAM. Probes and automatic-format tiles also spool to disk until output starts.
+Temporary storage must accommodate uncompressed pixels as well as the output.
 
-Buffered codecs keep the complete RGBA image and encoded file before writing. Their memory
-reservation includes conservative codec headroom, not a hard process RSS limit.
+Buffered codecs keep the complete RGBA image and encoded file before writing. Their
+preflight memory estimate includes conservative codec headroom, not a hard RSS limit.
 The synchronous codec cannot be interrupted mid-encode; cancellation waits for
 the worker and prevents publication.
 
@@ -26,10 +28,10 @@ entry to `output_codecs!` in [`model.rs`](../dezoomify/src/model.rs), then run
 `cargo xtask bindings generate`. Override construction in [`imaging.rs`](src/imaging.rs)
 only when the encoder needs explicit quality settings or metadata handling.
 
-Do not wait for memory while holding acquisition slots. A missing early tile can
-block the encoder, so waiting would prevent the work needed to unblock it.
-Return the typed resource-limit failure instead. Reservations track owned working
-memory, not total process RSS.
+Raster staging uses fallible file I/O rather than memory mappings, preserving
+disk failures as ordinary output errors. Producers never wait for missing tiles
+or encoder capacity while holding acquisition slots. Cancellation wakes readers;
+settlement awaits owned workers before closing staging files.
 
 Tiled outputs preserve compatible compressed source bytes. Convert locally only
 when required by the chosen output; preserve failures in acquisition's retry

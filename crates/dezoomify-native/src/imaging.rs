@@ -43,7 +43,7 @@ pub(crate) fn encoder_workspace(format: OutputFormat, size: &Size) -> u64 {
 pub const MAX_CONCURRENT: usize = 16;
 
 /// Bytes currently available to the process according to the operating
-/// system. The native Host samples this to cap its invocation's RAM budget;
+/// system. The native Host samples this to guard buffered codecs and tiled output;
 /// availability can change after sampling. Returns zero if the system probe
 /// cannot be initialized.
 #[must_use]
