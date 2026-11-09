@@ -1,6 +1,11 @@
 import type { ObservedInput } from "@dezoomify/wasm-bindings";
-import type { LoadedImage } from "../loaded-image.ts";
-import type { ScanDiagnostics, ScanResult, StopReason, ViewerEvidence } from "./types.ts";
+import type {
+  LoadedImage,
+  ScanDiagnostics,
+  ScanResult,
+  StopReason,
+  ViewerEvidence,
+} from "./types.ts";
 
 export const scanLimits = {
   documents: 16,

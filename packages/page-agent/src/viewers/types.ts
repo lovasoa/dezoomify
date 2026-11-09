@@ -1,5 +1,10 @@
 import type { ObservedInput } from "@dezoomify/wasm-bindings";
-import type { LoadedImage } from "../loaded-image.ts";
+/** Candidate original image discovered in an inspected viewer. */
+export interface LoadedImage {
+  url: string;
+  width: number;
+  height: number;
+}
 
 export type ViewerEvidence = { input: ObservedInput; handle?: string } | { image: LoadedImage };
 
@@ -110,6 +115,9 @@ export interface ScanResult {
   inputs: ObservedInput[];
   images: LoadedImage[];
   handles: string[];
+  /** Job-scoped page channel for live tile requests, generated and attached
+   * by the host after a scan finds handles; absent if it found none. */
+  channelId?: string;
   diagnostics: ScanDiagnostics;
 }
 

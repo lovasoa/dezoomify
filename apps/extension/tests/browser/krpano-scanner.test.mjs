@@ -6,7 +6,9 @@ import { chromium, firefox } from "playwright";
 
 const scanner = (
   await build({
-    entryPoints: [new URL("../../src/job/viewer-scanner.ts", import.meta.url).pathname],
+    entryPoints: [
+      new URL("../../../../packages/page-agent/src/viewer-scanner.ts", import.meta.url).pathname,
+    ],
     bundle: true,
     write: false,
     format: "iife",

@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@dezoomify/browser-runtime": "workspace:*",
+    "@dezoomify/page-agent": "workspace:*",
     "@dezoomify/shared-ui": "workspace:*",
     "@dezoomify/wasm-bindings": "workspace:*",
     "react": "^19.3.1",

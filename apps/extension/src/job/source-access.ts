@@ -26,7 +26,7 @@ import { transportError } from "../runtime/fetch.ts";
 import { findImageDownloadLink, findLoadedImage, type LoadedImage } from "./loaded-image.ts";
 import { cancelSourceFetch, fetchSource, inspectSourceDocument } from "./source-operations.ts";
 import { collectCandidates, type SourceSnapshot, sourceSnapshotLimits } from "./source-snapshot.ts";
-import { readViewerTile, releaseViewerTiles } from "./viewers/session.ts";
+import { createViewerChannel, installViewerBridge } from "./viewer-channel.ts";
 
 type SourceApi = Pick<WxtBrowser, "tabs" | "scripting">;
 type SourceFrame = { frameId: number; documentUrl: string; token?: string; documentId?: string };
@@ -71,18 +71,11 @@ function viewerResource(uri: unknown): ResourceRequest {
 function viewerBytes(result: Record<string, unknown>): ArrayBuffer {
   if (
     result.ok !== true ||
-    typeof result.data !== "string" ||
-    result.data.length > MAX_BASE64_CHARS ||
-    !Number.isSafeInteger(result.bytes) ||
-    typeof result.bytes !== "number" ||
-    result.bytes < 0 ||
-    result.bytes > SOURCE_FETCH_BYTE_LIMIT
+    !(result.buffer instanceof ArrayBuffer) ||
+    result.buffer.byteLength > SOURCE_FETCH_BYTE_LIMIT
   )
     throw new InternalError("Invalid viewer tile byte payload");
-  const bytes = decodeBase64Payload(result.data, SOURCE_FETCH_BYTE_LIMIT);
-  if (!bytes || bytes.byteLength !== result.bytes)
-    throw new InternalError("Invalid viewer tile byte count");
-  return bytes.buffer as ArrayBuffer;
+  return result.buffer;
 }
 
 function sameDocumentUrl(a: string, b: string): boolean {
@@ -299,8 +292,11 @@ export function createSourceAccess(
   const sourceOrigin = originOfUrl(documentUrl);
   const rootFrame: SourceFrame = { frameId: 0, documentUrl };
   const sessionFrames = new Map<string, SourceFrame>([[sourceOrigin, rootFrame]]);
-  const tileFrames = new Map<string, SourceFrame>();
-  const singleImageFrames = new Map<SourceFrame, LoadedImage[]>();
+  type ViewerChannel = ReturnType<typeof createViewerChannel>;
+  // Handles route to their own channel, so concurrent scans of one frame can
+  // never answer for each other's viewers.
+  const tileChannels = new Map<string, ViewerChannel>();
+  const singleImageFrames = new Map<number, { frame: SourceFrame; images: LoadedImage[] }>();
   const timeoutMs = options.timeoutMs ?? 30_000;
   const lifetime = new AbortController();
   const onUpdated = (updatedTabId: number, changeInfo: { status?: string; url?: string }) => {
@@ -509,6 +505,60 @@ export function createSourceAccess(
     );
   }
 
+  /** Establish the frame's one Port only if a scan found live viewer handles.
+   * The initial scanner and bridge installations still use their existing
+   * document checks, and the Port handshake confirms the receiving document. */
+  async function connectFrameViewerChannel(
+    frame: SourceFrame,
+    reply: Record<string, unknown>,
+    signal: AbortSignal | undefined,
+    deadlineAt: number,
+  ): Promise<void> {
+    const channelId = reply.channelId;
+    if (typeof channelId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(channelId))
+      throw new InternalError("Invalid viewer channel ID");
+    const channel = await bounded(
+      async (owned) => {
+        await injectUnchecked(
+          { func: installViewerBridge, args: [channelId], world: "ISOLATED" },
+          owned,
+          undefined,
+          frame,
+        );
+        const port = browserApi.tabs.connect(tabId, {
+          ...(frame.documentId ? { documentId: frame.documentId } : { frameId: frame.frameId }),
+          name: `dezoomify-viewer:${channelId}`,
+        });
+        const connected = createViewerChannel(port, frame.documentUrl);
+        try {
+          const ready = await connected.ready;
+          if (
+            !isRecord(ready) ||
+            typeof ready.documentUrl !== "string" ||
+            !sameDocumentUrl(ready.documentUrl, frame.documentUrl)
+          )
+            throw lostFrame(frame);
+          return connected;
+        } catch (error) {
+          connected.dispose();
+          throw error;
+        }
+      },
+      signal,
+      undefined,
+      deadlineAt,
+    );
+    registerTileHandles(reply.handles, channel);
+  }
+
+  function registerTileHandles(handles: unknown, channel: ViewerChannel) {
+    if (!Array.isArray(handles) || handles.length > 100) return;
+    for (const handle of handles) {
+      if (typeof handle === "string" && /^[\w-]{1,128}$/.test(handle))
+        tileChannels.set(handle, channel);
+    }
+  }
+
   async function scan(signal?: AbortSignal, frame = rootFrame): Promise<CandidateSnapshot> {
     const scanDeadline = Date.now() + timeoutMs;
     let observed: ObservedInput[] = [];
@@ -523,7 +573,8 @@ export function createSourceAccess(
         frame,
       );
       ({ observed, images, memory } = memoryScanReply(reply));
-      rememberTileFrames(isRecord(reply) ? reply.handles : undefined, frame);
+      if (isRecord(reply) && Array.isArray(reply.handles) && reply.handles.length > 0)
+        await connectFrameViewerChannel(frame, reply, signal, scanDeadline);
     } catch (error) {
       // A memory scan is optional evidence; source loss/cancellation still
       // fails the following normal scan through the same lifetime guard.
@@ -546,7 +597,7 @@ export function createSourceAccess(
     if (!validSnapshot(snapshot, frame.documentUrl))
       throw transportError("bad-url", "invalid source scan result");
     assertLive();
-    singleImageFrames.set(frame, images);
+    singleImageFrames.set(frame.frameId, { frame, images });
     return {
       ...snapshot,
       inputs: [...snapshot.inputs, ...observed].map((input) =>
@@ -571,14 +622,6 @@ export function createSourceAccess(
       isRecord(result) && typeof result.documentUrl === "string" ? result.documentUrl : null;
     if (!resultDocumentUrl || !sameDocumentUrl(resultDocumentUrl, frame.documentUrl)) {
       throw lostFrame(frame);
-    }
-  }
-
-  function rememberTileFrames(handles: unknown, frame: SourceFrame) {
-    if (!Array.isArray(handles) || handles.length > 100) return;
-    for (const handle of handles) {
-      if (typeof handle === "string" && /^[\w-]{1,128}$/.test(handle))
-        tileFrames.set(handle, frame);
     }
   }
 
@@ -818,26 +861,13 @@ export function createSourceAccess(
   ): Promise<ArrayBuffer | ResourceRequest> {
     assertLive();
     signal.throwIfAborted();
-    const frame = tileFrames.get(request.handle);
-    if (!frame || !sameDocumentUrl(request.source_url, frame.documentUrl))
+    const channel = tileChannels.get(request.handle);
+    if (!channel || !sameDocumentUrl(request.source_url, channel.documentUrl))
       throw transportError("source-lost", "viewer source is no longer available");
-    const result = await inject(
-      {
-        func: readViewerTile,
-        args: [request, extent],
-        world: "MAIN",
-      },
-      signal,
-      undefined,
-      Date.now() + timeoutMs,
-      frame,
-    );
-    if (
-      !isRecord(result) ||
-      typeof result.documentUrl !== "string" ||
-      !sameDocumentUrl(result.documentUrl, frame.documentUrl)
-    )
-      throw new InternalError("Invalid viewer tile response document");
+    // One Port per scanned session, with bounded and independently cancellable
+    // request/reply calls; the page's loader is not aborted when a caller stops waiting.
+    const result = await bounded((owned) => channel.readTile(request, extent, owned), signal);
+    if (!isRecord(result)) throw new InternalError("Invalid viewer tile response");
     if (result.ok === false && isJobError(result.error)) throw errorFromPayload(result.error);
     if (result.ok === true && "url" in result) return viewerResource(result.url);
     return viewerBytes(result);
@@ -853,23 +883,9 @@ export function createSourceAccess(
   /** Retire page tile handles and single-image candidates before the next job scans. */
   function releaseTiles() {
     singleImageFrames.clear();
-    const frames = new Map<SourceFrame, string[]>();
-    for (const [handle, frame] of tileFrames) {
-      const handles = frames.get(frame) ?? [];
-      handles.push(handle);
-      frames.set(frame, handles);
-    }
-    tileFrames.clear();
-    for (const [frame, handles] of frames) {
-      void browserApi.scripting
-        .executeScript({
-          target: target(frame),
-          func: releaseViewerTiles,
-          args: [handles],
-          world: "MAIN",
-        })
-        .catch(() => {});
-    }
+    const channels = new Set(tileChannels.values());
+    tileChannels.clear();
+    for (const channel of channels) channel.dispose();
   }
 
   return {
@@ -907,7 +923,7 @@ export function createSourceAccess(
   function loadedImage(signal: AbortSignal) {
     return bounded(async (owned) => {
       const images: LoadedImage[] = [];
-      for (const [frame, candidates] of singleImageFrames) {
+      for (const { frame, images: candidates } of singleImageFrames.values()) {
         if (!candidates.length) continue;
         images.push(...(await liveImages(frame, candidates, owned)));
       }

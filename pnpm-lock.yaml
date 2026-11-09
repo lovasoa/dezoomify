@@ -283,6 +283,9 @@ importers:
       '@dezoomify/browser-runtime':
         specifier: workspace:*
         version: link:../../packages/browser-runtime
+      '@dezoomify/page-agent':
+        specifier: workspace:*
+        version: link:../../packages/page-agent
       '@dezoomify/shared-ui':
         specifier: workspace:*
         version: link:../../packages/shared-ui
@@ -359,6 +362,15 @@ importers:
       react:
         specifier: ^19.3.1
         version: 19.3.1
+
+  packages/page-agent:
+    dependencies:
+      '@dezoomify/browser-runtime':
+        specifier: workspace:*
+        version: link:../browser-runtime
+      '@dezoomify/wasm-bindings':
+        specifier: workspace:*
+        version: link:../wasm-bindings
 
   packages/shared-ui:
     dependencies:

@@ -72,7 +72,10 @@ export default defineConfig({
     name: "Dezoomify",
     optional_host_permissions: ["http://*/*", "https://*/*"],
     permissions: ["activeTab", "downloads", "downloads.open", "scripting"],
-    minimum_chrome_version: browser === "chrome" ? "140" : undefined,
+    // Structured-clone messaging carries viewer tile bytes as ArrayBuffers;
+    // Chrome gained it in 148 and Firefox always structured-clones messages.
+    message_serialization: browser === "chrome" ? "structured_clone" : undefined,
+    minimum_chrome_version: browser === "chrome" ? "148" : undefined,
   }),
   hooks: {
     "prepare:publicPaths"(_wxt, paths) {

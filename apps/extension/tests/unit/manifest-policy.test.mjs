@@ -43,7 +43,8 @@ test("WXT keeps Chromium as an MV3 service worker", () => {
   const value = manifest("chrome");
   assert.equal(value.background?.service_worker, "background.js");
   assert.equal(value.background?.scripts, undefined);
-  assert.equal(value.minimum_chrome_version, "140");
+  assert.equal(value.minimum_chrome_version, "148");
+  assert.equal(value.message_serialization, "structured_clone");
 });
 
 test("WXT emits Firefox's required classic MV3 background script", () => {
@@ -56,6 +57,7 @@ test("WXT emits Firefox's required classic MV3 background script", () => {
     "{14074c89-8a5f-4813-98df-a7117f062871}",
   );
   assert.equal(value.browser_specific_settings?.gecko?.strict_min_version, "133.0");
+  assert.equal(value.message_serialization, undefined);
   const background = new URL("background.js", output("firefox"));
   const parsed = spawnSync(process.execPath, ["--check", fileURLToPath(background)], {
     encoding: "utf8",

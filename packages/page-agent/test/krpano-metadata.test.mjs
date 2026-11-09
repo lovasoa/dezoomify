@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readTileSource } from "../../src/job/krpano/metadata.ts";
-import { projectMetadata } from "../../src/job/viewers/metadata.ts";
-import { PageObject } from "../../src/job/viewers/page-object.ts";
+import { readTileSource } from "../src/krpano/metadata.ts";
+import { projectMetadata } from "../src/viewers/metadata.ts";
+import { PageObject } from "../src/viewers/page-object.ts";
 
 test("krpano metadata encoding uses a detached snapshot without page API calls", () => {
   const level = {

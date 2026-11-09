@@ -51,8 +51,8 @@ while discovery is running; each batch shares the existing job's cache and limit
 Hosts choose images and resolutions from the catalogs supplied by Rust.
 The core owns deferred resolution, retry classification, scheduling, retry budgets,
 and backoff. Hosts make individual acquisition attempts and report structured
-failures; they must not add a second retry policy. The extension's
-[live viewer adapters](../apps/extension/src/job/viewers/session.ts) reuse
+failures; they must not add a second retry policy. The in-page
+[live viewer adapters](../packages/page-agent/src/viewers/session.ts) reuse
 page loaders when needed, retaining their built-in retries. Ordinary image sources
 resolve tile URLs lazily and use the Host's resource transport; page-local blob
 URLs are read in their source document. Cancellation stops waiting

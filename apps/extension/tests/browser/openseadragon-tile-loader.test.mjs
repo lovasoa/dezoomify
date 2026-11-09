@@ -5,11 +5,13 @@ import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import { chromium, firefox } from "playwright";
 
+const pageAgent = fileURLToPath(new URL("../../../../packages/page-agent/src", import.meta.url));
 const bundle = await build({
   stdin: {
-    contents: `export {openTileSource,readViewerTile,releaseViewerTiles} from './openseadragon/session.ts';
-export {registerViewer} from './viewers/session.ts';`,
-    resolveDir: fileURLToPath(new URL("../../src/job", import.meta.url)),
+    contents: `export {openTileSource,readViewerTile,releaseViewerTiles} from '${pageAgent}/openseadragon/session.ts';
+export {registerViewer} from '${pageAgent}/viewers/session.ts';
+export {attachViewerTransport} from '${fileURLToPath(new URL("../../src/viewer-transport.ts", import.meta.url))}';`,
+    resolveDir: pageAgent,
   },
   bundle: true,
   write: false,
@@ -126,13 +128,37 @@ async function loadFixture(mode) {
   const handle = JSON.parse(metadata.input.contents).dezoomify_viewer.handle;
   const request = { handle, source_url: location.href, level: 8, column: 0, row: 0 };
   const extent = { width: 256, height: 256 };
-  const result = await TileSession.readViewerTile(request, extent);
-  TileSession.releaseViewerTiles([handle]);
+  const channelId = crypto.randomUUID();
+  // Attach the extension transport exactly as the scanner entrypoint does,
+  // so the listener shares this injection's loader map.
+  TileSession.attachViewerTransport(channelId, {
+    handles: [handle],
+    read: TileSession.readViewerTile,
+    dispose: () => TileSession.releaseViewerTiles([handle]),
+  });
+  // Stand in for the isolated bridge: hand over a MessagePort and speak the
+  // channel protocol over it exactly as the extension does.
+  const channel = new MessageChannel();
+  const waiting = new Map();
+  channel.port1.onmessage = (event) => {
+    const message = event.data;
+    if (message?.type !== "result") return;
+    waiting.get(message.id)?.(message.result);
+    waiting.delete(message.id);
+  };
+  window.postMessage(channelId, location.origin, [channel.port2]);
+  const send = (message) =>
+    new Promise((resolve) => {
+      waiting.set(message.id, resolve);
+      channel.port1.postMessage(message);
+    });
+  const result = await send({ type: "read-tile", id: 1, request, extent });
+  await send({ type: "close", id: 2 });
   const retired = await TileSession.readViewerTile(request, extent);
   if (retired.ok) throw new Error("retired source still loads tiles");
   if (!result.ok) return result.error;
   if (result.url) return { url: result.url, addedGlobals };
-  const bytes = Uint8Array.fromBase64(result.data);
+  const bytes = new Uint8Array(result.buffer);
   const decoded = await createImageBitmap(new Blob([bytes]));
   const canvas = document.createElement("canvas");
   canvas.width = decoded.width;

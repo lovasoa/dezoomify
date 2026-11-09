@@ -44,6 +44,8 @@ Apply this to nested instructions too.
 
 ## Tests and reviews
 
+Tests must exercise useful user-observable behavior. Never read or assert
+source files, and never encode architecture, wiring, or call shapes in a test.
 Use judgment: not every change needs a test. Prefer short, readable scenarios
 covering real production behavior with little setup: one shared image fixture
 over four product tests; retry yielding a download over assertions about helper

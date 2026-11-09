@@ -14,7 +14,7 @@ const tile = readFileSync(new URL("../../../../fixtures/tiles/0-0.png", import.m
 const scanner = (
   await build({
     stdin: {
-      contents: `export {scanViewers} from './viewer-scanner.ts';
+      contents: `export {scanViewers} from '@dezoomify/page-agent';
 export {collectCandidates,sourceSnapshotLimits} from './source-snapshot.ts';
 export {BrowserHost,selectionLimitsFor} from '@dezoomify/browser-runtime';`,
       resolveDir: new URL("../../src/job/", import.meta.url).pathname,
