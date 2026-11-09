@@ -70,7 +70,7 @@ async function tileResponse(route) {
 }
 
 async function acquireTiles(page, input) {
-  const source = JSON.parse(input.contents).dezoomify_viewer;
+  const source = input.viewer;
   // Read the full-resolution grid and one fractional-size lower level.
   const levels = source.levels.filter((grid) => [8, 10].includes(grid.level));
   for (const grid of levels) {
@@ -154,7 +154,7 @@ async function checkObservation(page, runtime, mode) {
 }
 
 async function checkSession(page, input, mode) {
-  const source = JSON.parse(input.contents).dezoomify_viewer;
+  const source = input.viewer;
   const request = {
     handle: source.handle,
     source_url: source.source_url,
