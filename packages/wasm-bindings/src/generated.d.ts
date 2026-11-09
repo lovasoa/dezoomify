@@ -364,6 +364,11 @@ export interface JobInput {
      */
     contents?: string;
     kind?: DiscoveryInputKind;
+    /**
+     * Live-viewer grids observed in the page at `url`, loaded by a loader the
+     * Host retained for this job. Only with kind [`DiscoveryInputKind::ObservedViewer`].
+     */
+    viewer?: ViewerPyramid;
 }
 
 /**
@@ -814,16 +819,16 @@ export interface InitOutput {
     readonly hasSecretParams: (a: number, b: number) => number;
     readonly isRetryable: (a: any) => [number, number, number];
     readonly isSecretKey: (a: number, b: number) => number;
-    readonly wasm_bindgen_aa50da02252d0a0c___convert__closures_____invoke___js_sys_28922c544317ab39___Function_fn_wasm_bindgen_aa50da02252d0a0c___JsValue_____wasm_bindgen_aa50da02252d0a0c___sys__Undefined___js_sys_28922c544317ab39___Function_fn_wasm_bindgen_aa50da02252d0a0c___JsValue_____wasm_bindgen_aa50da02252d0a0c___sys__Undefined_______true_: (a: number, b: number, c: any, d: any) => void;
-    readonly wasm_bindgen_aa50da02252d0a0c___convert__closures_____invoke___wasm_bindgen_aa50da02252d0a0c___JsValue__core_ed718c3d60ebd546___result__Result_____wasm_bindgen_aa50da02252d0a0c___JsError___true_: (a: number, b: number, c: any) => [number, number];
+    readonly wasm_bindgen_c47c495b6df6d1b4___convert__closures_____invoke___js_sys_93c91ed50cb258c7___Function_fn_wasm_bindgen_c47c495b6df6d1b4___JsValue_____wasm_bindgen_c47c495b6df6d1b4___sys__Undefined___js_sys_93c91ed50cb258c7___Function_fn_wasm_bindgen_c47c495b6df6d1b4___JsValue_____wasm_bindgen_c47c495b6df6d1b4___sys__Undefined_______true_: (a: number, b: number, c: any, d: any) => void;
+    readonly wasm_bindgen_c47c495b6df6d1b4___convert__closures_____invoke___wasm_bindgen_c47c495b6df6d1b4___JsValue__core_37ee0ce0c4cd57d5___result__Result_____wasm_bindgen_c47c495b6df6d1b4___JsError___true_: (a: number, b: number, c: any) => [number, number];
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
+    readonly __wbindgen_free: (a: number, b: number, c: number) => void;
     readonly __wbindgen_exn_store: (a: number) => void;
     readonly __externref_table_alloc: () => number;
     readonly __wbindgen_externrefs: WebAssembly.Table;
     readonly __wbindgen_destroy_closure: (a: number, b: number) => void;
     readonly __externref_table_dealloc: (a: number) => void;
-    readonly __wbindgen_free: (a: number, b: number, c: number) => void;
     readonly __wbindgen_start: () => void;
 }
 

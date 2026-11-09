@@ -41,11 +41,13 @@ fn supplied_observations_never_follow_links() {
             url: "https://page.test#openseadragon".into(),
             contents: Some(r#"<a href="https://must-not-fetch.test/info.json">image</a>"#.into()),
             kind: Some(kind),
+            viewer: None,
         };
         let source = JobInput {
             url: "https://page.test".into(),
             contents: Some("<html></html>".into()),
             kind: None,
+            viewer: None,
         };
         let error =
             futures::executor::block_on(dezoomify(vec![source, loaded], Options::default(), &host))
@@ -59,6 +61,7 @@ fn input() -> Vec<JobInput> {
         url: "https://images.test/image.dzi".into(),
         contents: Some(DZI.into()),
         kind: None,
+        viewer: None,
     }]
 }
 fn options() -> Options {
@@ -145,6 +148,7 @@ fn discovery_preserves_the_rejected_lookup_cause_after_a_failed_alternative() {
                 r#"<html><script src="first.js"></script><script src="second.js"></script><script>embedpano({xml:"tour.xml"});</script></html>"#.into(),
             ),
             kind: None,
+            viewer: None,
         }],
         Options {
             format: Some("krpano".into()),
@@ -235,6 +239,7 @@ fn accepted_catalog_warns_once_for_malformed_siblings_and_keeps_valid_images() {
                 </krpano>"#.into(),
             ),
             kind: None,
+            viewer: None,
         }],
         Options {
             format: Some("krpano".into()),
@@ -639,6 +644,7 @@ fn probe_budget_stops_generic_search_and_iiif_fallback_before_excess_io() {
                 url: "https://tiles.test/iiif/info.json".into(),
                 contents: Some(metadata.into()),
                 kind: None,
+                viewer: None,
             },
             ProbeOutcome::Missing,
         ),
@@ -779,6 +785,7 @@ fn deferred_cycles_do_not_reacquire_supplied_sources_or_their_redirected_address
                 url: SOURCE.into(),
                 contents: supplied.then(|| target.to_owned()),
                 kind: None,
+                viewer: None,
             }],
             Options {
                 format: Some("bulk_text".into()),

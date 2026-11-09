@@ -3,6 +3,7 @@
 //! occupy the bounded stream. Permissions are deferred until accessible work ends.
 
 use super::*;
+use crate::viewer::{self, compile_pyramid};
 use futures_util::{FutureExt, StreamExt, stream::FuturesUnordered};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -70,6 +71,9 @@ struct Search {
     ready: Vec<Branch>,
     winner: Option<(Priority, DiscoveryCatalog)>,
     observations: BTreeMap<usize, (Priority, DiscoveryCatalog)>,
+    /// Handles already compiled as typed observations; duplicates re-supplied by
+    /// later batches contribute nothing new.
+    observed: BTreeSet<String>,
     diagnostics: Vec<CandidateDiagnostic>,
     order: usize,
     attempted: usize,
@@ -82,7 +86,7 @@ impl Search {
         mut inputs: Vec<DiscoveryInput>,
         specs: &[FormatSpec],
         refresh: bool,
-    ) -> bool {
+    ) -> Result<bool, DiscoveryError> {
         // Keep concrete metadata ahead of equally specific loader snapshots,
         // and prefer an explicit source's body over duplicate passive content.
         inputs.sort_by_cached_key(|input| {
@@ -102,7 +106,12 @@ impl Search {
             )
         });
         let previous = self.ready.len();
-        for input in inputs {
+        let mut accepted = false;
+        for mut input in inputs {
+            if let Some(pyramid) = input.viewer.take() {
+                accepted |= self.observe_viewer(pyramid, specs)?;
+                continue;
+            }
             let specificity = input_specificity(&input);
             self.root(
                 input,
@@ -111,7 +120,59 @@ impl Search {
                 refresh,
             );
         }
-        self.ready.len() > previous
+        Ok(self.ready.len() > previous || accepted)
+    }
+
+    /// Compile a typed live-viewer observation immediately. Observations are
+    /// never fetched and match no URL evidence; each handle contributes once.
+    fn observe_viewer(
+        &mut self,
+        pyramid: ViewerPyramid,
+        specs: &[FormatSpec],
+    ) -> Result<bool, DiscoveryError> {
+        let Some((index, spec)) = specs
+            .iter()
+            .enumerate()
+            .find(|(_, spec)| spec.name() == viewer::SPEC.name())
+            .map(|(index, spec)| (index, *spec))
+        else {
+            self.rejected(
+                viewer::SPEC,
+                DiscoveryError::rejected(
+                    RejectionKind::Failed,
+                    "viewer observations need the viewer format",
+                ),
+            )?;
+            return Ok(false);
+        };
+        if !self.observed.insert(pyramid.handle.clone()) {
+            return Ok(false);
+        }
+        self.order += 1;
+        // input_specificity ranks observed viewer grids as Medium.
+        let priority = Priority(Specificity::Medium, 0, self.order, index);
+        let ViewerPyramid {
+            source_url,
+            handle,
+            levels,
+        } = pyramid;
+        match compile_pyramid(&source_url, handle, levels) {
+            Ok(parsed) => {
+                self.accept(Branch {
+                    spec,
+                    priority,
+                    parsed,
+                    history: Vec::new(),
+                    canonical_uri: None,
+                    observation: true,
+                })?;
+                Ok(true)
+            }
+            Err(error) => {
+                self.rejected(spec, error)?;
+                Ok(false)
+            }
+        }
     }
 
     fn root(
@@ -612,7 +673,7 @@ where
     OFut: std::future::Future<Output = Result<Vec<DiscoveryInput>, Error>>,
 {
     let mut search = Search::default();
-    search.inputs(inputs, specs, false);
+    search.inputs(inputs, specs, false)?;
     let selectors = selectors(specs);
     let mut active = FuturesUnordered::new();
     let mut observed = false;
@@ -643,7 +704,7 @@ where
             let inputs = observe(Interaction::Forbidden)
                 .await
                 .map_err(|error| DiscoveryError::Host(Box::new(error)))?;
-            observed = !search.inputs(inputs, specs, true);
+            observed = !search.inputs(inputs, specs, true)?;
             continue;
         }
         while active.len() < limits.concurrent.max(1) {
@@ -689,7 +750,7 @@ where
         let inputs = observe(Interaction::Allowed)
             .await
             .map_err(|error| DiscoveryError::Host(Box::new(error)))?;
-        if search.inputs(inputs, specs, true) {
+        if search.inputs(inputs, specs, true)? {
             observed = false;
         } else if !search.allow_blocked() {
             return Err(if search.exhausted {

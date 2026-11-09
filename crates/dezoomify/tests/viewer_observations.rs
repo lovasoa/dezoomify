@@ -54,6 +54,53 @@ fn discover(
     .0
 }
 
+fn typed(observation: ViewerObservation) -> DiscoveryInput {
+    let ViewerObservation {
+        dezoomify_viewer: pyramid,
+    } = observation;
+    DiscoveryInput {
+        url: pyramid.source_url.clone(),
+        contents: None,
+        kind: DiscoveryInputKind::ObservedViewer,
+        viewer: Some(pyramid),
+    }
+}
+
+#[test]
+fn typed_observations_compile_without_fetching() {
+    let (catalog, requests) = support::discover_inputs(
+        default_registry(),
+        vec![typed(observation())],
+        DiscoveryLimits::default(),
+        |uri| panic!("typed observations must not fetch: {uri}"),
+    );
+    let image = support::ready_image(catalog.unwrap());
+    assert_eq!(image.format, "viewer");
+    assert_eq!(image.source_url.as_deref(), Some("https://museum.test/art"));
+    assert!(requests.is_empty());
+}
+
+#[test]
+fn two_viewers_on_one_page_each_yield_a_candidate() {
+    let mut second = observation();
+    second.dezoomify_viewer.handle = "456".into();
+    let (catalog, requests) = support::discover_inputs(
+        default_registry(),
+        vec![typed(observation()), typed(second)],
+        DiscoveryLimits::default(),
+        |uri| panic!("typed observations must not fetch: {uri}"),
+    );
+    let catalog = catalog.unwrap();
+    assert_eq!(catalog.len(), 2);
+    assert!(
+        catalog
+            .entries()
+            .iter()
+            .all(|entry| matches!(entry, dezoomify::core::DiscoveredEntry::Ready(image) if image.format == "viewer"))
+    );
+    assert!(requests.is_empty());
+}
+
 #[test]
 fn live_grids_share_edge_geometry_and_keep_the_viewer_canonical() {
     let image = support::ready_image(discover(observation()).unwrap());

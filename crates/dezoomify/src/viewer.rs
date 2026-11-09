@@ -13,33 +13,44 @@ use crate::model::{TileSource, ViewerLevel, ViewerObservation, ViewerTileRequest
 pub const SPEC: FormatSpec = FormatSpec::new("viewer", &[json_metadata::<ViewerObservation>()])
     .with_display_name("Page viewer");
 
+/// Compile one live-viewer pyramid into source grids. `source_url` names the
+/// page the Host loaded the pyramid from; the Host resolves `handle` for this
+/// job only.
+pub(crate) fn compile_pyramid(
+    source_url: &str,
+    handle: String,
+    levels: Vec<ViewerLevel>,
+) -> Result<ParsedResource, DiscoveryError> {
+    if !matches!(
+        url::Url::parse(source_url).map_err(invalid)?.scheme(),
+        "http" | "https"
+    ) || source_url.len() > 2048
+        || !valid_handle(&handle)
+        || levels.is_empty()
+        || levels.len() > 64
+    {
+        return Err(invalid("invalid viewer source or level count"));
+    }
+    let mut ids = HashSet::new();
+    let levels = levels
+        .into_iter()
+        .map(|level| {
+            if !ids.insert(level.level) {
+                return Err(invalid("duplicate viewer level"));
+            }
+            grid(&handle, source_url, level)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(ParsedResource::CanonicalSource {
+        uri: source_url.to_owned(),
+        parsed: Box::new(ParsedResource::Image(ImagePlan::new(None, levels))),
+    })
+}
+
 impl Metadata for ViewerObservation {
     fn decode(self, _: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
         let pyramid = self.dezoomify_viewer;
-        let source = url::Url::parse(&pyramid.source_url).map_err(invalid)?;
-        if !matches!(source.scheme(), "http" | "https")
-            || pyramid.source_url.len() > 2048
-            || !valid_handle(&pyramid.handle)
-            || pyramid.levels.is_empty()
-            || pyramid.levels.len() > 64
-        {
-            return Err(invalid("invalid viewer source or level count"));
-        }
-        let mut ids = HashSet::new();
-        let levels = pyramid
-            .levels
-            .into_iter()
-            .map(|level| {
-                if !ids.insert(level.level) {
-                    return Err(invalid("duplicate viewer level"));
-                }
-                grid(&pyramid.handle, &pyramid.source_url, level)
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(ParsedResource::CanonicalSource {
-            uri: pyramid.source_url,
-            parsed: Box::new(ParsedResource::Image(ImagePlan::new(None, levels))),
-        })
+        compile_pyramid(&pyramid.source_url, pyramid.handle, pyramid.levels)
     }
 }
 

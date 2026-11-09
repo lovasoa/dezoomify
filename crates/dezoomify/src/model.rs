@@ -549,7 +549,8 @@ pub enum DiscoveryInputKind {
     /// Complete metadata reconstructed from a loaded viewer; never fetched.
     ObservedMetadata,
     /// Finite grids backed by a live page loader, used after supported metadata.
-    /// Supplied contents are required and never follow links.
+    /// Never fetched and never follow links; grids arrive as a typed [`JobInput`]
+    /// `viewer` payload or, while producers migrate, as a JSON document.
     ObservedViewer,
 }
 
@@ -568,6 +569,10 @@ pub struct JobInput {
     pub contents: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<DiscoveryInputKind>,
+    /// Live-viewer grids observed in the page at `url`, loaded by a loader the
+    /// Host retained for this job. Only with kind [`DiscoveryInputKind::ObservedViewer`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub viewer: Option<ViewerPyramid>,
 }
 
 /// Additional discovery evidence supplied by a Host. Empty means no more
@@ -605,6 +610,7 @@ impl From<ObservedInput> for JobInput {
                 ObservedInputKind::Metadata => DiscoveryInputKind::ObservedMetadata,
                 ObservedInputKind::Viewer => DiscoveryInputKind::ObservedViewer,
             }),
+            viewer: None,
         }
     }
 }
@@ -620,7 +626,7 @@ pub struct ViewerObservation {
 
 /// The reusable source is the viewer page. The opaque handle names an owned
 /// loader capability scoped to that exact document and job.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub struct ViewerPyramid {
     pub source_url: String,
@@ -631,7 +637,7 @@ pub struct ViewerPyramid {
 /// One regular level in image pixels, with top-left origin and downward rows.
 /// `level` is an opaque viewer index; ordering need not match image size.
 /// The core validates dimensions and grid counts and computes edge crops.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub struct ViewerLevel {
     pub level: u32,
@@ -663,6 +669,7 @@ impl JobInput {
             url: url.into(),
             contents: None,
             kind: None,
+            viewer: None,
         }
     }
 }
@@ -1838,6 +1845,31 @@ mod tests {
                 "url": "https://museum.test/image", "contents": "snapshot", "kind": "source"
             }))
             .is_err()
+        );
+    }
+
+    #[test]
+    fn viewer_payloads_travel_with_the_input_and_default_to_none() {
+        let input = JobInput {
+            url: "https://museum.test/art".into(),
+            contents: None,
+            kind: Some(DiscoveryInputKind::ObservedViewer),
+            viewer: Some(ViewerPyramid {
+                source_url: "https://museum.test/art".into(),
+                handle: "123".into(),
+                levels: Vec::new(),
+            }),
+        };
+        let wire = serde_json::to_value(&input).unwrap();
+        assert_eq!(wire["kind"], "observed-viewer");
+        assert_eq!(wire["viewer"]["handle"], "123");
+        assert_eq!(serde_json::from_value::<JobInput>(wire).unwrap(), input);
+        assert_eq!(
+            serde_json::from_value::<JobInput>(serde_json::json!({
+                "url": "https://museum.test/art"
+            }))
+            .unwrap(),
+            JobInput::new("https://museum.test/art")
         );
     }
 
