@@ -14,8 +14,8 @@ can arrive out of order without waiting for the encoder or retaining queued pixe
 in RAM. Probes and automatic-format tiles also spool to disk until output starts.
 Temporary storage must accommodate uncompressed pixels as well as the output.
 
-Buffered codecs keep the complete RGBA image and encoded file before writing. Their
-preflight memory estimate includes conservative codec headroom, not a hard RSS limit.
+Buffered codecs still need the complete RGBA image, but encode directly to staging.
+Their preflight estimate includes conservative codec headroom, not a hard RSS limit.
 The synchronous codec cannot be interrupted mid-encode; cancellation waits for
 the worker and prevents publication.
 
@@ -32,6 +32,8 @@ Raster staging uses fallible file I/O rather than memory mappings, preserving
 disk failures as ordinary output errors. Producers never wait for missing tiles
 or encoder capacity while holding acquisition slots. Cancellation wakes readers;
 settlement awaits owned workers before closing staging files.
+The invocation's blocking-task scope owns cancellation and settlement tracking;
+publication waits for its commit decision even after cancellation.
 
 Tiled outputs preserve compatible compressed source bytes. Convert locally only
 when required by the chosen output; preserve failures in acquisition's retry

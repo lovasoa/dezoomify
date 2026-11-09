@@ -1,5 +1,6 @@
 //! Native platform operations used directly by the shared async algorithm.
 mod image_choice;
+mod workers;
 use std::{
     cell::{Cell, RefCell},
     collections::BTreeSet,
@@ -7,11 +8,12 @@ use std::{
     path::{Path, PathBuf},
     pin::Pin,
     sync::{
-        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
+        atomic::{AtomicBool, Ordering},
         Arc,
     },
     time::{Duration, Instant},
 };
+use workers::BlockingTasks;
 
 use crate::{
     diagnostics::Diagnostics,
@@ -235,6 +237,32 @@ impl Controls {
         }
     }
 
+    /// Race cancellable waits against invocation cancellation and encoder errors.
+    async fn until_stopped<T>(
+        &self,
+        future: impl Future<Output = Result<T, Error>>,
+    ) -> Result<T, Error> {
+        let pipe = self
+            .0
+            .reader
+            .lock()
+            .expect("control reader lock")
+            .as_ref()
+            .and_then(std::sync::Weak::upgrade);
+        let failure = async {
+            match pipe {
+                Some(pipe) => pipe.wait_failed().await,
+                None => std::future::pending().await,
+            }
+        };
+        tokio::select! {
+            biased;
+            () = self.wait_cancelled() => Err(cancelled()),
+            error = failure => Err(error),
+            result = future => result,
+        }
+    }
+
     /// Apply the shared gate policy; cancellation wakes either gate immediately.
     #[allow(clippy::result_large_err)] // Host methods share the canonical error value.
     async fn checkpoint(&self, gate: Gate) -> Result<(), Error> {
@@ -288,7 +316,7 @@ pub struct NativeHost<'a> {
     acquired: RefCell<BTreeSet<u32>>,
     instrumentation: RefCell<Instrumentation>,
     inflight: Cell<usize>,
-    decode_tails: Arc<DecodeTails>,
+    workers: BlockingTasks,
     clock_start: Instant,
     progress: RefCell<Box<dyn FnMut(Progress) + 'a>>,
     last_progress: RefCell<Progress>,
@@ -350,9 +378,11 @@ impl<'a> NativeHost<'a> {
                 .ok()
                 .and_then(|url| url.host_str().map(str::to_string)),
         );
+        let controls = Controls::default();
+        let workers = BlockingTasks::new(controls.clone());
         Ok(Self {
             options,
-            controls: Controls::default(),
+            controls,
             diagnostics,
             transport,
             fetch_limits,
@@ -364,7 +394,7 @@ impl<'a> NativeHost<'a> {
             acquired: RefCell::default(),
             instrumentation: RefCell::default(),
             inflight: Cell::new(0),
-            decode_tails: Arc::default(),
+            workers,
             clock_start: Instant::now(),
             progress: RefCell::new(Box::new(|_| {})),
             last_progress: RefCell::new(Progress::default()),
@@ -439,7 +469,7 @@ impl<'a> NativeHost<'a> {
             );
             self.retry_pending.set(true);
             self.controls.0.retry_waiting.store(true, Ordering::SeqCst);
-            let choice = self.controlled(answer).await;
+            let choice = self.controls.until_stopped(answer).await;
             self.retry_pending.set(false);
             self.controls.0.retry_waiting.store(false, Ordering::SeqCst);
             self.controls.0.changed.notify_waiters();
@@ -476,37 +506,15 @@ impl<'a> NativeHost<'a> {
         }
     }
 
-    async fn controlled<T>(
-        &self,
-        future: impl Future<Output = Result<T, Error>>,
-    ) -> Result<T, Error> {
-        let pipe = self
-            .raster
-            .borrow()
-            .as_ref()
-            .map(|task| Arc::clone(&task.pipe));
-        let failure = async {
-            match pipe {
-                Some(pipe) => pipe.wait_failed().await,
-                None => std::future::pending().await,
-            }
-        };
-        tokio::select! {
-            biased;
-            () = self.controls.wait_cancelled() => Err(cancelled()),
-            error = failure => Err(error),
-            result = future => result,
-        }
-    }
-
     async fn read(&self, request: &ResourceRequest) -> Result<FetchOutcome, Error> {
         self.instrumentation.borrow_mut().attempts += 1;
         let outcome = self
-            .controlled(async {
-                self.transport
-                    .fetch_resource(request, Some(&self.user), &self.fetch_limits)
-                    .await
-            })
+            .controls
+            .until_stopped(self.transport.fetch_resource(
+                request,
+                Some(&self.user),
+                &self.fetch_limits,
+            ))
             .await
             .map_err(|error| resource_context(error, request))?;
         self.instrumentation.borrow_mut().bytes_fetched += outcome.body.len() as u64;
@@ -532,25 +540,20 @@ impl<'a> NativeHost<'a> {
         processing: dezoomify::core::model::ProcessingRecipe,
         store: Option<(PathBuf, String, ResourceRequest)>,
     ) -> Result<DecodedTile, Error> {
-        let permit = self.decode_tails.reserve(bytes.len());
-        let decode_tails = Arc::clone(&self.decode_tails);
-        self.controlled(async {
-            tokio::task::spawn_blocking(move || {
-                let _permit = permit;
+        let metrics = self.workers.clone();
+        self.workers
+            .run_with_bytes("tile decode", bytes.len(), move || {
                 let bytes = processing
                     .apply(bytes)
                     .map_err(|error| Error::ProcessingFailed(error.to_string().into()))?;
                 if let Some((dir, namespace, request)) = &store {
                     let _ = crate::cache::store(dir, namespace, request, &bytes);
                 }
-                decode_tails.pixel_decodes.fetch_add(1, Ordering::SeqCst);
+                metrics.record_decode();
                 load_image_with_limit(&bytes, None)
                     .map_err(|error| Error::DecodeFailed(error.to_string().into()))
             })
             .await
-            .map_err(|_| Error::Internal("tile decode task failed".into()))?
-        })
-        .await
     }
 
     async fn tile(&self, tile: &ResourceTile) -> Result<DecodedTile, Error> {
@@ -587,23 +590,18 @@ impl<'a> NativeHost<'a> {
         &self,
         mut bytes: Vec<u8>,
     ) -> Result<(Vec<u8>, Size, image::ImageFormat), Error> {
-        let permit = self.decode_tails.reserve(bytes.len());
-        self.check_encoded_inflight()?;
+        self.check_encoded_inflight(bytes.len())?;
         let budget = self
             .options
             .output_retain_cap
-            .saturating_sub(self.decode_tails.bytes.load(Ordering::SeqCst));
-        self.controlled(async {
-            tokio::task::spawn_blocking(move || {
-                let _permit = permit;
+            .saturating_sub(self.workers.stats().input_bytes + bytes.len() as u64);
+        self.workers
+            .run_with_bytes("tile inspection", bytes.len(), move || {
                 crate::tile_output::normalize_orientation(&mut bytes);
                 let (size, format) = crate::tile_output::inspect(&bytes, budget)?;
                 Ok((bytes, size, format))
             })
             .await
-            .map_err(|_| Error::Internal("tile inspection task failed".into()))?
-        })
-        .await
     }
 
     async fn encoded_tile(
@@ -640,27 +638,22 @@ impl<'a> NativeHost<'a> {
         }
         let response = self.read(&tile.request).await?;
         let processing = tile.placement.processing;
-        let permit = self.decode_tails.reserve(response.body.len());
-        self.check_encoded_inflight()?;
+        self.check_encoded_inflight(response.body.len())?;
         let request = tile.request.clone();
         let budget = self
             .options
             .output_retain_cap
-            .saturating_sub(self.decode_tails.bytes.load(Ordering::SeqCst));
+            .saturating_sub(self.workers.stats().input_bytes + response.body.len() as u64);
         let (bytes, size, format) = self
-            .controlled(async {
-                tokio::task::spawn_blocking(move || {
-                    let _permit = permit;
-                    let mut bytes = processing
-                        .apply(response.body)
-                        .map_err(|e| Error::ProcessingFailed(e.to_string().into()))?;
-                    crate::tile_output::normalize_orientation(&mut bytes);
-                    let (size, format) = crate::tile_output::inspect(&bytes, budget)?;
-                    let _ = crate::cache::store(&dir, &namespace, &request, &bytes);
-                    Ok((bytes, size, format))
-                })
-                .await
-                .map_err(|_| Error::Internal("tile processing task failed".into()))?
+            .workers
+            .run_with_bytes("tile processing", response.body.len(), move || {
+                let mut bytes = processing
+                    .apply(response.body)
+                    .map_err(|e| Error::ProcessingFailed(e.to_string().into()))?;
+                crate::tile_output::normalize_orientation(&mut bytes);
+                let (size, format) = crate::tile_output::inspect(&bytes, budget)?;
+                let _ = crate::cache::store(&dir, &namespace, &request, &bytes);
+                Ok((bytes, size, format))
             })
             .await?;
         Ok(crate::tile_output::EncodedTile {
@@ -681,7 +674,8 @@ impl<'a> NativeHost<'a> {
         }
     }
 
-    fn check_encoded_inflight(&self) -> Result<(), Error> {
+    fn check_encoded_inflight(&self, additional: usize) -> Result<(), Error> {
+        let workers = self.workers.stats();
         let probes: u64 = self
             .encoded_probes
             .borrow()
@@ -690,8 +684,9 @@ impl<'a> NativeHost<'a> {
             .sum();
         crate::tile_output::memory_check(
             probes
-                .saturating_add(self.decode_tails.bytes.load(Ordering::SeqCst))
-                .saturating_add(self.decode_tails.encoded_retained.load(Ordering::SeqCst)),
+                .saturating_add(additional as u64)
+                .saturating_add(workers.input_bytes)
+                .saturating_add(workers.retained_bytes),
             self.options.output_retain_cap,
         )
     }
@@ -718,37 +713,30 @@ impl<'a> NativeHost<'a> {
         let id = tile.id;
         let writer = self.tiled.borrow().as_ref().cloned();
         if let Some(writer) = writer {
-            let permit = self.decode_tails.reserve(tile.bytes.len());
-            self.check_encoded_inflight()?;
+            let input_bytes = tile.bytes.len();
+            let workers = self.workers.clone();
+            self.check_encoded_inflight(input_bytes)?;
             let controls = self.controls.clone();
             let peak = self
-                .controlled(async {
-                    tokio::task::spawn_blocking(move || {
-                        let _permit = permit;
-                        let result = (|| {
-                            let mut writer = writer
-                                .lock()
-                                .map_err(|_| Error::Internal("tile writer poisoned".into()))?;
-                            let queued = _permit
-                                .tails
-                                .bytes
-                                .load(Ordering::SeqCst)
-                                .saturating_sub(_permit.bytes);
-                            writer.hold_queued_bytes(queued)?;
-                            let result = writer.place(tile, &controls.0.cancelled);
-                            writer.release_probe_bytes(queued);
-                            _permit
-                                .tails
-                                .encoded_retained
-                                .store(writer.retained_bytes(), Ordering::SeqCst);
-                            result?;
-                            Ok(writer.peak_retained())
-                        })();
-                        drop(writer);
-                        result
-                    })
-                    .await
-                    .map_err(|_| Error::Internal("tile placement task failed".into()))?
+                .workers
+                .run_with_bytes("tile placement", input_bytes, move || {
+                    let result = (|| {
+                        let mut writer = writer
+                            .lock()
+                            .map_err(|_| Error::Internal("tile writer poisoned".into()))?;
+                        let queued = workers
+                            .stats()
+                            .input_bytes
+                            .saturating_sub(input_bytes as u64);
+                        writer.hold_queued_bytes(queued)?;
+                        let result = writer.place(tile, &controls.0.cancelled);
+                        writer.release_probe_bytes(queued);
+                        workers.retain(writer.retained_bytes());
+                        result?;
+                        Ok(writer.peak_retained())
+                    })();
+                    drop(writer);
+                    result
                 })
                 .await?;
             let mut stats = self.instrumentation.borrow_mut();
@@ -780,7 +768,11 @@ impl<'a> NativeHost<'a> {
             .as_ref()
             .map(|task| Arc::clone(&task.pipe));
         if let Some(pipe) = pipe {
-            self.place_pixels(pipe, storage_index, tile.placement.clone(), pixels)
+            let placement = tile.placement.clone();
+            self.workers
+                .run("tile placement", move || {
+                    pipe.place(storage_index, &placement, pixels)
+                })
                 .await?;
         } else {
             let spool = {
@@ -790,16 +782,9 @@ impl<'a> NativeHost<'a> {
                 }
                 Arc::clone(spool.as_ref().expect("tile spool"))
             };
-            let permit = self.decode_tails.reserve(0);
             let pixels = self
-                .controlled(async {
-                    tokio::task::spawn_blocking(move || {
-                        let _permit = permit;
-                        spool.store(pixels)
-                    })
-                    .await
-                    .map_err(|_| Error::Internal("tile storage task failed".into()))?
-                })
+                .workers
+                .run("tile storage", move || spool.store(pixels))
                 .await?;
             self.pending_pixels.borrow_mut().push(PendingPixels {
                 id: storage_index,
@@ -810,27 +795,6 @@ impl<'a> NativeHost<'a> {
         self.acquired.borrow_mut().insert(storage_index);
         self.instrumentation.borrow_mut().acquired = self.acquired.borrow().len() as u64;
         Ok(())
-    }
-
-    async fn place_pixels(
-        &self,
-        pipe: Arc<PixelPipe>,
-        id: u32,
-        placement: TilePlacement,
-        pixels: DecodedTile,
-    ) -> Result<(), Error> {
-        // Copy/composition belongs on a worker; placement never waits for queue
-        // capacity. The tail tracker owns cancelled placement work too.
-        let permit = self.decode_tails.reserve(0);
-        self.controlled(async {
-            tokio::task::spawn_blocking(move || {
-                let _permit = permit;
-                pipe.place(id, &placement, pixels)
-            })
-            .await
-            .map_err(|_| Error::Internal("pixel producer task failed".into()))?
-        })
-        .await
     }
 
     fn output_directory(&self) -> PathBuf {
@@ -870,16 +834,11 @@ impl<'a> NativeHost<'a> {
         self.report_preparation(&pipe);
         for pending in pending {
             let target = Arc::clone(&pipe);
-            let permit = self.decode_tails.reserve(0);
-            self.controlled(async {
-                tokio::task::spawn_blocking(move || {
-                    let _permit = permit;
+            self.workers
+                .run("tile placement", move || {
                     target.place(pending.id, &pending.placement, pending.pixels.read()?)
                 })
-                .await
-                .map_err(|_| Error::Internal("tile placement task failed".into()))?
-            })
-            .await?;
+                .await?;
             self.report_preparation(&pipe);
         }
         Ok(())
@@ -950,16 +909,9 @@ impl<'a> NativeHost<'a> {
         let pipe = Arc::clone(&self.raster.borrow().as_ref().expect("raster task").pipe);
         let producer = Arc::clone(&pipe);
         let reused = request.reused_tiles.clone();
-        let permit = self.decode_tails.reserve(0);
-        self.controlled(async {
-            tokio::task::spawn_blocking(move || {
-                let _permit = permit;
-                producer.finish(&reused)
-            })
-            .await
-            .map_err(|_| Error::Internal("pixel producer task failed".into()))?
-        })
-        .await?;
+        self.workers
+            .run("pixel producer", move || producer.finish(&reused))
+            .await?;
         let task = self.raster.borrow_mut().take().expect("raster task");
         let mut wait = std::pin::pin!(task.wait());
         let mut updates = tokio::time::interval(Duration::from_millis(100));
@@ -1049,32 +1001,25 @@ impl Host for NativeHost<'_> {
                 self.options.max_tiles as u32,
             )?;
             let controls = self.controls.clone();
-            let permit = self.decode_tails.reserve(0);
             let writer = self
-                .controlled(async {
-                    tokio::task::spawn_blocking(move || {
-                        let _permit = permit;
-                        for tile in probes {
-                            writer.release_probe_bytes(tile.bytes.len() as u64);
-                            let request = tile.request.clone();
-                            writer.place(tile, &controls.0.cancelled).map_err(
-                                |e| match request {
-                                    Some(ref request) => resource_context(e, request),
-                                    None => e,
-                                },
-                            )?;
-                        }
-                        Ok(writer)
-                    })
-                    .await
-                    .map_err(|_| Error::Internal("tile preflight task failed".into()))?
+                .workers
+                .run("tile preflight", move || {
+                    for tile in probes {
+                        writer.release_probe_bytes(tile.bytes.len() as u64);
+                        let request = tile.request.clone();
+                        writer
+                            .place(tile, &controls.0.cancelled)
+                            .map_err(|e| match request {
+                                Some(ref request) => resource_context(e, request),
+                                None => e,
+                            })?;
+                    }
+                    Ok(writer)
                 })
                 .await?;
             let mut stats = self.instrumentation.borrow_mut();
             stats.peak_retained_bytes = stats.peak_retained_bytes.max(writer.peak_retained());
-            self.decode_tails
-                .encoded_retained
-                .store(writer.retained_bytes(), Ordering::SeqCst);
+            self.workers.retain(writer.retained_bytes());
             *self.tiled.borrow_mut() = Some(Arc::new(std::sync::Mutex::new(writer)));
         } else if let Some(dimensions) = &plan.canvas {
             if !matches!(self.options.output, OutputTarget::AutoImageDir { .. }) {
@@ -1124,13 +1069,9 @@ impl Host for NativeHost<'_> {
                             image::ImageFormat::Png | image::ImageFormat::Jpeg
                         )
                     {
-                        let permit = self.decode_tails.reserve(encoded.bytes.len());
-                        self.check_encoded_inflight()?;
+                        self.check_encoded_inflight(encoded.bytes.len())?;
                         let budget = self.options.output_retain_cap.saturating_sub(
-                            self.decode_tails
-                                .bytes
-                                .load(Ordering::SeqCst)
-                                .saturating_sub(encoded.bytes.len() as u64)
+                            self.workers.stats().input_bytes
                                 + self
                                     .encoded_probes
                                     .borrow()
@@ -1139,18 +1080,13 @@ impl Host for NativeHost<'_> {
                                     .sum::<u64>(),
                         );
                         let compression = self.options.compression;
+                        let metrics = self.workers.clone();
                         encoded = self
-                            .controlled(async {
-                                tokio::task::spawn_blocking(move || {
-                                    let _permit = permit;
-                                    _permit.tails.pixel_decodes.fetch_add(1, Ordering::SeqCst);
-                                    encoded.convert_to_png(size, budget, compression)?;
-                                    Ok(encoded)
-                                })
-                                .await
-                                .map_err(|_| {
-                                    Error::Internal("probe conversion task failed".into())
-                                })?
+                            .workers
+                            .run_with_bytes("probe conversion", encoded.bytes.len(), move || {
+                                metrics.record_decode();
+                                encoded.convert_to_png(size, budget, compression)?;
+                                Ok(encoded)
                             })
                             .await?;
                     }
@@ -1249,15 +1185,15 @@ impl Host for NativeHost<'_> {
             let controls = self.controls.clone();
             let reused = request.reused_tiles.clone();
             Some(
-                tokio::task::spawn_blocking(move || {
-                    let writer = Arc::try_unwrap(writer)
-                        .map_err(|_| Error::Internal("tile placement still active".into()))?
-                        .into_inner()
-                        .map_err(|_| Error::Internal("tile writer poisoned".into()))?;
-                    writer.finish(&destination, &reused, &controls.0.cancelled)
-                })
-                .await
-                .map_err(|_| Error::Internal("tile output task failed".into()))??,
+                self.workers
+                    .run("tile output", move || {
+                        let writer = Arc::try_unwrap(writer)
+                            .map_err(|_| Error::Internal("tile placement still active".into()))?
+                            .into_inner()
+                            .map_err(|_| Error::Internal("tile writer poisoned".into()))?;
+                        writer.finish(&destination, &reused, &controls.0.cancelled)
+                    })
+                    .await?,
             )
         } else {
             None
@@ -1283,12 +1219,13 @@ impl Host for NativeHost<'_> {
                 let path = published.clone();
                 let controls = self.controls.clone();
                 let overwrite = self.options.overwrite;
-                let (output, result) = tokio::task::spawn_blocking(move || {
-                    let result = prepared.publish(&path, overwrite, &controls.0.cancelled);
-                    (prepared, result)
-                })
-                .await
-                .map_err(|_| Error::Internal("output publication task failed".into()))?;
+                let (output, result) = self
+                    .workers
+                    .commit("output publication", move || {
+                        let result = prepared.publish(&path, overwrite, &controls.0.cancelled);
+                        Ok((prepared, result))
+                    })
+                    .await?;
                 prepared = output;
                 result
             } else {
@@ -1310,9 +1247,8 @@ impl Host for NativeHost<'_> {
         };
         let acquired = self.acquired.borrow();
         let mut instrumentation = self.instrumentation.borrow().clone();
-        instrumentation.pixel_decodes += self.decode_tails.pixel_decodes.load(Ordering::SeqCst);
-        instrumentation.peak_decode_inflight_bytes =
-            self.decode_tails.peak_bytes.load(Ordering::SeqCst);
+        instrumentation.pixel_decodes += self.workers.stats().pixel_decodes;
+        instrumentation.peak_decode_inflight_bytes = self.workers.stats().peak_input_bytes;
         instrumentation.encoded_bytes = encoded_bytes;
         instrumentation.late_repaints = late_repaints;
         let output = Output {
@@ -1360,7 +1296,7 @@ impl Host for NativeHost<'_> {
                 .as_mut()
                 .map(|choose| choose(image.clone()));
             if let Some(answer) = answer {
-                return self.controlled(answer).await;
+                return self.controls.until_stopped(answer).await;
             }
         }
         let levels = &image.levels;
@@ -1410,11 +1346,12 @@ impl Host for NativeHost<'_> {
 
     async fn sleep(&self, delay_ms: u32) -> Result<HostTiming, Error> {
         self.instrumentation.borrow_mut().timer_wait_ms += u64::from(delay_ms);
-        self.controlled(async {
-            tokio::time::sleep(Duration::from_millis(u64::from(delay_ms))).await;
-            Ok(())
-        })
-        .await?;
+        self.controls
+            .until_stopped(async {
+                tokio::time::sleep(Duration::from_millis(u64::from(delay_ms))).await;
+                Ok(())
+            })
+            .await?;
         Ok(self.timing())
     }
 
@@ -1450,12 +1387,7 @@ impl Host for NativeHost<'_> {
         }
         self.pending_pixels.borrow_mut().clear();
         self.pixel_spool.borrow_mut().take();
-        while self.decode_tails.active.load(Ordering::SeqCst) != 0 {
-            let changed = self.decode_tails.changed.notified();
-            if self.decode_tails.active.load(Ordering::SeqCst) != 0 {
-                changed.await;
-            }
-        }
+        self.workers.drain().await;
     }
 }
 
@@ -1482,43 +1414,6 @@ fn size(size: &Size) -> Vec2d {
 }
 fn cancelled() -> Error {
     Error::Cancelled
-}
-
-#[derive(Default)]
-struct DecodeTails {
-    pixel_decodes: AtomicU64,
-    active: AtomicUsize,
-    bytes: AtomicU64,
-    peak_bytes: AtomicU64,
-    encoded_retained: AtomicU64,
-    changed: tokio::sync::Notify,
-}
-
-impl DecodeTails {
-    fn reserve(self: &Arc<Self>, bytes: usize) -> DecodePermit {
-        self.active.fetch_add(1, Ordering::SeqCst);
-        let current = self
-            .bytes
-            .fetch_add(bytes as u64, Ordering::SeqCst)
-            .saturating_add(bytes as u64);
-        self.peak_bytes.fetch_max(current, Ordering::SeqCst);
-        DecodePermit {
-            tails: Arc::clone(self),
-            bytes: bytes as u64,
-        }
-    }
-}
-
-struct DecodePermit {
-    tails: Arc<DecodeTails>,
-    bytes: u64,
-}
-impl Drop for DecodePermit {
-    fn drop(&mut self) {
-        self.tails.bytes.fetch_sub(self.bytes, Ordering::SeqCst);
-        self.tails.active.fetch_sub(1, Ordering::SeqCst);
-        self.tails.changed.notify_waiters();
-    }
 }
 
 struct Flight<'a, 'b>(&'a NativeHost<'b>);
@@ -1681,8 +1576,8 @@ mod tests {
                 height: 512
             })
         );
-        assert_eq!(host.decode_tails.pixel_decodes.load(Ordering::SeqCst), 1);
-        assert_eq!(host.decode_tails.active.load(Ordering::SeqCst), 0);
+        assert_eq!(host.workers.stats().pixel_decodes, 1);
+
         assert!(host.raster.borrow().is_none());
         assert!(directory.join("out.png").exists());
         assert!(!std::fs::read_dir(&directory).expect("directory").any(|e| e
@@ -1709,39 +1604,6 @@ mod tests {
             }
             controls.cancel();
             assert_eq!(acquisition.await.unwrap_err(), Error::Cancelled);
-        });
-    }
-
-    #[test]
-    fn blocking_decode_permit_survives_cancellation_until_work_exits() {
-        let runtime = tokio::runtime::Runtime::new().unwrap();
-        runtime.block_on(async {
-            let tails = Arc::new(DecodeTails::default());
-            let permit = tails.reserve(1024);
-            let (started, ready) = tokio::sync::oneshot::channel();
-            let (release, finish) = std::sync::mpsc::channel();
-            let parent = tokio::spawn(async move {
-                tokio::task::spawn_blocking(move || {
-                    let _permit = permit;
-                    started.send(()).unwrap();
-                    finish.recv().unwrap();
-                })
-                .await
-            });
-            ready.await.unwrap();
-            parent.abort();
-            let _ = parent.await;
-            assert_eq!(tails.active.load(Ordering::SeqCst), 1);
-            assert_eq!(tails.bytes.load(Ordering::SeqCst), 1024);
-            release.send(()).unwrap();
-            while tails.active.load(Ordering::SeqCst) != 0 {
-                let changed = tails.changed.notified();
-                if tails.active.load(Ordering::SeqCst) != 0 {
-                    changed.await;
-                }
-            }
-            assert_eq!(tails.bytes.load(Ordering::SeqCst), 0);
-            assert_eq!(tails.peak_bytes.load(Ordering::SeqCst), 1024);
         });
     }
 }

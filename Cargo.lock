@@ -1215,6 +1215,7 @@ dependencies = [
  "tempfile",
  "tiff",
  "tokio",
+ "tokio-util",
  "url",
  "webpki-roots",
  "zif-tiff",
@@ -5835,6 +5836,7 @@ dependencies = [
  "bytes",
  "futures-core",
  "futures-sink",
+ "futures-util",
  "pin-project-lite",
  "tokio",
 ]

@@ -2,12 +2,16 @@
 //! the encoder: unread pixels and coverage stay in a private staging file.
 use crate::{
     imaging::DecodedTile,
-    pixel_store::{PixelFile, StoredBytes},
+    pixel_store::{
+        discard, read_metadata, storage_error, store_metadata, temporary_file, MetadataLocation,
+    },
 };
 use dezoomify::model::{Error, ReusedTile, Size, TilePlacement};
 use image::Pixel;
 use std::{
     collections::BTreeMap,
+    fs::File,
+    io::{Read, Seek, SeekFrom, Write},
     path::Path,
     sync::{Arc, Condvar, Mutex},
 };
@@ -22,11 +26,11 @@ pub(crate) struct PixelStrip {
 }
 struct Metadata {
     position: (u32, u32),
-    icc: StoredBytes,
-    exif: StoredBytes,
+    icc: MetadataLocation,
+    exif: MetadataLocation,
 }
 struct Producer {
-    file: PixelFile,
+    file: File,
     pending: BTreeMap<u32, u64>,
     next_row: u32,
     metadata: BTreeMap<u32, Metadata>,
@@ -54,10 +58,12 @@ impl PixelPipe {
             .checked_mul(4)
             .and_then(|n| n.checked_add(pixels.div_ceil(8)))
             .ok_or_else(|| Error::InvalidState("raster dimensions overflow".into()))?;
+        let file = temporary_file(directory).map_err(storage_error)?;
+        file.set_len(length).map_err(storage_error)?;
         Ok(Arc::new(Self {
             size,
             producer: Mutex::new(Producer {
-                file: PixelFile::new(directory, length)?,
+                file,
                 pending: BTreeMap::new(),
                 next_row: 0,
                 metadata: BTreeMap::new(),
@@ -116,12 +122,10 @@ impl PixelPipe {
             return Err(error);
         }
         if decoded.icc_profile.is_some() || decoded.exif_metadata.is_some() {
-            let icc = producer
-                .file
-                .append_optional(decoded.icc_profile.as_deref())?;
-            let exif = producer
-                .file
-                .append_optional(decoded.exif_metadata.as_deref())?;
+            let icc = store_metadata(&mut producer.file, decoded.icc_profile.as_deref())
+                .map_err(storage_error)?;
+            let exif = store_metadata(&mut producer.file, decoded.exif_metadata.as_deref())
+                .map_err(storage_error)?;
             producer.metadata.insert(
                 id,
                 Metadata {
@@ -171,10 +175,18 @@ impl PixelPipe {
             let start = u64::from(y) * u64::from(self.size.width) + u64::from(placement.position.x);
             let source = (y - placement.position.y) as usize * image.width() as usize * 4;
             let source = &image.as_raw()[source..source + width as usize * 4];
+            producer
+                .file
+                .seek(SeekFrom::Start(start * 4))
+                .map_err(storage_error)?;
             if opaque {
-                producer.file.write(start * 4, source)?;
+                producer.file.write_all(source).map_err(storage_error)?;
             } else {
-                let mut target = producer.file.read(start * 4, source.len())?;
+                let mut target = vec![0; source.len()];
+                producer
+                    .file
+                    .read_exact(&mut target)
+                    .map_err(storage_error)?;
                 for (dst, src) in target
                     .as_chunks_mut::<4>()
                     .0
@@ -185,7 +197,11 @@ impl PixelPipe {
                     pixel.blend(&image::Rgba(*src));
                     *dst = pixel.0;
                 }
-                producer.file.write(start * 4, &target)?;
+                producer
+                    .file
+                    .seek(SeekFrom::Start(start * 4))
+                    .map_err(storage_error)?;
+                producer.file.write_all(&target).map_err(storage_error)?;
             }
             let covered = self.cover(&mut producer.file, start, start + u64::from(width))?;
             let rows = STRIP_ROWS.min(self.size.height - first_row);
@@ -203,12 +219,14 @@ impl PixelPipe {
         }
         Ok(())
     }
-    fn cover(&self, file: &mut PixelFile, start: u64, end: u64) -> Result<u64, Error> {
+    fn cover(&self, file: &mut File, start: u64, end: u64) -> Result<u64, Error> {
         if start == end {
             return Ok(0);
         }
         let offset = u64::from(self.size.width) * u64::from(self.size.height) * 4 + start / 8;
-        let mut bytes = file.read(offset, (end.div_ceil(8) - start / 8) as usize)?;
+        let mut bytes = vec![0; (end.div_ceil(8) - start / 8) as usize];
+        file.seek(SeekFrom::Start(offset)).map_err(storage_error)?;
+        file.read_exact(&mut bytes).map_err(storage_error)?;
         let mut covered = 0;
         for (index, byte) in bytes.iter_mut().enumerate() {
             let first = (start / 8 + index as u64) * 8;
@@ -218,7 +236,8 @@ impl PixelPipe {
             covered += u64::from((!*byte & mask).count_ones());
             *byte |= mask;
         }
-        file.write(offset, &bytes)?;
+        file.seek(SeekFrom::Start(offset)).map_err(storage_error)?;
+        file.write_all(&bytes).map_err(storage_error)?;
         Ok(covered)
     }
     fn publish_next(&self, producer: &mut Producer) -> Result<(), Error> {
@@ -247,8 +266,8 @@ impl PixelPipe {
         let icc = ordered.iter().find_map(|(_, m)| m.icc);
         let exif = ordered.iter().find_map(|(_, m)| m.exif);
         let metadata = (
-            producer.file.read_optional(icc)?,
-            producer.file.read_optional(exif)?,
+            read_metadata(&mut producer.file, icc).map_err(storage_error)?,
+            read_metadata(&mut producer.file, exif).map_err(storage_error)?,
         );
         producer.metadata.clear();
         self.queue.lock().expect("strip queue lock").metadata = Some(metadata);
@@ -286,8 +305,15 @@ impl PixelPipe {
                 let offset = u64::from(first_row) * u64::from(self.size.width) * 4;
                 let length = self.size.width as usize * rows as usize * 4;
                 let mut producer = self.producer.lock().expect("pixel producer lock");
-                let rgba = producer.file.read(offset, length)?;
-                producer.file.discard(offset, length as u64);
+                let mut rgba = Vec::new();
+                rgba.try_reserve_exact(length).map_err(storage_error)?;
+                rgba.resize(length, 0);
+                producer
+                    .file
+                    .seek(SeekFrom::Start(offset))
+                    .map_err(storage_error)?;
+                producer.file.read_exact(&mut rgba).map_err(storage_error)?;
+                discard(&producer.file, offset, length as u64);
                 return Ok(Some(PixelStrip {
                     first_row,
                     rows,

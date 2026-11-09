@@ -31,7 +31,7 @@ impl EncoderTask {
         crate::imaging::check_dimensions(format, &size)?;
         if format.codec().layout == OutputLayout::Buffered {
             crate::tile_output::memory_check(
-                crate::imaging::encoder_workspace(format, &size),
+                crate::imaging::buffered_workspace(format, &size),
                 memory_hint,
             )?;
         }
@@ -233,9 +233,8 @@ fn encode(
                     image::RgbaImage::from_raw(pipe.size.width, pipe.size.height, pixels)
                         .ok_or_else(|| Error::InvalidState("incomplete buffered pixels".into()))?;
                 let (icc, _) = pipe.metadata()?;
-                let mut encoded = MemoryOutput::default();
                 crate::imaging::encode_buffered_to(
-                    &mut encoded,
+                    &mut output,
                     &image,
                     format,
                     compression,
@@ -244,9 +243,6 @@ fn encode(
                 if let Some(error) = pipe.error() {
                     return Err(error);
                 }
-                output
-                    .write_all(encoded.0.get_ref())
-                    .map_err(encoding_error)?;
             }
             _ => return Err(Error::InvalidState("tile format in raster encoder".into())),
         }
@@ -283,32 +279,6 @@ fn encode(
 }
 fn encoding_error(error: impl std::fmt::Display) -> Error {
     Error::EncodeFailed(error.to_string().into())
-}
-
-/// Fallible, seekable allocation for a completed buffered image.
-#[derive(Default)]
-struct MemoryOutput(std::io::Cursor<Vec<u8>>);
-impl Write for MemoryOutput {
-    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-        let end = usize::try_from(self.0.position())
-            .ok()
-            .and_then(|pos| pos.checked_add(bytes.len()))
-            .ok_or_else(|| std::io::Error::other("image buffer overflow"))?;
-        let additional = end.saturating_sub(self.0.get_ref().len());
-        self.0
-            .get_mut()
-            .try_reserve(additional)
-            .map_err(std::io::Error::other)?;
-        self.0.write(bytes)
-    }
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
-}
-impl Seek for MemoryOutput {
-    fn seek(&mut self, position: std::io::SeekFrom) -> std::io::Result<u64> {
-        self.0.seek(position)
-    }
 }
 
 /// image's JPEG encoder finishes full-width eight-row bands in order.
@@ -776,19 +746,5 @@ mod tests {
             }
         }
         std::fs::remove_dir_all(directory).unwrap();
-    }
-
-    #[test]
-    fn default_image_encoder_uses_the_shared_buffered_path() {
-        let source = image::RgbaImage::from_pixel(7, 9, image::Rgba([120, 40, 80, 128]));
-        let mut encoded = MemoryOutput::default();
-        crate::imaging::encode_buffered_to(&mut encoded, &source, OutputFormat::Png, 5, None)
-            .unwrap();
-        assert_eq!(
-            image::load_from_memory(encoded.0.get_ref())
-                .unwrap()
-                .into_rgba8(),
-            source
-        );
     }
 }
