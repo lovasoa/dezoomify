@@ -13,6 +13,7 @@ pub mod imaging;
 pub mod options;
 pub mod output;
 mod pixel_pipe;
+mod pixel_store;
 mod raster;
 mod tile_output;
 pub mod transport;

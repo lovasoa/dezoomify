@@ -1,168 +1,101 @@
-//! Producer-owned reordering and immutable strips sharing one byte budget.
+//! Disk-backed composition and ordered strip delivery. Pixels and coverage share
+//! rectangular blocks, so placement uses bulk I/O rather than per-row operations.
+//! Producers never wait for the encoder; unread blocks stay in the staging file.
+use crate::{
+    imaging::DecodedTile,
+    pixel_store::{discard, read_metadata, storage_error, store_metadata, MetadataLocation},
+};
 use dezoomify::model::{Error, ReusedTile, Size, TilePlacement};
-use image::Pixel;
+use image::{
+    imageops::{crop_imm, overlay},
+    GenericImage, ImageBuffer, Rgba,
+};
 use std::{
-    collections::{BTreeMap, VecDeque},
+    collections::BTreeMap,
+    fs::File,
+    io::{Read, Seek, SeekFrom, Write},
+    path::Path,
     sync::{Arc, Condvar, Mutex},
 };
 
-#[derive(Default)]
-struct Usage {
-    current: u64,
-    peak: u64,
-}
-
-pub(crate) struct MemoryBudget {
-    cap: u64,
-    usage: Mutex<Usage>,
-}
-impl MemoryBudget {
-    pub(crate) fn new(cap: u64) -> Arc<Self> {
-        Arc::new(Self {
-            cap,
-            usage: Mutex::new(Usage::default()),
-        })
-    }
-    /// Never wait for RAM: an outstanding acquisition can prevent the reader
-    /// from freeing pixels. Fail with a typed limit instead of occupying every
-    /// acquisition slot in a circular wait.
-    pub(crate) fn reserve(self: &Arc<Self>, bytes: u64) -> Result<Reservation, Error> {
-        let mut usage = self.usage.lock().expect("memory accounting lock");
-        let required = usage.current.saturating_add(bytes);
-        crate::tile_output::memory_check(required, self.cap)?;
-        usage.current += bytes;
-        usage.peak = usage.peak.max(usage.current);
-        Ok(Reservation {
-            budget: Arc::clone(self),
-            bytes,
-        })
-    }
-    pub(crate) fn peak(&self) -> u64 {
-        self.usage.lock().expect("memory accounting lock").peak
-    }
-    pub(crate) fn available(&self) -> u64 {
-        self.cap - self.usage.lock().expect("memory accounting lock").current
-    }
-    #[cfg(test)]
-    pub(crate) fn current(&self) -> u64 {
-        self.usage.lock().expect("memory accounting lock").current
-    }
-}
-pub(crate) struct Reservation {
-    budget: Arc<MemoryBudget>,
-    bytes: u64,
-}
-impl Reservation {
-    pub(crate) fn shrink(&mut self, bytes: u64) {
-        assert!(bytes <= self.bytes);
-        self.budget
-            .usage
-            .lock()
-            .expect("memory accounting lock")
-            .current -= self.bytes - bytes;
-        self.bytes = bytes;
-    }
-}
-impl Drop for Reservation {
-    fn drop(&mut self) {
-        self.budget
-            .usage
-            .lock()
-            .expect("memory accounting lock")
-            .current -= self.bytes;
-    }
-}
-
-const STRIP_ROWS: u32 = 64; // JPEG finishes full-width eight-row bands.
+const STRIP_ROWS: u32 = 64; // JPEG consumes full-width eight-row bands.
+const BLOCK_COLUMNS: u32 = 256;
+type TileMetadata = (Option<Vec<u8>>, Option<Vec<u8>>);
 
 pub(crate) struct PixelStrip {
     pub(crate) first_row: u32,
     pub(crate) rows: u32,
     pub(crate) rgba: Vec<u8>,
-    _memory: Reservation,
-}
-struct PendingStrip {
-    pixels: PixelStrip,
-    coverage: Vec<u64>,
-    uncovered: u64,
-}
-impl PendingStrip {
-    fn cover(&mut self, start: usize, end: usize) {
-        for word in start / 64..end.div_ceil(64) {
-            let a = start.saturating_sub(word * 64);
-            let b = (end - word * 64).min(64);
-            let mask = (u64::MAX << a) & (u64::MAX >> (64 - b));
-            self.uncovered -= u64::from((mask & !self.coverage[word]).count_ones());
-            self.coverage[word] |= mask;
-        }
-    }
-}
-type TileMetadata = (Option<Vec<u8>>, Option<Vec<u8>>);
-pub(crate) struct ReceivedPixels {
-    pub(crate) decoded: crate::imaging::DecodedTile,
-    _pixels: Reservation,
-    metadata: Reservation,
-}
-impl ReceivedPixels {
-    pub(crate) fn new(
-        decoded: crate::imaging::DecodedTile,
-        mut pixels: Reservation,
-    ) -> Result<Self, Error> {
-        let bytes = decoded.icc_profile.as_ref().map_or(0, Vec::len)
-            + decoded.exif_metadata.as_ref().map_or(0, Vec::len);
-        // Keep the metadata and its finalization copies charged from decode
-        // through placement, including time spent waiting in deferred storage.
-        let metadata = pixels.budget.reserve(if bytes == 0 {
-            0
-        } else {
-            bytes as u64 * 3 + 128
-        })?;
-        pixels.shrink(decoded.image.as_raw().len() as u64);
-        Ok(Self {
-            decoded,
-            _pixels: pixels,
-            metadata,
-        })
-    }
 }
 struct Metadata {
     position: (u32, u32),
-    data: TileMetadata,
-    _memory: Reservation,
+    icc: MetadataLocation,
+    exif: MetadataLocation,
 }
-#[derive(Default)]
 struct Producer {
-    pending: BTreeMap<u32, PendingStrip>,
+    file: File,
+    pending: BTreeMap<u32, u64>,
     next_row: u32,
     metadata: BTreeMap<u32, Metadata>,
     late: u64,
 }
 #[derive(Default)]
 struct Queue {
-    ready: VecDeque<PixelStrip>,
-    closed: bool,
+    available: u32,
+    next_row: u32,
     metadata: Option<TileMetadata>,
     failure: Option<Error>,
     consumed: u64,
 }
 pub(crate) struct PixelPipe {
     pub(crate) size: Size,
-    pub(crate) budget: Arc<MemoryBudget>,
+    block: Size,
+    block_bytes: usize,
+    columns: u32,
+    reader: Mutex<File>,
     producer: Mutex<Producer>,
     queue: Mutex<Queue>,
     changed: Condvar,
     events: tokio::sync::Notify,
 }
 impl PixelPipe {
-    pub(crate) fn new(size: Size, budget: Arc<MemoryBudget>) -> Arc<Self> {
-        Arc::new(Self {
+    pub(crate) fn new(size: Size, directory: &Path) -> Result<Arc<Self>, Error> {
+        let block = Size {
+            width: size.width.min(BLOCK_COLUMNS),
+            height: size.height.min(STRIP_ROWS),
+        };
+        let pixels = block.width as usize * block.height as usize;
+        let block_bytes = pixels * 4 + pixels.div_ceil(8);
+        let columns = size.width.div_ceil(BLOCK_COLUMNS);
+        let length = u64::from(columns)
+            .checked_mul(u64::from(size.height.div_ceil(STRIP_ROWS)))
+            .and_then(|n| n.checked_mul(block_bytes as u64))
+            .ok_or_else(|| Error::InvalidState("raster dimensions overflow".into()))?;
+        std::fs::create_dir_all(directory).map_err(storage_error)?;
+        let file = tempfile::NamedTempFile::new_in(directory).map_err(storage_error)?;
+        // Reopen, rather than clone, to give the encoder an independent cursor.
+        // Unlink before writing so the handles own cleanup, including on crashes.
+        let reader = file.reopen().map_err(storage_error)?;
+        let (file, path) = file.into_parts();
+        path.close().map_err(storage_error)?;
+        file.set_len(length).map_err(storage_error)?;
+        Ok(Arc::new(Self {
             size,
-            budget,
-            producer: Mutex::new(Producer::default()),
+            block,
+            block_bytes,
+            columns,
+            reader: Mutex::new(reader),
+            producer: Mutex::new(Producer {
+                file,
+                pending: BTreeMap::new(),
+                next_row: 0,
+                metadata: BTreeMap::new(),
+                late: 0,
+            }),
             queue: Mutex::new(Queue::default()),
             changed: Condvar::new(),
             events: tokio::sync::Notify::new(),
-        })
+        }))
     }
     pub(crate) fn error(&self) -> Option<Error> {
         self.queue.lock().expect("strip queue lock").failure.clone()
@@ -177,16 +110,11 @@ impl PixelPipe {
         }
     }
     pub(crate) fn fail(&self, error: Error) {
-        {
-            let mut queue = self.queue.lock().expect("strip queue lock");
-            queue.failure.get_or_insert(error);
-            queue.ready.clear();
-        }
+        let mut queue = self.queue.lock().expect("strip queue lock");
+        queue.failure.get_or_insert(error);
+        drop(queue);
         self.changed.notify_all();
         self.events.notify_waiters();
-        let mut producer = self.producer.lock().expect("pixel producer lock");
-        producer.pending.clear();
-        producer.metadata.clear();
     }
     pub(crate) fn consumed(&self) -> u64 {
         self.queue.lock().expect("strip queue lock").consumed
@@ -198,55 +126,34 @@ impl PixelPipe {
     pub(crate) fn late(&self) -> u64 {
         self.producer.lock().expect("pixel producer lock").late
     }
-    #[cfg(test)]
-    pub(crate) fn queued_strips(&self) -> usize {
-        self.queue.lock().expect("strip queue lock").ready.len()
-    }
-    fn blank(&self, first_row: u32) -> Result<PendingStrip, Error> {
-        let rows = STRIP_ROWS.min(self.size.height - first_row);
-        let pixels = u64::from(self.size.width) * u64::from(rows);
-        let words = pixels.div_ceil(64) as usize;
-        let memory = self.budget.reserve(pixels * 4 + words as u64 * 8 + 128)?;
-        Ok(PendingStrip {
-            pixels: PixelStrip {
-                first_row,
-                rows,
-                rgba: vec![0; pixels as usize * 4],
-                _memory: memory,
-            },
-            coverage: vec![0; words],
-            uncovered: pixels,
-        })
-    }
-    /// Geometry and composition operate only on producer-owned allocations.
-    /// Any contribution covers a pixel; overlaps composite until whole-strip
-    /// handoff freezes even unread pixels. Later contributions to handed-off
-    /// rows are discarded, but later rows still apply. Conflicting overlaps
-    /// have unspecified results across runs/strips; identical opaque ones do not.
+    /// Placement does disk I/O and must run on a blocking worker. Contributions
+    /// composite until whole-strip handoff freezes the pixels. Later writes to
+    /// frozen rows are discarded; conflicting overlaps have unspecified results.
     pub(crate) fn place(
         &self,
         id: u32,
         placement: &TilePlacement,
-        pixels: ReceivedPixels,
+        decoded: DecodedTile,
     ) -> Result<(), Error> {
         let mut producer = self.producer.lock().expect("pixel producer lock");
         if let Some(error) = self.error() {
             return Err(error);
         }
-        let decoded = pixels.decoded;
-        let image = decoded.image;
-        let metadata_bytes = decoded.icc_profile.as_ref().map_or(0, Vec::len)
-            + decoded.exif_metadata.as_ref().map_or(0, Vec::len);
-        if metadata_bytes > 0 {
+        if decoded.icc_profile.is_some() || decoded.exif_metadata.is_some() {
+            let icc = store_metadata(&mut producer.file, decoded.icc_profile.as_deref())
+                .map_err(storage_error)?;
+            let exif = store_metadata(&mut producer.file, decoded.exif_metadata.as_deref())
+                .map_err(storage_error)?;
             producer.metadata.insert(
                 id,
                 Metadata {
                     position: (placement.position.x, placement.position.y),
-                    data: (decoded.icc_profile, decoded.exif_metadata),
-                    _memory: pixels.metadata,
+                    icc,
+                    exif,
                 },
             );
         }
+        let image = decoded.image;
         let width = image
             .width()
             .min(
@@ -268,91 +175,88 @@ impl PixelPipe {
         if width == 0 || height == 0 {
             return Ok(());
         }
-        let end = placement.position.y + height;
-        let mut y = placement.position.y;
-        let opaque = image
-            .as_raw()
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .all(|p| p[3] == 255);
-        while y < end {
-            let first_row = y / STRIP_ROWS * STRIP_ROWS;
-            let until = end.min(first_row.saturating_add(STRIP_ROWS));
+        let opaque = image.pixels().all(|p| p[3] == 255);
+        let (x, y) = (placement.position.x, placement.position.y);
+        let mut bytes = vec![0; self.block_bytes];
+        for band in y / STRIP_ROWS..(y + height).div_ceil(STRIP_ROWS) {
+            if let Some(error) = self.error() {
+                return Err(error);
+            }
+            let first_row = band * STRIP_ROWS;
             if first_row < producer.next_row {
                 producer.late += 1;
-            } else {
-                if let std::collections::btree_map::Entry::Vacant(entry) =
-                    producer.pending.entry(first_row)
-                {
-                    let pending = self.blank(first_row)?;
-                    entry.insert(pending);
-                }
-                let pending = producer.pending.get_mut(&first_row).expect("pending strip");
-                for row in y..until {
-                    let source =
-                        ((row - placement.position.y) as usize * image.width() as usize) * 4;
-                    let start = (row - first_row) as usize * self.size.width as usize
-                        + placement.position.x as usize;
-                    let target = &mut pending.pixels.rgba[start * 4..(start + width as usize) * 4];
-                    let source = &image.as_raw()[source..source + width as usize * 4];
-                    if opaque {
-                        target.copy_from_slice(source);
-                    } else {
-                        for (dst, src) in target
-                            .as_chunks_mut::<4>()
-                            .0
-                            .iter_mut()
-                            .zip(source.as_chunks::<4>().0.iter())
-                        {
-                            let mut pixel = image::Rgba(*dst);
-                            pixel.blend(&image::Rgba(*src));
-                            *dst = pixel.0;
-                        }
-                    }
-                    pending.cover(start, start + width as usize);
-                }
-                self.publish_ready(&mut producer)?;
+                continue;
             }
-            y = until;
+            let mut covered = 0;
+            let Producer { file, pending, .. } = &mut *producer;
+            for column in x / BLOCK_COLUMNS..(x + width).div_ceil(BLOCK_COLUMNS) {
+                let offset = (u64::from(band) * u64::from(self.columns) + u64::from(column))
+                    * self.block_bytes as u64;
+                file.seek(SeekFrom::Start(offset)).map_err(storage_error)?;
+                file.read_exact(&mut bytes).map_err(storage_error)?;
+                let (pixels, coverage) =
+                    bytes.split_at_mut(self.block.width as usize * self.block.height as usize * 4);
+                let left = column * BLOCK_COLUMNS;
+                let start_x = x.max(left);
+                let start_y = y.max(first_row);
+                let width = (x + width).min(left.saturating_add(self.block.width)) - start_x;
+                let height =
+                    (y + height).min(first_row.saturating_add(self.block.height)) - start_y;
+                let source = crop_imm(&image, start_x - x, start_y - y, width, height);
+                let mut target = ImageBuffer::<Rgba<u8>, _>::from_raw(
+                    self.block.width,
+                    self.block.height,
+                    pixels,
+                )
+                .expect("block pixels");
+                if opaque {
+                    target
+                        .copy_from(&*source, start_x - left, start_y - first_row)
+                        .map_err(storage_error)?;
+                } else {
+                    overlay(
+                        &mut target,
+                        &*source,
+                        i64::from(start_x - left),
+                        i64::from(start_y - first_row),
+                    );
+                }
+                for row in start_y - first_row..start_y - first_row + height {
+                    let start = (row * self.block.width + start_x - left) as usize;
+                    covered += cover(coverage, start, start + width as usize);
+                }
+                file.seek(SeekFrom::Start(offset)).map_err(storage_error)?;
+                file.write_all(&bytes).map_err(storage_error)?;
+            }
+            let rows = STRIP_ROWS.min(self.size.height - first_row);
+            *pending
+                .entry(first_row)
+                .or_insert(u64::from(self.size.width) * u64::from(rows)) -= covered;
         }
-        Ok(())
-    }
-    fn publish_ready(&self, producer: &mut Producer) -> Result<(), Error> {
         while producer
             .pending
             .get(&producer.next_row)
-            .is_some_and(|strip| strip.uncovered == 0)
+            .is_some_and(|left| *left == 0)
         {
-            self.publish_next(producer)?;
+            self.publish_next(&mut producer)?;
         }
         Ok(())
     }
     fn publish_next(&self, producer: &mut Producer) -> Result<(), Error> {
         let row = producer.next_row;
-        if let std::collections::btree_map::Entry::Vacant(entry) = producer.pending.entry(row) {
-            entry.insert(self.blank(row)?);
-        }
         let mut queue = self.queue.lock().expect("strip queue lock");
         if let Some(error) = &queue.failure {
             return Err(error.clone());
         }
-        let mut pending = producer.pending.remove(&row).expect("ready strip");
-        drop(pending.coverage);
-        pending
-            .pixels
-            ._memory
-            .shrink(pending.pixels.rgba.len() as u64);
-        producer.next_row += pending.pixels.rows;
-        // Handoff freezes the whole strip. Its reservation follows it into
-        // the queue and encoder; there is no separate queue capacity/wait.
-        queue.ready.push_back(pending.pixels);
-        queue.closed = producer.next_row == self.size.height;
+        producer.pending.remove(&row);
+        producer.next_row += STRIP_ROWS.min(self.size.height - row);
+        queue.available = producer.next_row;
         drop(queue);
         self.changed.notify_all();
         Ok(())
     }
-    /// Finalize uncovered pixels for positioned layouts after acquisition succeeds.
+    /// After successful acquisition, finalize metadata in plan order and fill
+    /// uncovered layout pixels with transparent black.
     pub(crate) fn finish(&self, reused: &[ReusedTile]) -> Result<(), Error> {
         let mut producer = self.producer.lock().expect("pixel producer lock");
         let mapping: BTreeMap<_, _> = reused
@@ -361,15 +265,13 @@ impl PixelPipe {
             .collect();
         let mut ordered: Vec<_> = producer.metadata.iter().collect();
         ordered.sort_by_key(|(id, m)| mapping.get(&m.position).copied().unwrap_or(**id));
-        let mut metadata = (None, None);
-        for (_, m) in ordered {
-            if metadata.0.is_none() {
-                metadata.0.clone_from(&m.data.0);
-            }
-            if metadata.1.is_none() {
-                metadata.1.clone_from(&m.data.1);
-            }
-        }
+        let icc = ordered.iter().find_map(|(_, m)| m.icc);
+        let exif = ordered.iter().find_map(|(_, m)| m.exif);
+        let metadata = (
+            read_metadata(&mut producer.file, icc).map_err(storage_error)?,
+            read_metadata(&mut producer.file, exif).map_err(storage_error)?,
+        );
+        producer.metadata.clear();
         self.queue.lock().expect("strip queue lock").metadata = Some(metadata);
         self.changed.notify_all();
         while producer.next_row < self.size.height {
@@ -378,44 +280,91 @@ impl PixelPipe {
         Ok(())
     }
     pub(crate) fn metadata(&self) -> Result<TileMetadata, Error> {
-        let mut queue = self.queue.lock().expect("strip queue lock");
-        loop {
-            if let Some(error) = &queue.failure {
-                return Err(error.clone());
-            }
-            if let Some(metadata) = &queue.metadata {
-                return Ok(metadata.clone());
-            }
-            queue = self.changed.wait(queue).expect("strip queue lock");
+        let queue = self
+            .changed
+            .wait_while(self.queue.lock().expect("strip queue lock"), |q| {
+                q.metadata.is_none() && q.failure.is_none()
+            })
+            .expect("strip queue lock");
+        if let Some(error) = &queue.failure {
+            return Err(error.clone());
         }
+        Ok(queue.metadata.clone().expect("finished metadata"))
     }
-    /// The encoder receives exclusive ownership; pixel access needs no lock.
+    /// Reads one immutable strip from staging. No producer lock is held waiting
+    /// for missing tiles, so later tiles cannot prevent the required acquisition.
     pub(crate) fn receive(&self) -> Result<Option<PixelStrip>, Error> {
-        let mut queue = self.queue.lock().expect("strip queue lock");
-        loop {
-            if let Some(error) = &queue.failure {
-                return Err(error.clone());
-            }
-            if let Some(strip) = queue.ready.pop_front() {
-                drop(queue);
-                self.changed.notify_all();
-                return Ok(Some(strip));
-            }
-            if queue.closed {
-                return Ok(None);
-            }
-            queue = self.changed.wait(queue).expect("strip queue lock");
+        let mut queue = self
+            .changed
+            .wait_while(self.queue.lock().expect("strip queue lock"), |q| {
+                q.next_row == q.available && q.next_row < self.size.height && q.failure.is_none()
+            })
+            .expect("strip queue lock");
+        if let Some(error) = &queue.failure {
+            return Err(error.clone());
         }
+        if queue.next_row == self.size.height {
+            return Ok(None);
+        }
+        let first_row = queue.next_row;
+        let rows = STRIP_ROWS.min(self.size.height - first_row);
+        queue.next_row += rows;
+        drop(queue);
+        let offset =
+            u64::from(first_row / STRIP_ROWS) * u64::from(self.columns) * self.block_bytes as u64;
+        let length = self.size.width as usize * rows as usize * 4;
+        let mut reader = self.reader.lock().expect("pixel reader lock");
+        let mut rgba = Vec::new();
+        rgba.try_reserve_exact(length).map_err(storage_error)?;
+        rgba.resize(length, 0);
+        let mut rgba =
+            image::RgbaImage::from_raw(self.size.width, rows, rgba).expect("strip pixels");
+        let mut block = image::RgbaImage::new(self.block.width, self.block.height);
+        for column in 0..self.columns {
+            reader
+                .seek(SeekFrom::Start(
+                    offset + u64::from(column) * self.block_bytes as u64,
+                ))
+                .map_err(storage_error)?;
+            reader.read_exact(block.as_mut()).map_err(storage_error)?;
+            let left = column * BLOCK_COLUMNS;
+            let width = self.block.width.min(self.size.width - left);
+            rgba.copy_from(&*crop_imm(&block, 0, 0, width, rows), left, 0)
+                .map_err(storage_error)?;
+        }
+        discard(
+            &reader,
+            offset,
+            u64::from(self.columns) * self.block_bytes as u64,
+        );
+        Ok(Some(PixelStrip {
+            first_row,
+            rows,
+            rgba: rgba.into_raw(),
+        }))
     }
 }
 
+fn cover(bytes: &mut [u8], start: usize, end: usize) -> u64 {
+    let mut covered = 0;
+    for (index, byte) in bytes[start / 8..end.div_ceil(8)].iter_mut().enumerate() {
+        let first = (start / 8 + index) * 8;
+        let low = start.saturating_sub(first);
+        let high = (end - first).min(8);
+        let mask = (u8::MAX << low) & (u8::MAX >> (8 - high));
+        covered += u64::from((!*byte & mask).count_ones());
+        *byte |= mask;
+    }
+    covered
+}
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use crate::imaging::DecodedTile;
     use dezoomify::model::{Point, TileRole};
+    use image::Pixel;
     fn new_pipe(width: u32, height: u32) -> Arc<PixelPipe> {
-        PixelPipe::new(Size { width, height }, MemoryBudget::new(8192))
+        PixelPipe::new(Size { width, height }, std::env::temp_dir().as_path()).unwrap()
     }
     pub(crate) fn placement(x: u32, y: u32) -> TilePlacement {
         TilePlacement {
@@ -427,64 +376,52 @@ pub(crate) mod tests {
         }
     }
     pub(crate) fn put(pipe: &PixelPipe, id: u32, x: u32, y: u32, image: image::RgbaImage) {
-        let memory = pipe.budget.reserve(image.as_raw().len() as u64).unwrap();
         pipe.place(
             id,
             &placement(x, y),
-            ReceivedPixels::new(
-                DecodedTile {
-                    image,
-                    icc_profile: None,
-                    exif_metadata: None,
-                },
-                memory,
-            )
-            .unwrap(),
+            DecodedTile {
+                image,
+                icc_profile: None,
+                exif_metadata: None,
+            },
         )
         .unwrap();
     }
     #[test]
-    fn shuffled_tiles_are_copied_into_one_owned_strip_and_handoff_is_final() {
-        let pipe = new_pipe(4, 2);
-        put(
-            &pipe,
-            0,
-            0,
-            0,
-            image::RgbaImage::from_pixel(2, 2, image::Rgba([100, 0, 0, 255])),
-        );
-        put(
-            &pipe,
-            1,
-            0,
-            0,
-            image::RgbaImage::from_pixel(2, 2, image::Rgba([0, 100, 0, 128])),
-        );
-        assert_eq!(pipe.queued_strips(), 0);
-        put(
-            &pipe,
-            2,
-            2,
-            0,
-            image::RgbaImage::from_pixel(2, 2, image::Rgba([9, 8, 7, 255])),
-        );
-        let strip = pipe.receive().unwrap().unwrap();
-        let mut expected = image::Rgba([100, 0, 0, 255]);
-        expected.blend(&image::Rgba([0, 100, 0, 128]));
-        assert_eq!(&strip.rgba[..4], &expected.0);
-        assert_eq!(&strip.rgba[8..12], &[9, 8, 7, 255]);
-        put(
-            &pipe,
-            3,
-            0,
-            0,
-            image::RgbaImage::from_pixel(4, 2, image::Rgba([0, 0, 255, 255])),
-        );
-        assert_eq!(&strip.rgba[..4], &expected.0);
-        assert_eq!(pipe.late(), 1);
-        assert_eq!(pipe.budget.current(), strip.rgba.len() as u64);
-        drop(strip);
-        assert_eq!(pipe.budget.current(), 0);
+    fn overlapping_tiles_are_composited_until_handoff_then_frozen() {
+        let pipe = new_pipe(517, 257);
+        for (id, (x, width, color)) in [
+            (0, 257, [100, 0, 0, 255]),
+            (0, 257, [0, 100, 0, 128]),
+            (257, 260, [9, 8, 7, 255]),
+            (0, 517, [0, 0, 255, 255]), // Complete strips are already frozen.
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            put(
+                &pipe,
+                id as u32,
+                x,
+                0,
+                image::RgbaImage::from_pixel(width, 257, image::Rgba(color)),
+            );
+        }
+        let mut left = image::Rgba([100, 0, 0, 255]);
+        left.blend(&image::Rgba([0, 100, 0, 128]));
+        let expected = image::RgbaImage::from_fn(517, 257, |x, _| {
+            if x < 257 {
+                left
+            } else {
+                image::Rgba([9, 8, 7, 255])
+            }
+        });
+        let mut pixels = Vec::new();
+        while let Some(strip) = pipe.receive().unwrap() {
+            pixels.extend(strip.rgba);
+        }
+        assert_eq!(pixels, expected.into_raw());
+        assert!(pipe.late() > 0);
     }
     #[test]
     fn reader_waits_for_required_pixels_and_failure_wakes_it() {
@@ -535,7 +472,6 @@ pub(crate) mod tests {
             0,
             image::RgbaImage::from_pixel(1, 1, image::Rgba([9, 8, 7, 255])),
         );
-        assert_eq!(pipe.queued_strips(), 0);
         pipe.finish(&[]).unwrap();
         assert_eq!(
             pipe.receive().unwrap().unwrap().rgba,
@@ -543,62 +479,24 @@ pub(crate) mod tests {
         );
     }
     #[test]
-    fn handoffs_release_owned_memory_and_cancellation_clears_queued_strips() {
-        for cancel in [false, true] {
-            let pipe = new_pipe(1, 256);
-            let producer = Arc::clone(&pipe);
-            let (sent, received) = std::sync::mpsc::channel();
-            let thread = std::thread::spawn(move || {
-                let image =
-                    image::RgbaImage::from_fn(1, 256, |_, y| image::Rgba([y as u8, 0, 0, 255]));
-                let memory = producer.budget.reserve(1024).unwrap();
-                sent.send(
-                    producer.place(
-                        0,
-                        &placement(0, 0),
-                        ReceivedPixels::new(
-                            DecodedTile {
-                                image,
-                                icc_profile: None,
-                                exif_metadata: None,
-                            },
-                            memory,
-                        )
-                        .unwrap(),
-                    ),
-                )
-                .unwrap();
-            });
-            received
-                .recv_timeout(std::time::Duration::from_secs(2))
-                .unwrap()
-                .unwrap();
-            assert_eq!(pipe.queued_strips(), 4);
-            if cancel {
-                pipe.fail(Error::Cancelled);
-                assert!(matches!(pipe.receive(), Err(Error::Cancelled)));
-            } else {
-                for row in [0, 64, 128, 192] {
-                    let strip = pipe.receive().unwrap().unwrap();
-                    assert_eq!(strip.first_row, row);
-                    assert_eq!(strip.rgba[0], row as u8);
-                }
-                assert!(pipe.receive().unwrap().is_none());
-            }
-            thread.join().unwrap();
-            assert_eq!(pipe.budget.current(), 0);
+    fn placement_can_finish_before_the_reader_starts() {
+        let pipe = new_pipe(1, 256);
+        let source = image::RgbaImage::from_fn(1, 256, |_, y| image::Rgba([y as u8, 0, 0, 255]));
+        let expected = source.clone().into_raw();
+        let producer = Arc::clone(&pipe);
+        let (sent, received) = std::sync::mpsc::channel();
+        let thread = std::thread::spawn(move || {
+            put(&producer, 0, 0, 0, source);
+            sent.send(()).unwrap();
+        });
+        received
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .unwrap();
+        thread.join().unwrap();
+        let mut pixels = Vec::new();
+        while let Some(strip) = pipe.receive().unwrap() {
+            pixels.extend(strip.rgba);
         }
-    }
-    #[test]
-    fn full_budget_returns_a_limit_without_waiting() {
-        let budget = MemoryBudget::new(100);
-        let in_use = budget.reserve(60).unwrap();
-        let remainder = budget.reserve(40).unwrap();
-        assert_eq!(budget.current(), 100);
-        assert!(budget.reserve(1).is_err());
-        drop(remainder);
-        drop(in_use);
-        assert_eq!(budget.current(), 0);
-        assert_eq!(budget.peak(), 100);
+        assert_eq!(pixels, expected);
     }
 }

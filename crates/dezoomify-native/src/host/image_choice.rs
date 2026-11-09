@@ -12,14 +12,15 @@ impl NativeHost<'_> {
         mut preview: impl FnMut(u32, String),
     ) -> Result<T, Error> {
         tokio::pin!(answer);
-        self.controlled(async {
-            tokio::select! {
-                biased;
-                result = &mut answer => result,
-                () = self.image_previews(catalog, &mut preview) => answer.await,
-            }
-        })
-        .await
+        self.controls
+            .until_stopped(async {
+                tokio::select! {
+                    biased;
+                    result = &mut answer => result,
+                    () = self.image_previews(catalog, &mut preview) => answer.await,
+                }
+            })
+            .await
     }
 
     pub(super) async fn select_image(&self, catalog: Catalog) -> Result<u32, Error> {
@@ -73,7 +74,7 @@ impl NativeHost<'_> {
             return Ok(None);
         }
         let pixels = self.tile(&ResourceTile::try_from(tile.clone())?).await?;
-        let image = &pixels.decoded.image;
+        let image = &pixels.image;
         if image.width() < size.width || image.height() < size.height {
             return Ok(None);
         }

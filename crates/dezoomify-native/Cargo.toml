@@ -14,6 +14,7 @@ base64.workspace = true
 rustls.workspace = true
 reqwest.workspace = true
 tokio = { workspace = true, features = ["sync", "time", "macros"] }
+tokio-util = { version = "0.7", features = ["rt"] }
 webpki-roots = "1"
 url.workspace = true
 sha2.workspace = true

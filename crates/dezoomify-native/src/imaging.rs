@@ -1,7 +1,7 @@
 //! Image decoding, metadata, encoders, and memory limits.
 use std::path::PathBuf;
 
-use dezoomify::model::{Error, LimitContext, LimitReason, OutputFormat, OutputLayout, Size};
+use dezoomify::model::{Error, LimitContext, LimitReason, OutputFormat, Size};
 
 pub(crate) fn check_dimensions(
     format: dezoomify::model::OutputFormat,
@@ -23,27 +23,21 @@ pub(crate) fn check_dimensions(
     Ok(())
 }
 
-pub(crate) fn encoder_workspace(format: OutputFormat, size: &Size) -> u64 {
-    let (width, height) = (u64::from(size.width), u64::from(size.height));
-    match format {
-        OutputFormat::Png => width * 16 + (1 << 20),
-        OutputFormat::Tiff => width * 8 + height * 24 + (128 << 10),
-        OutputFormat::Webp => width * height * 32 + (128 << 10),
-        // Conservative full-image, encoded-file and codec workspace reservation,
-        // not a process RSS guarantee. Saturation makes overflow fail the budget.
-        _ if format.codec().layout == OutputLayout::Buffered => width
-            .saturating_mul(height)
-            .saturating_mul(64)
-            .saturating_add(16 << 20),
-        _ => 128 << 10,
-    }
+/// Conservative preflight for codecs requiring a complete image, not an RSS limit.
+pub(crate) fn buffered_workspace(format: OutputFormat, size: &Size) -> u64 {
+    let pixels = u64::from(size.width) * u64::from(size.height);
+    let (per_pixel, fixed) = match format {
+        OutputFormat::Webp => (32, 128 << 10),
+        _ => (64, 16 << 20),
+    };
+    pixels.saturating_mul(per_pixel).saturating_add(fixed)
 }
 
 /// Default number of tile acquisitions in flight.
 pub const MAX_CONCURRENT: usize = 16;
 
 /// Bytes currently available to the process according to the operating
-/// system. The native Host samples this to cap its invocation's RAM budget;
+/// system. The native Host samples this to guard buffered codecs and tiled output;
 /// availability can change after sampling. Returns zero if the system probe
 /// cannot be initialized.
 #[must_use]

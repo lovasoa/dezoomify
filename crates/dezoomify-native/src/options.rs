@@ -49,7 +49,8 @@ pub struct JobOptions {
     pub max_bytes: u64,
     /// Core-owned adaptive tile pacing; the native Host adds no throttle.
     pub pacing: Option<RequestPacing>,
-    /// RAM budget for tile processing, pixels, descriptors and codec workspace.
+    /// RAM guard for buffered codecs and tiled-output conversion/indexes.
+    /// Streaming raster pixels use disk staging and do not consume this budget.
     /// Defaults to 80% of available RAM; callers may supply a smaller cap.
     pub output_retain_cap: u64,
 }
