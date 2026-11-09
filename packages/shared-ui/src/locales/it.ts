@@ -79,7 +79,7 @@ export const it = {
   "view.modal.closeTitle": "Chiudi",
   // Desktop-app guidance modal.
   "view.desktop.title": "Applicazione desktop Dezoomify",
-  "view.desktop.download.windows": "Programma di installazione Windows · x64 (MSI)",
+  "view.desktop.download.windows": "Programma di installazione Windows · x64 (NSIS)",
   "view.desktop.download.macos": "Programma di installazione macOS · Apple Silicon (DMG)",
   "view.desktop.download.linux": "Programma di installazione Linux · x64 (DEB)",
   "view.desktop.step1":

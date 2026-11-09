@@ -150,7 +150,7 @@ mod tests {
         assert_eq!(assets(&plan, &root).len(), 3);
         for (platform, target, extension) in [
             ("linux-x86_64", "desktop-linux-x86_64", ".deb"),
-            ("windows-x86_64", "desktop-windows-x86_64", ".msi"),
+            ("windows-x86_64", "desktop-windows-x86_64", ".exe"),
             ("darwin-aarch64", "desktop-macos-aarch64", ".app.tar.gz"),
         ] {
             let url = platforms[platform]["url"].as_str().unwrap();

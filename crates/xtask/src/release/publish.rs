@@ -92,7 +92,7 @@ fn release_publish(plan: &Plan, artifacts: &std::path::Path) -> Result<(), Strin
             .ok_or_else(|| format!("target '{}' has no artifact name rule", target.name))?;
         assets.insert(artifacts.join(&target.name).join(name));
     }
-    // Windows uses the same MSI for installation and updating.
+    // Windows uses the same NSIS installer for installation and updating.
     assets.extend(super::updater::assets(plan, artifacts));
     assets.insert(manifest_path);
     for asset in assets {
@@ -120,7 +120,7 @@ fn release_publish(plan: &Plan, artifacts: &std::path::Path) -> Result<(), Strin
 fn labeled_asset(path: &std::path::Path) -> std::ffi::OsString {
     let filename = path.file_name().unwrap_or_default().to_string_lossy();
     let label = [
-        (".msi", "Windows installer: x64 (MSI)"),
+        (".exe", "Windows installer: x64 (NSIS)"),
         (".deb", "Linux installer: x64 (DEB)"),
         (".dmg", "macOS installer: Apple Silicon (DMG)"),
         ("macos-aarch64.app.tar.gz", "macOS updater: Apple Silicon"),

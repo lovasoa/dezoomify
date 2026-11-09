@@ -50,7 +50,7 @@ its tile files. Finish or cancel the current download before opening another sou
 ## Install
 
 The [releases page](https://github.com/lovasoa/dezoomify/releases/latest)
-ships installers for Linux x86_64 (`.deb`), Windows x86_64 (`.msi`),
+ships installers for Linux x86_64 (`.deb`), Windows x86_64 (`.exe`, NSIS),
 and Apple silicon macOS (`.dmg`). Linux and Windows installers are unsigned.
 macOS releases use a Developer ID signature and Apple notarization. The operating
 system may ask you to confirm that you want to open a downloaded app.
@@ -64,7 +64,7 @@ upgrade to gain the updater.
 You can also build the app locally with `cargo xtask build desktop`, which
 produces an installer for the matching host under
 `target/release/bundle/` (Linux `.deb` on a Linux host with the webview
-system packages; Windows `.msi` and macOS `.dmg` only on their matching
+system packages; Windows `.exe` (NSIS) and macOS `.dmg` only on their matching
 hosts). Local macOS builds use an ad-hoc signature unless Apple signing
 credentials are supplied; these builds are not notarized by default.
 
