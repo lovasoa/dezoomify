@@ -4,14 +4,12 @@
 use std::collections::HashSet;
 
 use crate::Vec2d;
-use crate::core::discovery::{Metadata, json_metadata};
-use crate::core::{
-    DiscoveryError, DiscoveryResource, FormatSpec, ImagePlan, ParsedResource, ResolvedLevel,
-};
-use crate::model::{TileSource, ViewerLevel, ViewerObservation, ViewerTileRequest};
+use crate::core::{DiscoveryError, FormatSpec, ImagePlan, ParsedResource, ResolvedLevel};
+use crate::model::{TileSource, ViewerLevel, ViewerTileRequest};
 
-pub const SPEC: FormatSpec = FormatSpec::new("viewer", &[json_metadata::<ViewerObservation>()])
-    .with_display_name("Page viewer");
+/// Registered so `format=viewer` resolves and stays listed; typed observations
+/// compile without document parsing, and no URL matches this format's routes.
+pub const SPEC: FormatSpec = FormatSpec::new("viewer", &[]).with_display_name("Page viewer");
 
 /// Compile one live-viewer pyramid into source grids. `source_url` names the
 /// page the Host loaded the pyramid from; the Host resolves `handle` for this
@@ -45,13 +43,6 @@ pub(crate) fn compile_pyramid(
         uri: source_url.to_owned(),
         parsed: Box::new(ParsedResource::Image(ImagePlan::new(None, levels))),
     })
-}
-
-impl Metadata for ViewerObservation {
-    fn decode(self, _: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
-        let pyramid = self.dezoomify_viewer;
-        compile_pyramid(&pyramid.source_url, pyramid.handle, pyramid.levels)
-    }
 }
 
 fn valid_handle(handle: &str) -> bool {

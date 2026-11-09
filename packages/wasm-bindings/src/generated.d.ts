@@ -15,17 +15,6 @@ export function applyProcessing(recipe: ProcessingRecipe, bytes: Uint8Array): Ui
 export type ProcessingRecipe = "none" | "google-arts-decrypt";
 
 /**
- * A complete snapshot supplied by an identified live viewer. Contents are
- * required: discovery decodes these bytes without fetching or following links.
- * Its wire representation is also accepted wherever a [`JobInput`] is expected.
- */
-export interface ObservedInput {
-    url: string;
-    contents: string;
-    kind: ObservedInputKind;
-}
-
-/**
  * A desktop picker answer applies only to its current ordered catalog.
  */
 export type DesktopImageChoice = { kind: "one"; index: number } | { kind: "all" };
@@ -165,15 +154,6 @@ export interface OutputGrid {
      * Additional pixels on each side, clipped to the canvas.
      */
     overlap: Size;
-}
-
-/**
- * Complete, finite pixel grids observed in a live viewer. Serialize as supplied
- * `observed-viewer`; the Host resolves `handle` for this job only.
- * These are source images, independent of viewport rotation, pan or overlays.
- */
-export interface ViewerObservation {
-    dezoomify_viewer: ViewerPyramid;
 }
 
 /**
@@ -630,12 +610,6 @@ export interface LimitContext {
     bytes_required?: number;
     bytes_available?: number;
 }
-
-/**
- * Supported format metadata can be used directly; viewer grids require a
- * loader retained by the Host for this exact source document and job.
- */
-export type ObservedInputKind = "observed-metadata" | "observed-viewer";
 
 /**
  * The meaning of the existing compression setting for a codec.

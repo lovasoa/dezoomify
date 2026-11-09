@@ -32,29 +32,24 @@ fn supplied_viewer_metadata_preserves_all_images_without_fetching() {
 
 #[test]
 fn supplied_observations_never_follow_links() {
-    for kind in [
-        DiscoveryInputKind::ObservedMetadata,
-        DiscoveryInputKind::ObservedViewer,
-    ] {
-        let host = MemoryHost::default();
-        let loaded = JobInput {
-            url: "https://page.test#openseadragon".into(),
-            contents: Some(r#"<a href="https://must-not-fetch.test/info.json">image</a>"#.into()),
-            kind: Some(kind),
-            viewer: None,
-        };
-        let source = JobInput {
-            url: "https://page.test".into(),
-            contents: Some("<html></html>".into()),
-            kind: None,
-            viewer: None,
-        };
-        let error =
-            futures::executor::block_on(dezoomify(vec![source, loaded], Options::default(), &host))
-                .unwrap_err();
-        assert!(matches!(error, Error::DiscoveryFailed { .. }), "{error:?}");
-        assert!(host.fetched.borrow().is_empty());
-    }
+    let host = MemoryHost::default();
+    let loaded = JobInput {
+        url: "https://page.test#openseadragon".into(),
+        contents: Some(r#"<a href="https://must-not-fetch.test/info.json">image</a>"#.into()),
+        kind: Some(DiscoveryInputKind::ObservedMetadata),
+        viewer: None,
+    };
+    let source = JobInput {
+        url: "https://page.test".into(),
+        contents: Some("<html></html>".into()),
+        kind: None,
+        viewer: None,
+    };
+    let error =
+        futures::executor::block_on(dezoomify(vec![source, loaded], Options::default(), &host))
+            .unwrap_err();
+    assert!(matches!(error, Error::DiscoveryFailed { .. }), "{error:?}");
+    assert!(host.fetched.borrow().is_empty());
 }
 fn input() -> Vec<JobInput> {
     vec![JobInput {

@@ -549,8 +549,8 @@ pub enum DiscoveryInputKind {
     /// Complete metadata reconstructed from a loaded viewer; never fetched.
     ObservedMetadata,
     /// Finite grids backed by a live page loader, used after supported metadata.
-    /// Never fetched and never follow links; grids arrive as a typed [`JobInput`]
-    /// `viewer` payload or, while producers migrate, as a JSON document.
+    /// Supplied through the typed [`JobInput`] `viewer` payload; never fetched
+    /// and never follow links.
     ObservedViewer,
 }
 
@@ -578,51 +578,6 @@ pub struct JobInput {
 /// Additional discovery evidence supplied by a Host. Empty means no more
 /// sources are available under the requested interaction policy.
 pub type JobInputs = Vec<JobInput>;
-
-/// A complete snapshot supplied by an identified live viewer. Contents are
-/// required: discovery decodes these bytes without fetching or following links.
-/// Its wire representation is also accepted wherever a [`JobInput`] is expected.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
-pub struct ObservedInput {
-    pub url: String,
-    pub contents: String,
-    pub kind: ObservedInputKind,
-}
-
-/// Supported format metadata can be used directly; viewer grids require a
-/// loader retained by the Host for this exact source document and job.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
-pub enum ObservedInputKind {
-    #[serde(rename = "observed-metadata")]
-    Metadata,
-    #[serde(rename = "observed-viewer")]
-    Viewer,
-}
-
-impl From<ObservedInput> for JobInput {
-    fn from(input: ObservedInput) -> Self {
-        Self {
-            url: input.url,
-            contents: Some(input.contents),
-            kind: Some(match input.kind {
-                ObservedInputKind::Metadata => DiscoveryInputKind::ObservedMetadata,
-                ObservedInputKind::Viewer => DiscoveryInputKind::ObservedViewer,
-            }),
-            viewer: None,
-        }
-    }
-}
-
-/// Complete, finite pixel grids observed in a live viewer. Serialize as supplied
-/// `observed-viewer`; the Host resolves `handle` for this job only.
-/// These are source images, independent of viewport rotation, pan or overlays.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
-pub struct ViewerObservation {
-    pub dezoomify_viewer: ViewerPyramid,
-}
 
 /// The reusable source is the viewer page. The opaque handle names an owned
 /// loader capability scoped to that exact document and job.
@@ -1822,31 +1777,6 @@ pub fn has_secret_params(url: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn complete_observations_use_the_job_input_wire_format() {
-        for kind in [ObservedInputKind::Metadata, ObservedInputKind::Viewer] {
-            let observed = ObservedInput {
-                url: "https://museum.test/image".into(),
-                contents: "snapshot".into(),
-                kind,
-            };
-            let wire = serde_json::to_value(&observed).unwrap();
-            let input: JobInput = serde_json::from_value(wire.clone()).unwrap();
-            assert_eq!(input, observed.into());
-            for missing in ["contents", "kind"] {
-                let mut incomplete = wire.clone();
-                incomplete.as_object_mut().unwrap().remove(missing);
-                assert!(serde_json::from_value::<ObservedInput>(incomplete).is_err());
-            }
-        }
-        assert!(
-            serde_json::from_value::<ObservedInput>(serde_json::json!({
-                "url": "https://museum.test/image", "contents": "snapshot", "kind": "source"
-            }))
-            .is_err()
-        );
-    }
 
     #[test]
     fn viewer_payloads_travel_with_the_input_and_default_to_none() {
