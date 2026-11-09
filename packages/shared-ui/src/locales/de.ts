@@ -294,9 +294,10 @@ export const de = {
     "Dieser Auftrag ist von {host} aus nicht mehr aktiv. Beginnen Sie erneut mit einer frischen Adresse.",
   "desktop.msg.thisPicture": "dieses Bild",
   "desktop.msg.dimsPixels": "{a} mal {b} Pixel",
-  "desktop.msg.needAbout": " Es braucht etwa {need} Speicher",
   "desktop.output.canvasLimit":
-    "Dieses Bild benötigt mehr Arbeitsspeicher als verfügbar ({dims},{need}; Grenze {limit}). Speichern Sie eine kleinere Fassung mit Max. Breite (CLI: --max-width), oder wählen Sie einen Kachelordner. Von {host}.",
+    "Die Verarbeitung dieses Bildes hat das Speicherlimit der App überschritten. Dieses Limit ist unabhängig vom gesamten Arbeitsspeicher Ihres Computers. Wählen Sie im Menü Größe eine kleinere Größe oder das Format IIIF-Kachelordner.",
+  "view.fail.memoryLimit":
+    "Die Verarbeitung dieses Bildes hat das Speicherlimit überschritten. Wählen Sie eine kleinere Bildgröße und starten Sie den Download erneut.",
   "desktop.tile.failed":
     "Eine Kachel von {host} konnte nicht geladen werden. Prüfen Sie das Quellbild und versuchen Sie es erneut.",
   "view.discovery.none":
