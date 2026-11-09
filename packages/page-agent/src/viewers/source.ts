@@ -1,4 +1,4 @@
-import type { ObservedInput, ViewerLevel } from "@dezoomify/wasm-bindings";
+import type { JobInput, ViewerLevel } from "@dezoomify/wasm-bindings";
 import type { ViewerImage } from "./adapter.ts";
 import { registerViewer, type ViewerLoader } from "./session.ts";
 import type { MetadataContext } from "./types.ts";
@@ -14,7 +14,7 @@ export interface LiveViewerSource {
 export function viewerImage(
   identity: object,
   open: () => LiveViewerSource,
-  metadata?: (context: MetadataContext, base: string) => ObservedInput,
+  metadata?: (context: MetadataContext, base: string) => JobInput,
 ): ViewerImage {
   return {
     identity,

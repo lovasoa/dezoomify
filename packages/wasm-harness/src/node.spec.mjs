@@ -115,8 +115,9 @@ test("viewer acquisition retries transport failures and keeps internal exception
   const sourceUrl = "https://iiif.nichibun.test/viewer";
   const size = { width: 256, height: 256 };
   const observation = {
-    dezoomify_viewer: {
-      source_url: sourceUrl,
+    kind: "observed-viewer",
+    url: sourceUrl,
+    viewer: {
       handle: "job-viewer",
       levels: [
         {
@@ -181,17 +182,10 @@ test("viewer acquisition retries transport failures and keeps internal exception
       approveRetry: async () => assert.fail("one automatic retry is sufficient"),
       onProgress() {},
     });
-    // Node has no DOM; this complete metadata observation needs no HTML projection.
+    // Node has no DOM; typed viewer grids need no HTML projection.
     platform.parseHtml = async () => ({});
     const job = wasm.dezoomify(
-      [
-        { url: sourceUrl },
-        {
-          kind: "observed-metadata",
-          url: `${sourceUrl}#observation`,
-          contents: JSON.stringify(observation),
-        },
-      ],
+      [{ url: sourceUrl }, observation],
       { max_concurrent: 1, max_retries: 1, retry_base_delay_ms: 1 },
       platform,
     );

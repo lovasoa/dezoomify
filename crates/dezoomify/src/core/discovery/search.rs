@@ -3,6 +3,7 @@
 //! occupy the bounded stream. Permissions are deferred until accessible work ends.
 
 use super::*;
+use crate::viewer;
 use futures_util::{FutureExt, StreamExt, stream::FuturesUnordered};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -70,6 +71,8 @@ struct Search {
     ready: Vec<Branch>,
     winner: Option<(Priority, DiscoveryCatalog)>,
     observations: BTreeMap<usize, (Priority, DiscoveryCatalog)>,
+    /// A rescan can return the same job-owned loader more than once.
+    observed: BTreeSet<String>,
     diagnostics: Vec<CandidateDiagnostic>,
     order: usize,
     attempted: usize,
@@ -82,7 +85,7 @@ impl Search {
         mut inputs: Vec<DiscoveryInput>,
         specs: &[FormatSpec],
         refresh: bool,
-    ) -> bool {
+    ) -> Result<bool, DiscoveryError> {
         // Keep concrete metadata ahead of equally specific loader snapshots,
         // and prefer an explicit source's body over duplicate passive content.
         inputs.sort_by_cached_key(|input| {
@@ -102,7 +105,38 @@ impl Search {
             )
         });
         let previous = self.ready.len();
-        for input in inputs {
+        for mut input in inputs {
+            if input.kind == DiscoveryInputKind::ObservedViewer {
+                let Some((index, spec)) = specs
+                    .iter()
+                    .enumerate()
+                    .find(|(_, spec)| spec.name() == viewer::SPEC.name())
+                else {
+                    continue;
+                };
+                let Some(pyramid) = input.viewer.take() else {
+                    continue;
+                };
+                if !self.observed.insert(pyramid.handle.clone()) {
+                    continue;
+                }
+                let priority = Priority(Specificity::Medium, 1, self.order, index);
+                self.order += 1;
+                match viewer::compile_pyramid(&input.url, pyramid) {
+                    Ok(parsed) => self.ready.push(Branch {
+                        spec: *spec,
+                        // Preserve the old one-read ranking: concrete metadata
+                        // still precedes live loaders at the same specificity.
+                        priority,
+                        parsed,
+                        history: Vec::new(),
+                        canonical_uri: Some(input.url),
+                        observation: true,
+                    }),
+                    Err(error) => self.rejected(*spec, error)?,
+                }
+                continue;
+            }
             let specificity = input_specificity(&input);
             self.root(
                 input,
@@ -111,7 +145,7 @@ impl Search {
                 refresh,
             );
         }
-        self.ready.len() > previous
+        Ok(self.ready.len() > previous)
     }
 
     fn root(
@@ -123,10 +157,7 @@ impl Search {
     ) {
         let request = Request::new(&input.url);
         let entry = self.resources.entry(request.clone()).or_default();
-        let snapshot = matches!(
-            input.kind,
-            DiscoveryInputKind::ObservedMetadata | DiscoveryInputKind::ObservedViewer
-        );
+        let snapshot = input.kind == DiscoveryInputKind::ObservedMetadata;
         let changed = input.contents.as_ref().is_some_and(|bytes| {
             entry
                 .supplied
@@ -612,7 +643,7 @@ where
     OFut: std::future::Future<Output = Result<Vec<DiscoveryInput>, Error>>,
 {
     let mut search = Search::default();
-    search.inputs(inputs, specs, false);
+    search.inputs(inputs, specs, false)?;
     let selectors = selectors(specs);
     let mut active = FuturesUnordered::new();
     let mut observed = false;
@@ -643,7 +674,7 @@ where
             let inputs = observe(Interaction::Forbidden)
                 .await
                 .map_err(|error| DiscoveryError::Host(Box::new(error)))?;
-            observed = !search.inputs(inputs, specs, true);
+            observed = !search.inputs(inputs, specs, true)?;
             continue;
         }
         while active.len() < limits.concurrent.max(1) {
@@ -689,7 +720,7 @@ where
         let inputs = observe(Interaction::Allowed)
             .await
             .map_err(|error| DiscoveryError::Host(Box::new(error)))?;
-        if search.inputs(inputs, specs, true) {
+        if search.inputs(inputs, specs, true)? {
             observed = false;
         } else if !search.allow_blocked() {
             return Err(if search.exhausted {

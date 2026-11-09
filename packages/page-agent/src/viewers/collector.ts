@@ -70,7 +70,8 @@ export class ViewerCollector {
           doc.baseURI,
         );
         if (this.state.collect(evidence) === "full") {
-          if ("handle" in evidence && evidence.handle) releaseViewerTiles([evidence.handle]);
+          if ("input" in evidence && evidence.input.viewer)
+            releaseViewerTiles([evidence.input.viewer.handle]);
           break;
         }
       } catch {

@@ -16,7 +16,6 @@ import {
 import type {
   Interaction,
   JobInput,
-  ObservedInput,
   ResourceRequest,
   Size,
   ViewerTileRequest,
@@ -102,9 +101,24 @@ function validCandidate(value: unknown): value is JobInput {
   )
     return false;
   if (value.url.length > MAX_URL_LENGTH || !isPublicHttpUrl(value.url)) return false;
+  if (value.kind === "observed-viewer") return validViewerPayload(value.viewer);
+  if (value.viewer !== undefined) return false;
+  if (value.kind === "observed-metadata" && typeof value.contents !== "string") return false;
   if (value.contents === undefined) return true;
   if (typeof value.contents !== "string") return false;
   return new TextEncoder().encode(value.contents).byteLength <= MAX_DOM_BYTES;
+}
+
+/** Transport bounds only; the core validates the pyramid before any use. */
+function validViewerPayload(viewer: unknown): boolean {
+  return (
+    isRecord(viewer) &&
+    typeof viewer.handle === "string" &&
+    /^[\w-]{1,128}$/.test(viewer.handle) &&
+    Array.isArray(viewer.levels) &&
+    viewer.levels.length > 0 &&
+    viewer.levels.length <= 64
+  );
 }
 
 function validSnapshotInputs(inputs: unknown[]): boolean {
@@ -192,21 +206,16 @@ function readSourcePayload(
   return { bytes, finalUri: result.url, http: result.status, contentType: result.contentType };
 }
 
-function observedInputs(inputs: unknown[]): ObservedInput[] {
+function observedInputs(inputs: unknown[]): JobInput[] {
   let bytes = 0;
-  const observed: ObservedInput[] = [];
+  const observed: JobInput[] = [];
   for (const input of inputs) {
     if (!validCandidate(input)) continue;
-    if (
-      (input.kind !== "observed-metadata" && input.kind !== "observed-viewer") ||
-      typeof input.contents !== "string"
-    )
-      continue;
-    const candidate: ObservedInput = {
-      url: input.url,
-      kind: input.kind,
-      contents: input.contents,
-    };
+    if (input.kind !== "observed-metadata" && input.kind !== "observed-viewer") continue;
+    const candidate: JobInput =
+      input.kind === "observed-viewer"
+        ? { url: input.url, kind: input.kind, viewer: input.viewer }
+        : { url: input.url, kind: input.kind, contents: input.contents };
     bytes += new TextEncoder().encode(JSON.stringify(candidate)).byteLength;
     if (bytes <= 1024 * 1024) observed.push(candidate);
   }
@@ -248,7 +257,7 @@ function memoryDiagnostics(value: unknown): MemoryDiagnostics | undefined {
 }
 
 function memoryScanReply(reply: unknown): {
-  observed: ObservedInput[];
+  observed: JobInput[];
   images: LoadedImage[];
   memory?: MemoryDiagnostics;
 } {
@@ -561,7 +570,7 @@ export function createSourceAccess(
 
   async function scan(signal?: AbortSignal, frame = rootFrame): Promise<CandidateSnapshot> {
     const scanDeadline = Date.now() + timeoutMs;
-    let observed: ObservedInput[] = [];
+    let observed: JobInput[] = [];
     let images: LoadedImage[] = [];
     let memory: MemoryDiagnostics | undefined;
     try {
