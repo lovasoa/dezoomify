@@ -149,8 +149,10 @@ impl Search {
             return Ok(false);
         }
         self.order += 1;
-        // input_specificity ranks observed viewer grids as Medium.
-        let priority = Priority(Specificity::Medium, 0, self.order, index);
+        // input_specificity ranks observed viewer grids as Medium. Observations
+        // rank as if consumed through one read hop, so pending concrete
+        // metadata at the same strength still outranks and delays them.
+        let priority = Priority(Specificity::Medium, 1, self.order, index);
         let ViewerPyramid {
             source_url,
             handle,
@@ -184,10 +186,7 @@ impl Search {
     ) {
         let request = Request::new(&input.url);
         let entry = self.resources.entry(request.clone()).or_default();
-        let snapshot = matches!(
-            input.kind,
-            DiscoveryInputKind::ObservedMetadata | DiscoveryInputKind::ObservedViewer
-        );
+        let snapshot = input.kind == DiscoveryInputKind::ObservedMetadata;
         let changed = input.contents.as_ref().is_some_and(|bytes| {
             entry
                 .supplied
