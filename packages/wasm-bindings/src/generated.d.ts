@@ -15,17 +15,6 @@ export function applyProcessing(recipe: ProcessingRecipe, bytes: Uint8Array): Ui
 export type ProcessingRecipe = "none" | "google-arts-decrypt";
 
 /**
- * A complete snapshot supplied by an identified live viewer. Contents are
- * required: discovery decodes these bytes without fetching or following links.
- * Its wire representation is also accepted wherever a [`JobInput`] is expected.
- */
-export interface ObservedInput {
-    url: string;
-    contents: string;
-    kind: ObservedInputKind;
-}
-
-/**
  * A desktop picker answer applies only to its current ordered catalog.
  */
 export type DesktopImageChoice = { kind: "one"; index: number } | { kind: "all" };
@@ -165,15 +154,6 @@ export interface OutputGrid {
      * Additional pixels on each side, clipped to the canvas.
      */
     overlap: Size;
-}
-
-/**
- * Complete, finite pixel grids observed in a live viewer. Serialize as supplied
- * `observed-viewer`; the Host resolves `handle` for this job only.
- * These are source images, independent of viewport rotation, pan or overlays.
- */
-export interface ViewerObservation {
-    dezoomify_viewer: ViewerPyramid;
 }
 
 /**
@@ -359,11 +339,15 @@ export interface JobInput {
     url: string;
     /**
      * Supplied UTF-8 document instead of fetching `url`. Initial inputs must be
-     * nonempty and within `Options.max_bytes`; observed metadata and viewer grids
-     * never follow links.
+     * nonempty and within `Options.max_bytes`; observed metadata never follows links.
      */
     contents?: string;
     kind?: DiscoveryInputKind;
+    /**
+     * Live-viewer grids observed in the page at `url`, loaded by a loader the
+     * Host retained for this job. Only with kind [`DiscoveryInputKind::ObservedViewer`].
+     */
+    viewer?: ViewerPyramid;
 }
 
 /**
@@ -627,25 +611,18 @@ export interface LimitContext {
 }
 
 /**
- * Supported format metadata can be used directly; viewer grids require a
- * loader retained by the Host for this exact source document and job.
+ * The enclosing input's `url` names the viewer page. The opaque handle names
+ * an owned loader capability scoped to that exact document and job.
  */
-export type ObservedInputKind = "observed-metadata" | "observed-viewer";
+export interface ViewerPyramid {
+    handle: string;
+    levels: ViewerLevel[];
+}
 
 /**
  * The meaning of the existing compression setting for a codec.
  */
 export type OutputControl = { kind: "quality"; minimum: number; warning_below: number } | { kind: "effort" } | { kind: "none" };
-
-/**
- * The reusable source is the viewer page. The opaque handle names an owned
- * loader capability scoped to that exact document and job.
- */
-export interface ViewerPyramid {
-    source_url: string;
-    handle: string;
-    levels: ViewerLevel[];
-}
 
 /**
  * The shared failure context, defined once instead of per variant:
@@ -814,16 +791,16 @@ export interface InitOutput {
     readonly hasSecretParams: (a: number, b: number) => number;
     readonly isRetryable: (a: any) => [number, number, number];
     readonly isSecretKey: (a: number, b: number) => number;
-    readonly wasm_bindgen_aa50da02252d0a0c___convert__closures_____invoke___js_sys_28922c544317ab39___Function_fn_wasm_bindgen_aa50da02252d0a0c___JsValue_____wasm_bindgen_aa50da02252d0a0c___sys__Undefined___js_sys_28922c544317ab39___Function_fn_wasm_bindgen_aa50da02252d0a0c___JsValue_____wasm_bindgen_aa50da02252d0a0c___sys__Undefined_______true_: (a: number, b: number, c: any, d: any) => void;
-    readonly wasm_bindgen_aa50da02252d0a0c___convert__closures_____invoke___wasm_bindgen_aa50da02252d0a0c___JsValue__core_ed718c3d60ebd546___result__Result_____wasm_bindgen_aa50da02252d0a0c___JsError___true_: (a: number, b: number, c: any) => [number, number];
+    readonly wasm_bindgen_c47c495b6df6d1b4___convert__closures_____invoke___js_sys_93c91ed50cb258c7___Function_fn_wasm_bindgen_c47c495b6df6d1b4___JsValue_____wasm_bindgen_c47c495b6df6d1b4___sys__Undefined___js_sys_93c91ed50cb258c7___Function_fn_wasm_bindgen_c47c495b6df6d1b4___JsValue_____wasm_bindgen_c47c495b6df6d1b4___sys__Undefined_______true_: (a: number, b: number, c: any, d: any) => void;
+    readonly wasm_bindgen_c47c495b6df6d1b4___convert__closures_____invoke___wasm_bindgen_c47c495b6df6d1b4___JsValue__core_37ee0ce0c4cd57d5___result__Result_____wasm_bindgen_c47c495b6df6d1b4___JsError___true_: (a: number, b: number, c: any) => [number, number];
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
+    readonly __wbindgen_free: (a: number, b: number, c: number) => void;
     readonly __wbindgen_exn_store: (a: number) => void;
     readonly __externref_table_alloc: () => number;
     readonly __wbindgen_externrefs: WebAssembly.Table;
     readonly __wbindgen_destroy_closure: (a: number, b: number) => void;
     readonly __externref_table_dealloc: (a: number) => void;
-    readonly __wbindgen_free: (a: number, b: number, c: number) => void;
     readonly __wbindgen_start: () => void;
 }
 

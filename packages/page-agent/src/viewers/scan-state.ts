@@ -1,4 +1,4 @@
-import type { ObservedInput } from "@dezoomify/wasm-bindings";
+import type { JobInput } from "@dezoomify/wasm-bindings";
 import type {
   LoadedImage,
   ScanDiagnostics,
@@ -30,7 +30,7 @@ function yieldTask(): Promise<void> {
 }
 
 export class ScanState {
-  readonly inputs: ObservedInput[] = [];
+  readonly inputs: JobInput[] = [];
   readonly images: LoadedImage[] = [];
   readonly handles = new Set<string>();
   readonly diagnostics: ScanDiagnostics = {
@@ -93,14 +93,17 @@ export class ScanState {
       this.images.push(evidence.image);
       return "added";
     }
-    const { input, handle } = evidence;
-    if (this.seenImages.has(input.contents)) return "duplicate";
-    const bytes = new TextEncoder().encode(input.contents).byteLength;
+    const { input } = evidence;
+    const handle = input.viewer?.handle;
+    // Viewer evidence deduplicates by its loader handle; metadata by its document.
+    const identity = handle ?? input.contents ?? input.url;
+    if (this.seenImages.has(identity)) return "duplicate";
+    const bytes = new TextEncoder().encode(JSON.stringify(input)).byteLength;
     if (this.diagnostics.bytes + bytes > scanLimits.bytes) {
       this.truncate("payload-limit");
       return "full";
     }
-    this.seenImages.add(input.contents);
+    this.seenImages.add(identity);
     this.diagnostics.bytes += bytes;
     this.inputs.push(input);
     if (handle) this.handles.add(handle);

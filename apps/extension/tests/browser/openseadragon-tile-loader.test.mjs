@@ -125,7 +125,7 @@ async function loadFixture(mode) {
   const addedGlobals = Reflect.ownKeys(window)
     .filter((key) => !globalKeys.has(key))
     .map(String);
-  const handle = JSON.parse(metadata.input.contents).dezoomify_viewer.handle;
+  const handle = metadata.input.viewer.handle;
   const request = { handle, source_url: location.href, level: 8, column: 0, row: 0 };
   const extent = { width: 256, height: 256 };
   const channelId = crypto.randomUUID();

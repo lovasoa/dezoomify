@@ -11,7 +11,6 @@ import type {
   Error as JobError,
   Size,
   ViewerLevel,
-  ViewerObservation,
   ViewerTileRequest,
 } from "@dezoomify/wasm-bindings";
 import { imageBlob } from "./tile-image.ts";
@@ -49,18 +48,11 @@ export function registerViewer(
   const id = crypto.getRandomValues(new Uint32Array(4)).join("-");
   const lifetime = new AbortController();
   loaders.set(id, { lifetime, load });
-  const observation: ViewerObservation = {
-    dezoomify_viewer: { source_url: context.documentUrl, handle: id, levels },
-  };
-  const contents = JSON.stringify(observation);
-  const identity = new URL(context.documentUrl);
-  identity.hash = `dezoomify-observation-${id}`;
   return {
-    handle: id,
     input: {
       kind: "observed-viewer",
-      url: identity.href,
-      contents,
+      url: context.documentUrl,
+      viewer: { handle: id, levels },
     },
   };
 

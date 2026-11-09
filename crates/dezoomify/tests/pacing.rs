@@ -13,6 +13,7 @@ fn image(width: u32, height: u32) -> Vec<JobInput> {
             r#"<Image TileSize="256" Overlap="0" Format="jpg"><Size Width="{width}" Height="{height}"/></Image>"#,
         )),
         kind: None,
+        viewer: None,
     }]
 }
 
@@ -341,6 +342,7 @@ height: 256
             .into(),
         ),
         kind: None,
+        viewer: None,
     };
     futures::executor::block_on(dezoomify(vec![input], Options::default(), &host)).unwrap();
     let observations = observations.borrow();

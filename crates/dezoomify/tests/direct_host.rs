@@ -32,33 +32,31 @@ fn supplied_viewer_metadata_preserves_all_images_without_fetching() {
 
 #[test]
 fn supplied_observations_never_follow_links() {
-    for kind in [
-        DiscoveryInputKind::ObservedMetadata,
-        DiscoveryInputKind::ObservedViewer,
-    ] {
-        let host = MemoryHost::default();
-        let loaded = JobInput {
-            url: "https://page.test#openseadragon".into(),
-            contents: Some(r#"<a href="https://must-not-fetch.test/info.json">image</a>"#.into()),
-            kind: Some(kind),
-        };
-        let source = JobInput {
-            url: "https://page.test".into(),
-            contents: Some("<html></html>".into()),
-            kind: None,
-        };
-        let error =
-            futures::executor::block_on(dezoomify(vec![source, loaded], Options::default(), &host))
-                .unwrap_err();
-        assert!(matches!(error, Error::DiscoveryFailed { .. }), "{error:?}");
-        assert!(host.fetched.borrow().is_empty());
-    }
+    let host = MemoryHost::default();
+    let loaded = JobInput {
+        url: "https://page.test#openseadragon".into(),
+        contents: Some(r#"<a href="https://must-not-fetch.test/info.json">image</a>"#.into()),
+        kind: Some(DiscoveryInputKind::ObservedMetadata),
+        viewer: None,
+    };
+    let source = JobInput {
+        url: "https://page.test".into(),
+        contents: Some("<html></html>".into()),
+        kind: None,
+        viewer: None,
+    };
+    let error =
+        futures::executor::block_on(dezoomify(vec![source, loaded], Options::default(), &host))
+            .unwrap_err();
+    assert!(matches!(error, Error::DiscoveryFailed { .. }), "{error:?}");
+    assert!(host.fetched.borrow().is_empty());
 }
 fn input() -> Vec<JobInput> {
     vec![JobInput {
         url: "https://images.test/image.dzi".into(),
         contents: Some(DZI.into()),
         kind: None,
+        viewer: None,
     }]
 }
 fn options() -> Options {
@@ -145,6 +143,7 @@ fn discovery_preserves_the_rejected_lookup_cause_after_a_failed_alternative() {
                 r#"<html><script src="first.js"></script><script src="second.js"></script><script>embedpano({xml:"tour.xml"});</script></html>"#.into(),
             ),
             kind: None,
+            viewer: None,
         }],
         Options {
             format: Some("krpano".into()),
@@ -235,6 +234,7 @@ fn accepted_catalog_warns_once_for_malformed_siblings_and_keeps_valid_images() {
                 </krpano>"#.into(),
             ),
             kind: None,
+            viewer: None,
         }],
         Options {
             format: Some("krpano".into()),
@@ -639,6 +639,7 @@ fn probe_budget_stops_generic_search_and_iiif_fallback_before_excess_io() {
                 url: "https://tiles.test/iiif/info.json".into(),
                 contents: Some(metadata.into()),
                 kind: None,
+                viewer: None,
             },
             ProbeOutcome::Missing,
         ),
@@ -779,6 +780,7 @@ fn deferred_cycles_do_not_reacquire_supplied_sources_or_their_redirected_address
                 url: SOURCE.into(),
                 contents: supplied.then(|| target.to_owned()),
                 kind: None,
+                viewer: None,
             }],
             Options {
                 format: Some("bulk_text".into()),
