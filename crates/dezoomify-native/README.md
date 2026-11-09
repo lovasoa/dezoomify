@@ -28,12 +28,9 @@ entry to `output_codecs!` in [`model.rs`](../dezoomify/src/model.rs), then run
 `cargo xtask bindings generate`. Override construction in [`imaging.rs`](src/imaging.rs)
 only when the encoder needs explicit quality settings or metadata handling.
 
-Raster staging uses fallible file I/O rather than memory mappings, preserving
-disk failures as ordinary output errors. Producers never wait for missing tiles
-or encoder capacity while holding acquisition slots. Cancellation wakes readers;
-settlement awaits owned workers before closing staging files.
-The invocation's blocking-task scope owns cancellation and settlement tracking;
-publication waits for its commit decision even after cancellation.
+Staging uses fallible file I/O so disk failures remain ordinary output errors.
+The blocking-task scope owns cancellation and settlement; publication awaits
+its commit decision even after cancellation.
 
 Tiled outputs preserve compatible compressed source bytes. Convert locally only
 when required by the chosen output; preserve failures in acquisition's retry

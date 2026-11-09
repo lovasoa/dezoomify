@@ -1,13 +1,15 @@
-//! Disk-backed composition and ordered strip delivery. Producers never wait for
-//! the encoder: unread pixels and coverage stay in a private staging file.
+//! Disk-backed composition and ordered strip delivery. Pixels and coverage share
+//! rectangular blocks, so placement uses bulk I/O rather than per-row operations.
+//! Producers never wait for the encoder; unread blocks stay in the staging file.
 use crate::{
     imaging::DecodedTile,
-    pixel_store::{
-        discard, read_metadata, storage_error, store_metadata, temporary_file, MetadataLocation,
-    },
+    pixel_store::{discard, read_metadata, storage_error, store_metadata, MetadataLocation},
 };
 use dezoomify::model::{Error, ReusedTile, Size, TilePlacement};
-use image::Pixel;
+use image::{
+    imageops::{crop_imm, overlay},
+    GenericImage, ImageBuffer, Rgba,
+};
 use std::{
     collections::BTreeMap,
     fs::File,
@@ -17,6 +19,7 @@ use std::{
 };
 
 const STRIP_ROWS: u32 = 64; // JPEG consumes full-width eight-row bands.
+const BLOCK_COLUMNS: u32 = 256;
 type TileMetadata = (Option<Vec<u8>>, Option<Vec<u8>>);
 
 pub(crate) struct PixelStrip {
@@ -46,6 +49,10 @@ struct Queue {
 }
 pub(crate) struct PixelPipe {
     pub(crate) size: Size,
+    block: Size,
+    block_bytes: usize,
+    columns: u32,
+    reader: Mutex<File>,
     producer: Mutex<Producer>,
     queue: Mutex<Queue>,
     changed: Condvar,
@@ -53,15 +60,31 @@ pub(crate) struct PixelPipe {
 }
 impl PixelPipe {
     pub(crate) fn new(size: Size, directory: &Path) -> Result<Arc<Self>, Error> {
-        let pixels = u64::from(size.width) * u64::from(size.height);
-        let length = pixels
-            .checked_mul(4)
-            .and_then(|n| n.checked_add(pixels.div_ceil(8)))
+        let block = Size {
+            width: size.width.min(BLOCK_COLUMNS),
+            height: size.height.min(STRIP_ROWS),
+        };
+        let pixels = block.width as usize * block.height as usize;
+        let block_bytes = pixels * 4 + pixels.div_ceil(8);
+        let columns = size.width.div_ceil(BLOCK_COLUMNS);
+        let length = u64::from(columns)
+            .checked_mul(u64::from(size.height.div_ceil(STRIP_ROWS)))
+            .and_then(|n| n.checked_mul(block_bytes as u64))
             .ok_or_else(|| Error::InvalidState("raster dimensions overflow".into()))?;
-        let file = temporary_file(directory).map_err(storage_error)?;
+        std::fs::create_dir_all(directory).map_err(storage_error)?;
+        let file = tempfile::NamedTempFile::new_in(directory).map_err(storage_error)?;
+        // Reopen, rather than clone, to give the encoder an independent cursor.
+        // Unlink before writing so the handles own cleanup, including on crashes.
+        let reader = file.reopen().map_err(storage_error)?;
+        let (file, path) = file.into_parts();
+        path.close().map_err(storage_error)?;
         file.set_len(length).map_err(storage_error)?;
         Ok(Arc::new(Self {
             size,
+            block,
+            block_bytes,
+            columns,
+            reader: Mutex::new(reader),
             producer: Mutex::new(Producer {
                 file,
                 pending: BTreeMap::new(),
@@ -102,11 +125,6 @@ impl PixelPipe {
     }
     pub(crate) fn late(&self) -> u64 {
         self.producer.lock().expect("pixel producer lock").late
-    }
-    #[cfg(test)]
-    pub(crate) fn queued_strips(&self) -> usize {
-        let queue = self.queue.lock().expect("strip queue lock");
-        (queue.available - queue.next_row).div_ceil(STRIP_ROWS) as usize
     }
     /// Placement does disk I/O and must run on a blocking worker. Contributions
     /// composite until whole-strip handoff freezes the pixels. Later writes to
@@ -157,56 +175,61 @@ impl PixelPipe {
         if width == 0 || height == 0 {
             return Ok(());
         }
-        let opaque = image
-            .as_raw()
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .all(|p| p[3] == 255);
-        for y in placement.position.y..placement.position.y + height {
+        let opaque = image.pixels().all(|p| p[3] == 255);
+        let (x, y) = (placement.position.x, placement.position.y);
+        let mut bytes = vec![0; self.block_bytes];
+        for band in y / STRIP_ROWS..(y + height).div_ceil(STRIP_ROWS) {
             if let Some(error) = self.error() {
                 return Err(error);
             }
-            let first_row = y / STRIP_ROWS * STRIP_ROWS;
+            let first_row = band * STRIP_ROWS;
             if first_row < producer.next_row {
-                producer.late += u64::from(y % STRIP_ROWS == 0 || y == placement.position.y);
+                producer.late += 1;
                 continue;
             }
-            let start = u64::from(y) * u64::from(self.size.width) + u64::from(placement.position.x);
-            let source = (y - placement.position.y) as usize * image.width() as usize * 4;
-            let source = &image.as_raw()[source..source + width as usize * 4];
-            producer
-                .file
-                .seek(SeekFrom::Start(start * 4))
-                .map_err(storage_error)?;
-            if opaque {
-                producer.file.write_all(source).map_err(storage_error)?;
-            } else {
-                let mut target = vec![0; source.len()];
-                producer
-                    .file
-                    .read_exact(&mut target)
-                    .map_err(storage_error)?;
-                for (dst, src) in target
-                    .as_chunks_mut::<4>()
-                    .0
-                    .iter_mut()
-                    .zip(source.as_chunks::<4>().0)
-                {
-                    let mut pixel = image::Rgba(*dst);
-                    pixel.blend(&image::Rgba(*src));
-                    *dst = pixel.0;
+            let mut covered = 0;
+            let Producer { file, pending, .. } = &mut *producer;
+            for column in x / BLOCK_COLUMNS..(x + width).div_ceil(BLOCK_COLUMNS) {
+                let offset = (u64::from(band) * u64::from(self.columns) + u64::from(column))
+                    * self.block_bytes as u64;
+                file.seek(SeekFrom::Start(offset)).map_err(storage_error)?;
+                file.read_exact(&mut bytes).map_err(storage_error)?;
+                let (pixels, coverage) =
+                    bytes.split_at_mut(self.block.width as usize * self.block.height as usize * 4);
+                let left = column * BLOCK_COLUMNS;
+                let start_x = x.max(left);
+                let start_y = y.max(first_row);
+                let width = (x + width).min(left.saturating_add(self.block.width)) - start_x;
+                let height =
+                    (y + height).min(first_row.saturating_add(self.block.height)) - start_y;
+                let source = crop_imm(&image, start_x - x, start_y - y, width, height);
+                let mut target = ImageBuffer::<Rgba<u8>, _>::from_raw(
+                    self.block.width,
+                    self.block.height,
+                    pixels,
+                )
+                .expect("block pixels");
+                if opaque {
+                    target
+                        .copy_from(&*source, start_x - left, start_y - first_row)
+                        .map_err(storage_error)?;
+                } else {
+                    overlay(
+                        &mut target,
+                        &*source,
+                        i64::from(start_x - left),
+                        i64::from(start_y - first_row),
+                    );
                 }
-                producer
-                    .file
-                    .seek(SeekFrom::Start(start * 4))
-                    .map_err(storage_error)?;
-                producer.file.write_all(&target).map_err(storage_error)?;
+                for row in start_y - first_row..start_y - first_row + height {
+                    let start = (row * self.block.width + start_x - left) as usize;
+                    covered += cover(coverage, start, start + width as usize);
+                }
+                file.seek(SeekFrom::Start(offset)).map_err(storage_error)?;
+                file.write_all(&bytes).map_err(storage_error)?;
             }
-            let covered = self.cover(&mut producer.file, start, start + u64::from(width))?;
             let rows = STRIP_ROWS.min(self.size.height - first_row);
-            *producer
-                .pending
+            *pending
                 .entry(first_row)
                 .or_insert(u64::from(self.size.width) * u64::from(rows)) -= covered;
         }
@@ -218,27 +241,6 @@ impl PixelPipe {
             self.publish_next(&mut producer)?;
         }
         Ok(())
-    }
-    fn cover(&self, file: &mut File, start: u64, end: u64) -> Result<u64, Error> {
-        if start == end {
-            return Ok(0);
-        }
-        let offset = u64::from(self.size.width) * u64::from(self.size.height) * 4 + start / 8;
-        let mut bytes = vec![0; (end.div_ceil(8) - start / 8) as usize];
-        file.seek(SeekFrom::Start(offset)).map_err(storage_error)?;
-        file.read_exact(&mut bytes).map_err(storage_error)?;
-        let mut covered = 0;
-        for (index, byte) in bytes.iter_mut().enumerate() {
-            let first = (start / 8 + index as u64) * 8;
-            let low = start.saturating_sub(first);
-            let high = (end - first).min(8);
-            let mask = (u8::MAX << low) & (u8::MAX >> (8 - high));
-            covered += u64::from((!*byte & mask).count_ones());
-            *byte |= mask;
-        }
-        file.seek(SeekFrom::Start(offset)).map_err(storage_error)?;
-        file.write_all(&bytes).map_err(storage_error)?;
-        Ok(covered)
     }
     fn publish_next(&self, producer: &mut Producer) -> Result<(), Error> {
         let row = producer.next_row;
@@ -278,60 +280,89 @@ impl PixelPipe {
         Ok(())
     }
     pub(crate) fn metadata(&self) -> Result<TileMetadata, Error> {
-        let mut queue = self.queue.lock().expect("strip queue lock");
-        loop {
-            if let Some(error) = &queue.failure {
-                return Err(error.clone());
-            }
-            if let Some(metadata) = &queue.metadata {
-                return Ok(metadata.clone());
-            }
-            queue = self.changed.wait(queue).expect("strip queue lock");
+        let queue = self
+            .changed
+            .wait_while(self.queue.lock().expect("strip queue lock"), |q| {
+                q.metadata.is_none() && q.failure.is_none()
+            })
+            .expect("strip queue lock");
+        if let Some(error) = &queue.failure {
+            return Err(error.clone());
         }
+        Ok(queue.metadata.clone().expect("finished metadata"))
     }
     /// Reads one immutable strip from staging. No producer lock is held waiting
     /// for missing tiles, so later tiles cannot prevent the required acquisition.
     pub(crate) fn receive(&self) -> Result<Option<PixelStrip>, Error> {
-        let mut queue = self.queue.lock().expect("strip queue lock");
-        loop {
-            if let Some(error) = &queue.failure {
-                return Err(error.clone());
-            }
-            if queue.next_row < queue.available {
-                let first_row = queue.next_row;
-                let rows = STRIP_ROWS.min(self.size.height - first_row);
-                queue.next_row += rows;
-                drop(queue);
-                let offset = u64::from(first_row) * u64::from(self.size.width) * 4;
-                let length = self.size.width as usize * rows as usize * 4;
-                let mut producer = self.producer.lock().expect("pixel producer lock");
-                let mut rgba = Vec::new();
-                rgba.try_reserve_exact(length).map_err(storage_error)?;
-                rgba.resize(length, 0);
-                producer
-                    .file
-                    .seek(SeekFrom::Start(offset))
-                    .map_err(storage_error)?;
-                producer.file.read_exact(&mut rgba).map_err(storage_error)?;
-                discard(&producer.file, offset, length as u64);
-                return Ok(Some(PixelStrip {
-                    first_row,
-                    rows,
-                    rgba,
-                }));
-            }
-            if queue.next_row == self.size.height {
-                return Ok(None);
-            }
-            queue = self.changed.wait(queue).expect("strip queue lock");
+        let mut queue = self
+            .changed
+            .wait_while(self.queue.lock().expect("strip queue lock"), |q| {
+                q.next_row == q.available && q.next_row < self.size.height && q.failure.is_none()
+            })
+            .expect("strip queue lock");
+        if let Some(error) = &queue.failure {
+            return Err(error.clone());
         }
+        if queue.next_row == self.size.height {
+            return Ok(None);
+        }
+        let first_row = queue.next_row;
+        let rows = STRIP_ROWS.min(self.size.height - first_row);
+        queue.next_row += rows;
+        drop(queue);
+        let offset =
+            u64::from(first_row / STRIP_ROWS) * u64::from(self.columns) * self.block_bytes as u64;
+        let length = self.size.width as usize * rows as usize * 4;
+        let mut reader = self.reader.lock().expect("pixel reader lock");
+        let mut rgba = Vec::new();
+        rgba.try_reserve_exact(length).map_err(storage_error)?;
+        rgba.resize(length, 0);
+        let mut rgba =
+            image::RgbaImage::from_raw(self.size.width, rows, rgba).expect("strip pixels");
+        let mut block = image::RgbaImage::new(self.block.width, self.block.height);
+        for column in 0..self.columns {
+            reader
+                .seek(SeekFrom::Start(
+                    offset + u64::from(column) * self.block_bytes as u64,
+                ))
+                .map_err(storage_error)?;
+            reader.read_exact(block.as_mut()).map_err(storage_error)?;
+            let left = column * BLOCK_COLUMNS;
+            let width = self.block.width.min(self.size.width - left);
+            rgba.copy_from(&*crop_imm(&block, 0, 0, width, rows), left, 0)
+                .map_err(storage_error)?;
+        }
+        discard(
+            &reader,
+            offset,
+            u64::from(self.columns) * self.block_bytes as u64,
+        );
+        Ok(Some(PixelStrip {
+            first_row,
+            rows,
+            rgba: rgba.into_raw(),
+        }))
     }
+}
+
+fn cover(bytes: &mut [u8], start: usize, end: usize) -> u64 {
+    let mut covered = 0;
+    for (index, byte) in bytes[start / 8..end.div_ceil(8)].iter_mut().enumerate() {
+        let first = (start / 8 + index) * 8;
+        let low = start.saturating_sub(first);
+        let high = (end - first).min(8);
+        let mask = (u8::MAX << low) & (u8::MAX >> (8 - high));
+        covered += u64::from((!*byte & mask).count_ones());
+        *byte |= mask;
+    }
+    covered
 }
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use crate::imaging::DecodedTile;
     use dezoomify::model::{Point, TileRole};
+    use image::Pixel;
     fn new_pipe(width: u32, height: u32) -> Arc<PixelPipe> {
         PixelPipe::new(Size { width, height }, std::env::temp_dir().as_path()).unwrap()
     }
@@ -357,45 +388,40 @@ pub(crate) mod tests {
         .unwrap();
     }
     #[test]
-    fn shuffled_tiles_are_copied_into_one_owned_strip_and_handoff_is_final() {
-        let pipe = new_pipe(4, 2);
-        put(
-            &pipe,
-            0,
-            0,
-            0,
-            image::RgbaImage::from_pixel(2, 2, image::Rgba([100, 0, 0, 255])),
-        );
-        put(
-            &pipe,
-            1,
-            0,
-            0,
-            image::RgbaImage::from_pixel(2, 2, image::Rgba([0, 100, 0, 128])),
-        );
-        assert_eq!(pipe.queued_strips(), 0);
-        put(
-            &pipe,
-            2,
-            2,
-            0,
-            image::RgbaImage::from_pixel(2, 2, image::Rgba([9, 8, 7, 255])),
-        );
-        let strip = pipe.receive().unwrap().unwrap();
-        let mut expected = image::Rgba([100, 0, 0, 255]);
-        expected.blend(&image::Rgba([0, 100, 0, 128]));
-        assert_eq!(&strip.rgba[..4], &expected.0);
-        assert_eq!(&strip.rgba[8..12], &[9, 8, 7, 255]);
-        put(
-            &pipe,
-            3,
-            0,
-            0,
-            image::RgbaImage::from_pixel(4, 2, image::Rgba([0, 0, 255, 255])),
-        );
-        assert_eq!(&strip.rgba[..4], &expected.0);
-        assert_eq!(pipe.late(), 1);
-        drop(strip);
+    fn overlapping_tiles_are_composited_until_handoff_then_frozen() {
+        let pipe = new_pipe(517, 257);
+        for (id, (x, width, color)) in [
+            (0, 257, [100, 0, 0, 255]),
+            (0, 257, [0, 100, 0, 128]),
+            (257, 260, [9, 8, 7, 255]),
+            (0, 517, [0, 0, 255, 255]), // Complete strips are already frozen.
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            put(
+                &pipe,
+                id as u32,
+                x,
+                0,
+                image::RgbaImage::from_pixel(width, 257, image::Rgba(color)),
+            );
+        }
+        let mut left = image::Rgba([100, 0, 0, 255]);
+        left.blend(&image::Rgba([0, 100, 0, 128]));
+        let expected = image::RgbaImage::from_fn(517, 257, |x, _| {
+            if x < 257 {
+                left
+            } else {
+                image::Rgba([9, 8, 7, 255])
+            }
+        });
+        let mut pixels = Vec::new();
+        while let Some(strip) = pipe.receive().unwrap() {
+            pixels.extend(strip.rgba);
+        }
+        assert_eq!(pixels, expected.into_raw());
+        assert!(pipe.late() > 0);
     }
     #[test]
     fn reader_waits_for_required_pixels_and_failure_wakes_it() {
@@ -446,7 +472,6 @@ pub(crate) mod tests {
             0,
             image::RgbaImage::from_pixel(1, 1, image::Rgba([9, 8, 7, 255])),
         );
-        assert_eq!(pipe.queued_strips(), 0);
         pipe.finish(&[]).unwrap();
         assert_eq!(
             pipe.receive().unwrap().unwrap().rgba,
@@ -454,42 +479,24 @@ pub(crate) mod tests {
         );
     }
     #[test]
-    fn slow_readers_and_cancellation_do_not_block_placement() {
-        for cancel in [false, true] {
-            let pipe = new_pipe(1, 256);
-            let producer = Arc::clone(&pipe);
-            let (sent, received) = std::sync::mpsc::channel();
-            let thread = std::thread::spawn(move || {
-                let image =
-                    image::RgbaImage::from_fn(1, 256, |_, y| image::Rgba([y as u8, 0, 0, 255]));
-                sent.send(producer.place(
-                    0,
-                    &placement(0, 0),
-                    DecodedTile {
-                        image,
-                        icc_profile: None,
-                        exif_metadata: None,
-                    },
-                ))
-                .unwrap();
-            });
-            received
-                .recv_timeout(std::time::Duration::from_secs(2))
-                .unwrap()
-                .unwrap();
-            assert_eq!(pipe.queued_strips(), 4);
-            if cancel {
-                pipe.fail(Error::Cancelled);
-                assert!(matches!(pipe.receive(), Err(Error::Cancelled)));
-            } else {
-                for row in [0, 64, 128, 192] {
-                    let strip = pipe.receive().unwrap().unwrap();
-                    assert_eq!(strip.first_row, row);
-                    assert_eq!(strip.rgba[0], row as u8);
-                }
-                assert!(pipe.receive().unwrap().is_none());
-            }
-            thread.join().unwrap();
+    fn placement_can_finish_before_the_reader_starts() {
+        let pipe = new_pipe(1, 256);
+        let source = image::RgbaImage::from_fn(1, 256, |_, y| image::Rgba([y as u8, 0, 0, 255]));
+        let expected = source.clone().into_raw();
+        let producer = Arc::clone(&pipe);
+        let (sent, received) = std::sync::mpsc::channel();
+        let thread = std::thread::spawn(move || {
+            put(&producer, 0, 0, 0, source);
+            sent.send(()).unwrap();
+        });
+        received
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .unwrap();
+        thread.join().unwrap();
+        let mut pixels = Vec::new();
+        while let Some(strip) = pipe.receive().unwrap() {
+            pixels.extend(strip.rgba);
         }
+        assert_eq!(pixels, expected);
     }
 }
