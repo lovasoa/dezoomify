@@ -1,4 +1,4 @@
-import type { ObservedInput } from "@dezoomify/wasm-bindings";
+import type { JobInput } from "@dezoomify/wasm-bindings";
 import type {
   LoadedImage,
   ScanDiagnostics,
@@ -30,7 +30,7 @@ function yieldTask(): Promise<void> {
 }
 
 export class ScanState {
-  readonly inputs: ObservedInput[] = [];
+  readonly inputs: JobInput[] = [];
   readonly images: LoadedImage[] = [];
   readonly handles = new Set<string>();
   readonly diagnostics: ScanDiagnostics = {
@@ -49,7 +49,7 @@ export class ScanState {
   };
   private readonly started = performance.now();
   private steps = 0;
-  private readonly seenImages = new Set<string>();
+  private readonly seenImages = new Set<string | undefined>();
   private readonly stops = new Set<StopReason>();
 
   readonly documentUrl: string;
@@ -94,13 +94,20 @@ export class ScanState {
       return "added";
     }
     const { input, handle } = evidence;
-    if (this.seenImages.has(input.contents)) return "duplicate";
-    const bytes = new TextEncoder().encode(input.contents).byteLength;
+    // Viewer evidence deduplicates by its loader handle; metadata by its document.
+    const identity = handle ?? input.contents;
+    if (this.seenImages.has(identity)) return "duplicate";
+    // Metadata documents count against the payload budget; viewer pyramids are
+    // bounded by their level count and the image limit.
+    const bytes =
+      input.contents === undefined
+        ? 0
+        : new TextEncoder().encode(input.contents).byteLength;
     if (this.diagnostics.bytes + bytes > scanLimits.bytes) {
       this.truncate("payload-limit");
       return "full";
     }
-    this.seenImages.add(input.contents);
+    this.seenImages.add(identity);
     this.diagnostics.bytes += bytes;
     this.inputs.push(input);
     if (handle) this.handles.add(handle);

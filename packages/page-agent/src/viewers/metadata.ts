@@ -1,4 +1,4 @@
-import type { ObservedInput } from "@dezoomify/wasm-bindings";
+import type { JobInput } from "@dezoomify/wasm-bindings";
 import type { PageObject } from "./page-object.ts";
 import type {
   DziSource,
@@ -66,7 +66,7 @@ export function readTiledSource(
   return { ...shape, protocol: "dzi", base, overlap: source.number("tileOverlap") };
 }
 
-function dziMetadata(source: DziSource, context: MetadataContext): ObservedInput {
+function dziMetadata(source: DziSource, context: MetadataContext): JobInput {
   const identity = new URL(context.documentUrl);
   identity.hash = `dezoomify-openseadragon-${context.imageIndex}`;
   return {
@@ -85,7 +85,7 @@ function dziMetadata(source: DziSource, context: MetadataContext): ObservedInput
   };
 }
 
-function zoomifyMetadata(source: ZoomifySource): ObservedInput {
+function zoomifyMetadata(source: ZoomifySource): JobInput {
   return {
     kind: "observed-metadata",
     url: `${source.base.replace(/\/$/, "")}/ImageProperties.xml`,
@@ -93,7 +93,7 @@ function zoomifyMetadata(source: ZoomifySource): ObservedInput {
   };
 }
 
-function iiifMetadata(source: IiifSource): ObservedInput {
+function iiifMetadata(source: IiifSource): JobInput {
   return {
     kind: "observed-metadata",
     url: `${source.id.replace(/\/$/, "")}/info.json`,
@@ -110,7 +110,7 @@ function iiifMetadata(source: IiifSource): ObservedInput {
   };
 }
 
-function iipMetadata(source: IipSource): ObservedInput {
+function iipMetadata(source: IipSource): JobInput {
   return {
     kind: "observed-metadata",
     url: `${source.server}?FIF=${source.image}${source.transforms}&OBJ=Max-size&OBJ=Tile-size&OBJ=Resolution-number`,
@@ -118,7 +118,7 @@ function iipMetadata(source: IipSource): ObservedInput {
   };
 }
 
-function krpanoMetadata(source: KrpanoSource, context: MetadataContext): ObservedInput {
+function krpanoMetadata(source: KrpanoSource, context: MetadataContext): JobInput {
   const url = new URL(context.documentUrl);
   url.hash = `dezoomify-krpano-${context.imageIndex}`;
   const levels = source.levels.map(({ width, height, shapes }) => {
@@ -139,7 +139,7 @@ function xmlAttribute(value: string): string {
 }
 
 /** Pure projection of validated page snapshots into the core's metadata input. */
-export function projectMetadata(source: TileSource, context: MetadataContext): ObservedInput {
+export function projectMetadata(source: TileSource, context: MetadataContext): JobInput {
   switch (source.protocol) {
     case "dzi":
       return dziMetadata(source, context);
