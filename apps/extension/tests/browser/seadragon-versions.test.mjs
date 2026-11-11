@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import { chromium, firefox } from "playwright";
 import sharp from "sharp";
@@ -12,11 +13,9 @@ import {
 
 const scanner = (
   await build({
-    stdin: {
-      contents: `export {scanViewers} from './viewer-scanner.ts';
-export {readViewerTile,releaseViewerTiles} from './viewers/session.ts';`,
-      resolveDir: new URL("../../../../packages/page-agent/src", import.meta.url).pathname,
-    },
+    entryPoints: [
+      fileURLToPath(new URL("../../../../packages/page-agent/src/index.ts", import.meta.url)),
+    ],
     bundle: true,
     write: false,
     format: "iife",

@@ -28,11 +28,7 @@ const {
 test("source URL clips in the middle, copies natively, and leaves timing visible", async ({ page }) => {
   const root = path.resolve(__dirname, "../../../..");
   const { outputFiles } = require("esbuild").buildSync({
-    stdin: {
-      contents: `export { renderView } from "./packages/shared-ui/src/view.tsx";
-        export { presentProgress } from "./packages/shared-ui/src/presentation.ts";`,
-      resolveDir: root,
-    },
+    entryPoints: [path.join(__dirname, "source-view.ts")],
     bundle: true,
     write: false,
     format: "iife",
