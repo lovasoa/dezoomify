@@ -5,6 +5,8 @@ on:
     # Single-branch repository: main holds legacy/ and the new app.
 
     branches: [main]
+  schedule:
+    - cron: '0 6 * * 1'
 permissions:
   contents: read
 concurrency:
@@ -12,6 +14,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   windows-cli:
+    if: github.event_name != 'schedule'
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
@@ -48,13 +51,7 @@ jobs:
       fail-fast: false
       max-parallel: 4
       matrix:
-        lane-group:
-          - check
-          - rust
-          - wasm
-          - browser+web
-          - extension
-          - bindings+security
+        lane-group: ${{ fromJSON(github.event_name == 'schedule' && '["check", "bindings+security"]' || '["check", "rust", "wasm", "browser+web", "extension", "bindings+security"]') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

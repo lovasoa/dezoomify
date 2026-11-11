@@ -39,7 +39,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           sha="$(git rev-parse HEAD)"
-          test -n "$(gh run list --workflow ci.yml --commit "$sha" --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
+          test -n "$(gh run list --workflow ci.yml --commit "$sha" --status success --limit 100 --json databaseId,event --jq '[.[] | select(.event != "schedule")][0].databaseId // empty')"
       - name: Freeze plan
         if: steps.daily.outputs.build == 'true'
         env:
