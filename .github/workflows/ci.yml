@@ -16,6 +16,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
       - uses: ./.github/actions/setup-build
         with:
           key: cli-release
@@ -25,6 +27,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $env:DEZOOMIFY_VERSION = cargo xtask release version
           if ($LASTEXITCODE -ne 0) { throw 'version failed' }
+          Remove-Item target/release-dist -Recurse -Force -ErrorAction SilentlyContinue
           cargo xtask release plan
           if ($LASTEXITCODE -ne 0) { throw 'plan failed' }
           cargo xtask release build --plan "target/release-dist/$env:DEZOOMIFY_VERSION/plan.json" --target cli-windows-x86_64
