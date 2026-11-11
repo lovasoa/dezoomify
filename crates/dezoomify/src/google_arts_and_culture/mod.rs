@@ -1,7 +1,7 @@
-//! Pure Google Arts & Culture two-stage discovery.
+//! Google Arts discovery from page HTML or a detached live-viewer snapshot.
 
 use crate::Vec2d;
-use crate::core::discovery::{any, url_matches, viewer};
+use crate::core::discovery::{Metadata, any, json_metadata, url_matches, viewer};
 use crate::core::{
     DiscoveryError, DiscoveryResource, DiscoveryRoute, FormatSpec, Grid, ImagePlan, ParsedResource,
     ProcessingRecipe, Request, ResolvedLevel,
@@ -13,6 +13,7 @@ mod tile_info;
 mod url;
 
 const ROUTES: &[DiscoveryRoute] = &[
+    json_metadata::<crate::model::GoogleArtsMetadata>(),
     viewer(url_matches(is_google_arts_url)).decode(parse_page),
     viewer(any()).try_decode(|resource| parse_page(resource).ok().map(Ok)),
 ];
@@ -33,6 +34,51 @@ fn parse_page(resource: DiscoveryResource<'_>) -> Result<ParsedResource, Discove
         Request::new(page_info(resource)?.tile_info_url()),
         parse_tile_information,
     ))
+}
+
+impl Metadata for crate::model::GoogleArtsMetadata {
+    fn decode(self, resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
+        parse_snapshot(self, resource.final_uri())
+    }
+}
+
+fn parse_snapshot(
+    snapshot: crate::model::GoogleArtsMetadata,
+    uri: &str,
+) -> Result<ParsedResource, DiscoveryError> {
+    let source = ::url::Url::parse(uri)
+        .map_err(|error| DiscoveryError::InvalidMetadata(error.to_string()))?;
+    if source.host_str() != Some("artsandculture.google.com")
+        || !source.path().starts_with("/asset/")
+        || source
+            .path_segments()
+            .and_then(|mut segments| segments.next_back())
+            != Some(snapshot.asset_id.as_str())
+    {
+        return Err(DiscoveryError::InvalidMetadata(
+            "Google Arts snapshot does not match the source asset".into(),
+        ));
+    }
+    let base = source
+        .join(&snapshot.base_url)
+        .map_err(|error| DiscoveryError::InvalidMetadata(error.to_string()))?;
+    if !matches!(base.scheme(), "https" | "http")
+        || base.host_str().is_none()
+        || !base.username().is_empty()
+        || base.password().is_some()
+        || base.query().is_some()
+        || base.fragment().is_some()
+    {
+        return Err(DiscoveryError::InvalidMetadata(
+            "invalid Google Arts image URL".into(),
+        ));
+    }
+    let page = Arc::new(PageInfo {
+        base_url: base.into(),
+        token: snapshot.token,
+        name: snapshot.title,
+    });
+    decode(&page, snapshot.tile_info.as_bytes()).map(ParsedResource::Image)
 }
 
 fn page_info(resource: DiscoveryResource<'_>) -> Result<PageInfo, DiscoveryError> {
@@ -77,9 +123,20 @@ fn decode(page: &Arc<PageInfo>, bytes: &[u8]) -> Result<ImagePlan, DiscoveryErro
         .into_iter()
         .enumerate()
         .map(|(z, level)| {
+            let extent = |tiles: u32, tile: u32, empty: u32| {
+                tiles
+                    .checked_mul(tile)
+                    .and_then(|size| size.checked_sub(empty))
+                    .filter(|size| *size > 0)
+                    .ok_or_else(|| {
+                        DiscoveryError::InvalidMetadata(
+                            "invalid Google Arts level dimensions".into(),
+                        )
+                    })
+            };
             let size = Vec2d {
-                x: tile_width * level.num_tiles_x - level.empty_pels_x,
-                y: tile_height * level.num_tiles_y - level.empty_pels_y,
+                x: extent(level.num_tiles_x, tile_width, level.empty_pels_x)?,
+                y: extent(level.num_tiles_y, tile_height, level.empty_pels_y)?,
             };
             let tile_size = Vec2d {
                 x: tile_width,
@@ -246,5 +303,63 @@ mod tests {
         );
         let error = result.unwrap_err().to_string();
         assert!(error.contains("invalid Google Arts tile XML"));
+    }
+
+    fn live_snapshot() -> crate::model::GoogleArtsMetadata {
+        let page = std::str::from_utf8(PAGE)
+            .unwrap()
+            .parse::<PageInfo>()
+            .unwrap();
+        crate::model::GoogleArtsMetadata {
+            asset_id: "current".into(),
+            title: page.name,
+            base_url: page.base_url,
+            token: page.token,
+            tile_info: String::from_utf8(TILE_INFO.to_vec()).unwrap(),
+        }
+    }
+
+    #[test]
+    fn live_metadata_recovers_an_asset_without_page_tokens() {
+        use crate::core::discovery::DiscoveryInput;
+        use crate::model::DiscoveryInputKind;
+        let source = "https://artsandculture.google.com/asset/painting/current";
+        let (catalog, _) = crate::test_support::discover_inputs(
+            crate::core::default_registry(),
+            vec![
+                DiscoveryInput::with_contents(source, b"<html><h1>Current artwork</h1></html>"),
+                DiscoveryInput::with_contents(
+                    format!("{source}#dezoomify-google-arts"),
+                    serde_json::to_vec(&live_snapshot()).unwrap(),
+                )
+                .with_kind(DiscoveryInputKind::ObservedMetadata),
+            ],
+            Default::default(),
+            |_| panic!("a detached viewer must work without metadata requests"),
+        );
+        let catalog = catalog.unwrap();
+        let [DiscoveredEntry::Ready(image)] = catalog.entries() else {
+            panic!("one artwork");
+        };
+        assert_eq!(image.format, "google_arts_and_culture");
+        assert_fixture_geometry(image);
+    }
+
+    #[test]
+    fn live_metadata_rejects_a_different_asset_or_invalid_geometry() {
+        let mut snapshot = live_snapshot();
+        assert!(
+            parse_snapshot(
+                snapshot.clone(),
+                "https://artsandculture.google.com/asset/other"
+            )
+            .is_err()
+        );
+        snapshot.tile_info = snapshot
+            .tile_info
+            .replace("empty_pels_x=\"173\"", "empty_pels_x=\"999999\"");
+        assert!(
+            parse_snapshot(snapshot, "https://artsandculture.google.com/asset/current").is_err()
+        );
     }
 }

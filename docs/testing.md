@@ -10,6 +10,7 @@ assert source-file contents or invent architectural tests.
 
 - `cargo xtask test`: Rust workspace and Node unit tests.
 - `cargo xtask test <target>`: focused iteration; use `cargo xtask --help` for targets.
+- `cargo xtask test page-agent`: library unit tests and real Chromium/Firefox viewers.
 - `cargo xtask test all`: also exercises current WASM bindings, the website in
   Chromium, and packaged extensions in Chromium and Firefox.
 - `cargo xtask ci local`: static checks, tests, WASM portability, and dependency audit.
@@ -38,6 +39,13 @@ for retries, cancellation, resource limits, codecs, publication, cache isolation
 and credentials. UI/product tests cover accessibility, permissions, navigation,
 and recovery. These tests exercise failures a successful save cannot reveal.
 Normal Biome and Clippy checks enforce dependency boundaries.
+
+Page-agent browser tests live with the library. The shared
+[Playwright fixtures](../test/browser/fixtures.mjs) load ordinary TypeScript modules
+through Vite and own page isolation; [projects](../test/browser/playwright.config.mjs)
+select browsers. Extension specs cover source access and transport, and the
+packaged extension matrix covers permission and download flows. Keep a behavior
+at its owning layer rather than repeating it for each product or viewer version.
 
 Keep setup and assertions about one behavior together. Use the core's shared
 test helpers for successful discovery and tile inspection; inspect errors

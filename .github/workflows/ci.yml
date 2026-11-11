@@ -50,14 +50,14 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('crates/fixture-server/tests/webapp-e2e/package.json', 'apps/extension/tests/browser/package.json') }}
+          key: playwright-${{ runner.os }}-${{ hashFiles('crates/fixture-server/tests/webapp-e2e/package.json', 'apps/extension/tests/browser/package.json', 'test/browser/package.json') }}
       - name: Ensure browser dependencies and pinned revisions
         if: matrix.lane-group == 'browser+web' || matrix.lane-group == 'extension'
         # Both jobs populate the same complete cache. Install is idempotent;
         # one OS dependency pass serves both packages, even on a cache hit.
         run: |
           pnpm --filter webapp-e2e exec playwright install-deps chromium firefox
-          pnpm --filter webapp-e2e --filter dezoomify-extension-headless exec playwright install chromium firefox
+          pnpm --filter webapp-e2e --filter browser-tests --filter dezoomify-extension-headless exec playwright install chromium firefox
       - name: Install pinned Firefox driver
         if: matrix.lane-group == 'extension'
         run: pnpm --filter dezoomify-extension-headless install:driver

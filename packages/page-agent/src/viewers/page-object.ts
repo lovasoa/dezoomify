@@ -54,7 +54,7 @@ export class PageObject {
     return apply(method, this.identity, args);
   }
 
-  matches(key: PropertyKey, value: boolean | object): boolean {
+  matches(key: PropertyKey, value: unknown): boolean {
     return this.data(key) === value;
   }
 
@@ -166,6 +166,16 @@ export class PageAccess {
     try {
       return value && this.nodeType && apply(this.nodeType, value.identity, []) === 1
         ? (value.identity as Element)
+        : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  documentNode(value: PageObject): Document | undefined {
+    try {
+      return this.nodeType && apply(this.nodeType, value.identity, []) === 9
+        ? (value.identity as Document)
         : undefined;
     } catch {
       return undefined;
