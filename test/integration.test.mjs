@@ -2,7 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createWebFetcher, isProxyEligible } from "../packages/browser-runtime/src/web-fetch.ts";
 import { createDiagnosticRecorder } from "../packages/shared-ui/src/diagnostics.ts";
-import { createProxyRateLimiter, createProxyTransport } from "../src/proxyTransport.ts";
+import {
+  createProxyRateLimiter,
+  createProxyTransport,
+  PROXY_MAX_INFLIGHT,
+  PROXY_MAX_REQUESTS_PER_SECOND,
+  PROXY_RATE_WINDOW_MS,
+} from "../src/proxyTransport.ts";
 
 function okBytes(...values) {
   return new Uint8Array(values).buffer;
@@ -292,39 +298,43 @@ test("proxyTransport surfaces Retry-After on 429 so callers can back off once", 
   assert.equal(unhinted.retryAfterMs, undefined);
 });
 
-test("proxyTransport caps proxy load at 4 inflight and 4 starts per second", async () => {
-  // Isolated limiter so this burst never borrows quota from other tests.
-  const limiter = createProxyRateLimiter();
-  let inflight = 0;
-  let maxInflight = 0;
-  const fetchImpl = async () => {
-    inflight += 1;
-    maxInflight = Math.max(maxInflight, inflight);
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    inflight -= 1;
-    return new Response(new Uint8Array([1]));
-  };
-  const pt = createProxyTransport(fetchImpl, {
-    protocolVersion: 1,
-    maxBytes: 1024,
-    rateLimiter: limiter,
+test("queued proxy downloads respect concurrency and rate budgets and all complete", async () => {
+  let now = 0,
+    inflight = 0;
+  const starts = [];
+  const network = Promise.withResolvers();
+  const limiter = createProxyRateLimiter({
+    now: () => now,
+    sleep: async (ms) => {
+      now += ms;
+    },
   });
-  const started = Date.now();
-  const results = await Promise.all(
-    Array.from({ length: 8 }, (_, i) =>
-      pt.fetchViaProxy(
-        request(`https://public.test/burst-${i}.json`, ["metadata", "tile", "probe"][i % 3]),
-      ),
+  const transport = createProxyTransport(
+    async () => {
+      starts.push(now);
+      inflight++;
+      await network.promise;
+      inflight--;
+      return new Response(Uint8Array.of(1));
+    },
+    { protocolVersion: 1, maxBytes: 1024, rateLimiter: limiter },
+  );
+  const pending = Promise.all(
+    Array.from({ length: 2 * PROXY_MAX_REQUESTS_PER_SECOND }, (_, index) =>
+      transport.fetchViaProxy(request(`https://public.test/tile-${index}.jpg`, "tile")),
     ),
   );
-  const elapsed = Date.now() - started;
-  assert.ok(
-    results.every((r) => r.ok),
-    "every limited request still succeeds",
-  );
-  assert.ok(maxInflight <= 4, `at most 4 proxy requests in flight (saw ${maxInflight})`);
-  // 8 starts at 4/s need a second window: the tail must wait out the window.
-  assert.ok(elapsed >= 900, `8 starts at 4/s take >= ~1s (took ${elapsed}ms)`);
+  // Drain admissions while the first network responses are held, without a timer.
+  await new Promise(setImmediate);
+  assert.equal(inflight, PROXY_MAX_INFLIGHT);
+  network.resolve();
+  const results = await pending;
+  assert.ok(results.every((result) => result.ok));
+  for (const result of results) assert.deepEqual([...new Uint8Array(result.bytes)], [1]);
+  for (const start of starts) {
+    const window = starts.filter((time) => time >= start && time < start + PROXY_RATE_WINDOW_MS);
+    assert.ok(window.length <= PROXY_MAX_REQUESTS_PER_SECOND);
+  }
 });
 
 test("proxyTransport surfaces the upstream URL so proxied metadata keeps its tile base", async () => {
