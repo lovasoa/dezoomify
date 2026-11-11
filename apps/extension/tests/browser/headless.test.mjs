@@ -114,6 +114,12 @@ function stagePackage(
 async function startFixtureServer(workDir, { cors = true } = {}) {
   const staticDir = path.join(workDir, "static");
   cpSync(STATIC_DIR, staticDir, { recursive: true });
+  for (const name of ["memory-krpano.html", "private-runtime.js"]) {
+    writeFileSync(
+      path.join(staticDir, name),
+      readFileSync(new URL(`../../../../test/browser/pages/${name}`, import.meta.url)),
+    );
+  }
   await sharp({
     create: { width: 1800, height: 1200, channels: 3, background: { r: 27, g: 98, b: 154 } },
   })

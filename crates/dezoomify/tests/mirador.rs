@@ -15,12 +15,12 @@ fn declared_manifest_precedes_a_loaded_snapshot_also_seen_in_network_history() {
         vec![
             DiscoveryInput::with_contents(
                 PAGE,
-                include_str!("../../../apps/extension/tests/browser/corpus/mirador/viewer.html"),
+                include_str!("../../../test/browser/corpus/mirador/viewer.html"),
             ),
             DiscoveryInput::new(INFO).with_kind(DiscoveryInputKind::ObservedResource),
             DiscoveryInput::with_contents(
                 INFO,
-                include_str!("../../../apps/extension/tests/browser/corpus/mirador/info.json"),
+                include_str!("../../../test/browser/corpus/mirador/info.json"),
             )
             .with_kind(DiscoveryInputKind::ObservedMetadata),
         ],
@@ -28,10 +28,7 @@ fn declared_manifest_precedes_a_loaded_snapshot_also_seen_in_network_history() {
         |uri| {
             assert_eq!(uri, MANIFEST);
             Some(Ok((
-                include_bytes!(
-                    "../../../apps/extension/tests/browser/corpus/mirador/manifest.json"
-                )
-                .to_vec(),
+                include_bytes!("../../../test/browser/corpus/mirador/manifest.json").to_vec(),
                 None,
             )))
         },

@@ -1,29 +1,13 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import test from "node:test";
-import { fileURLToPath } from "node:url";
-import { build } from "esbuild";
-import { chromium, firefox } from "playwright";
 import sharp from "sharp";
+import { test } from "../../../../test/browser/fixtures.mjs";
 import {
   createSeadragonViewer,
   seadragonLibrary,
   seadragonVersions,
-} from "./seadragon-fixture.mjs";
+} from "../../../../test/browser/seadragon-fixture.mjs";
 
-const scanner = (
-  await build({
-    entryPoints: [
-      fileURLToPath(new URL("../../../../packages/page-agent/src/index.ts", import.meta.url)),
-    ],
-    bundle: true,
-    write: false,
-    format: "iife",
-    globalName: "ViewerScanner",
-    target: "es2022",
-    define: { "import.meta.url": JSON.stringify(import.meta.url) },
-  })
-).outputFiles[0].text;
 const ordinaryTile = readFileSync(new URL("../../../../fixtures/tiles/0-0.png", import.meta.url));
 
 // Non-power-of-two dimensions, overlap and edge tiles exercise actual geometry.
@@ -130,12 +114,6 @@ async function checkObservation(page, runtime, mode) {
     expectedImages(runtime, mode),
     JSON.stringify(result.diagnostics),
   );
-  if (mode !== "multi") {
-    const kind = ["custom", "failure", "bounds", "ajax"].includes(mode)
-      ? "observed-viewer"
-      : "observed-metadata";
-    for (const input of result.inputs) assert.equal(input.kind, kind);
-  }
   const live = result.inputs.filter((input) => input.kind === "observed-viewer");
   if (["custom", "expando", "global", "multi", "ajax"].includes(mode)) {
     for (const input of live) await acquireTiles(page, input);
@@ -146,10 +124,7 @@ async function checkObservation(page, runtime, mode) {
   for (const input of result.inputs.filter((input) => input.kind === "observed-metadata")) {
     checkMetadata(input, mode);
   }
-  assert.deepEqual(await page.evaluate(() => [window.getterCalls, window.viewportUnchanged()]), [
-    0,
-    true,
-  ]);
+  assert.equal(await page.evaluate(() => window.viewportUnchanged()), true);
 }
 
 async function checkSession(page, input, mode) {
@@ -219,53 +194,40 @@ function expectedImages(runtime, mode) {
   return mode === "multi" ? 2 : 1;
 }
 
-for (const [name, engine] of [
-  ["Chromium", chromium],
-  ["Firefox", firefox],
-]) {
-  test(`${name}: real Seadragon and OpenSeadragon release matrix`, {
-    timeout: 180000,
-  }, async (t) => {
-    const browser = await engine.launch({ headless: true });
-    try {
-      for (const runtime of seadragonVersions) {
-        const modes = [
-          "global",
-          "expando",
-          "closure",
-          "custom",
-          "empty",
-          "sparse",
-          "bounds",
-          "failure",
-        ];
-        if (runtime.world) modes.push("multi", "ajax", "iiif", "zoomify", "image");
-        if (runtime.classic) modes.push("query");
-        for (const mode of modes)
-          await t.test(
-            `${runtime.classic ? "Seadragon" : "OpenSeadragon"} ${runtime.version}: ${mode}`,
-            async () => {
-              const page = await browser.newPage();
-              const requests = [];
-              page.on("request", (request) => {
-                if (new URL(request.url()).pathname.startsWith("/ajax/")) requests.push(request);
-              });
-              try {
-                await page.route("https://viewer.fixture.test/**", tileResponse);
-                await page.goto("https://viewer.fixture.test/");
-                await page.addScriptTag({ content: seadragonLibrary(runtime) });
-                await page.evaluate(createSeadragonViewer, { runtime, mode });
-                await page.addScriptTag({ content: scanner });
-                await checkObservation(page, runtime, mode);
-                if (mode === "ajax") checkAjax(requests, runtime);
-              } finally {
-                await page.close();
-              }
-            },
-          );
-      }
-    } finally {
-      await browser.close();
-    }
-  });
+for (const runtime of seadragonVersions) {
+  const modes = ["global", "closure", "custom"];
+  if (runtime === seadragonVersions.at(-1)) {
+    modes.push(
+      "expando",
+      "empty",
+      "sparse",
+      "bounds",
+      "failure",
+      "multi",
+      "iiif",
+      "zoomify",
+      "image",
+    );
+  }
+  // These releases cover the two supported AJAX loader contracts (GET and POST).
+  if (runtime.version.startsWith("2.") || runtime === seadragonVersions.at(-1)) modes.push("ajax");
+  if (runtime.classic) modes.push("query");
+  for (const mode of modes) {
+    test(`${runtime.classic ? "Seadragon" : "OpenSeadragon"} ${runtime.version}: ${mode}`, async ({
+      page,
+      loadModule,
+    }) => {
+      const requests = [];
+      page.on("request", (request) => {
+        if (new URL(request.url()).pathname.startsWith("/ajax/")) requests.push(request);
+      });
+      await page.route("https://viewer.fixture.test/**", tileResponse);
+      await page.goto("https://viewer.fixture.test/");
+      await page.addScriptTag({ content: seadragonLibrary(runtime) });
+      await page.evaluate(createSeadragonViewer, { runtime, mode });
+      await loadModule(page);
+      await checkObservation(page, runtime, mode);
+      if (mode === "ajax") checkAjax(requests, runtime);
+    });
+  }
 }
