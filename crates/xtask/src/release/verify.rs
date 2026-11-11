@@ -1,36 +1,14 @@
 //! `cargo xtask release verify`: ensure a frozen plan has all expected artifacts.
 
 use super::common::{
-    expected_artifact_name, load_capabilities, load_targets, read_plan, validate_version, Plan,
+    expected_artifact_name, load_capabilities, load_targets, read_plan, stage_args,
+    validate_version, Plan,
 };
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 pub(crate) fn verify_cmd(args: &[String]) -> Result<(), String> {
-    let mut plan = None;
-    let mut artifacts = None;
-    let mut i = 0;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--plan" => {
-                i += 1;
-                plan = Some(PathBuf::from(args.get(i).ok_or("missing --plan <path>")?));
-            }
-            "--artifacts" => {
-                i += 1;
-                artifacts = Some(PathBuf::from(
-                    args.get(i).ok_or("missing --artifacts <path>")?,
-                ));
-            }
-            other => return Err(format!("unknown release verify arg '{other}'")),
-        }
-        i += 1;
-    }
-    let (Some(plan), Some(artifacts)) = (plan, artifacts) else {
-        return Err(
-            "usage: cargo xtask release verify --plan <path> --artifacts <path>".to_string(),
-        );
-    };
-    release_verify(&read_plan(&plan)?, &artifacts)?;
+    let (plan, artifacts) = stage_args(args, "verify", "--artifacts")?;
+    release_verify(&read_plan(plan)?, Path::new(artifacts))?;
     println!("release verify: ok");
     Ok(())
 }

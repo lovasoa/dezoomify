@@ -68,6 +68,7 @@ fn release_notes(plan: &Plan) -> Result<String, String> {
     let path = crate::repo_root().join("docs/user/start-here.md");
     let text =
         std::fs::read_to_string(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
+    let text = text.replace("\r\n", "\n");
     let introduction = text
         .split("\n\n")
         .nth(2)

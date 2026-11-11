@@ -5,12 +5,43 @@ on:
     # Single-branch repository: main holds legacy/ and the new app.
 
     branches: [main]
+  schedule:
+    - cron: '0 6 * * 1'
 permissions:
   contents: read
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  windows-cli:
+    if: github.event_name != 'schedule'
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/setup-pnpm
+        with:
+          install: true
+      - uses: ./.github/actions/setup-build
+        with:
+          key: cli-release
+      - name: Build and exercise the release archive
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:DEZOOMIFY_VERSION = cargo xtask release version
+          if ($LASTEXITCODE -ne 0) { throw 'version failed' }
+          Remove-Item target/release-dist -Recurse -Force -ErrorAction SilentlyContinue
+          cargo xtask release plan
+          if ($LASTEXITCODE -ne 0) { throw 'plan failed' }
+          cargo xtask release build --plan "target/release-dist/$env:DEZOOMIFY_VERSION/plan.json" --target cli-windows-x86_64
+          if ($LASTEXITCODE -ne 0) { throw 'build failed' }
+          Expand-Archive "target/release-dist/$env:DEZOOMIFY_VERSION/cli-windows-x86_64/*.zip" -DestinationPath target/cli-smoke
+          if (-not (Test-Path target/cli-smoke/LICENSE)) { throw 'license missing' }
+          & target/cli-smoke/dezoomify-cli.exe --help
+          if ($LASTEXITCODE -ne 0) { throw 'CLI failed' }
   deterministic:
     # Keep the same lanes as `cargo xtask ci local`, with parallel feedback.
     name: deterministic (${{ matrix.lane-group }})
@@ -20,13 +51,7 @@ jobs:
       fail-fast: false
       max-parallel: 4
       matrix:
-        lane-group:
-          - check
-          - rust
-          - wasm
-          - browser+web
-          - extension
-          - bindings+security
+        lane-group: ${{ fromJSON(github.event_name == 'schedule' && '["check", "bindings+security"]' || '["check", "rust", "wasm", "browser+web", "extension", "bindings+security"]') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

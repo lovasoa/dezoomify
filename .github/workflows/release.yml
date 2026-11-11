@@ -39,7 +39,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           sha="$(git rev-parse HEAD)"
-          test -n "$(gh run list --workflow ci.yml --commit "$sha" --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
+          test -n "$(gh run list --workflow ci.yml --commit "$sha" --status success --limit 100 --json databaseId,event --jq '[.[] | select(.event != "schedule")][0].databaseId // empty')"
       - name: Freeze plan
         if: steps.daily.outputs.build == 'true'
         env:
@@ -63,6 +63,9 @@ jobs:
         include:
           - target: cli-linux-x86_64
             runner: ubuntu-latest
+            cache: cli-release
+          - target: cli-windows-x86_64
+            runner: windows-latest
             cache: cli-release
           - target: desktop-linux-x86_64
             runner: ubuntu-latest
@@ -103,8 +106,8 @@ jobs:
         env:
           DEZOOMIFY_VERSION: ${{ needs.prepare.outputs.version }}
         run: xvfb-run -a cargo xtask test desktop --e2e-window
-      - name: Build artifact (Unix)
-        if: runner.os != 'Windows'
+      - name: Build artifact
+        shell: bash
         env:
           DEZOOMIFY_VERSION: ${{ needs.prepare.outputs.version }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ startsWith(matrix.target, 'desktop-') && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
@@ -119,18 +122,6 @@ jobs:
           v="$DEZOOMIFY_VERSION"
           cargo xtask release build --plan "target/release-dist/$v/plan.json" --target "${{ matrix.target }}"
           rm "target/release-dist/$v/plan.json" "target/release-dist/$v/notes.md"
-      - name: Build artifact (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        env:
-          DEZOOMIFY_VERSION: ${{ needs.prepare.outputs.version }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: |
-          $v = $env:DEZOOMIFY_VERSION
-          cargo xtask release build --plan "target/release-dist/$v/plan.json" --target "${{ matrix.target }}"
-          if ($LASTEXITCODE -ne 0) { throw "release artifact build failed" }
-          Remove-Item "target/release-dist/$v/plan.json", "target/release-dist/$v/notes.md"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-${{ matrix.target }}
@@ -155,9 +146,11 @@ jobs:
           # rust-cache can restore this directory even after pruning its files.
           rm -rf target/release-dist
           mkdir -p target/release-dist
-          for name in release-plan release-cli-linux-x86_64 release-desktop-linux-x86_64 release-desktop-windows-x86_64 release-desktop-macos-aarch64 release-extension-chromium release-extension-firefox; do
-            gh run download "${{ github.run_id }}" -n "$name" -D target/release-dist
-          done
+          gh run download "${{ github.run_id }}" -n release-plan -D target/release-dist
+          v="${{ needs.prepare.outputs.version }}"
+          while IFS= read -r target; do
+            gh run download "${{ github.run_id }}" -n "release-$target" -D target/release-dist
+          done < <(jq -r '.targets[].name' "target/release-dist/$v/plan.json")
       - name: Verify and publish the daily release
         env:
           GH_TOKEN: ${{ github.token }}

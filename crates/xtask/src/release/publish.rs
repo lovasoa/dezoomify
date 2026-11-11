@@ -5,41 +5,16 @@
 //! and no existing release for the frozen date. An existing tag must identify
 //! the same commit. The workflow owns CI approval and serializes publishers.
 
-use super::common::{expected_artifact_name, read_plan, Plan};
+use super::common::{expected_artifact_name, read_plan, stage_args, Plan};
 use super::verify::release_verify;
-use std::path::PathBuf;
+use std::path::Path;
 use std::process::Command;
 
 pub(crate) fn publish_cmd(args: &[String]) -> Result<(), String> {
-    let mut plan: Option<PathBuf> = None;
-    let mut artifacts: Option<PathBuf> = None;
-    let mut i = 0;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--plan" => {
-                i += 1;
-                plan = Some(PathBuf::from(
-                    args.get(i).ok_or("missing --plan <path>")?.clone(),
-                ));
-            }
-            "--artifacts" => {
-                i += 1;
-                artifacts = Some(PathBuf::from(
-                    args.get(i).ok_or("missing --artifacts <path>")?.clone(),
-                ));
-            }
-            other => return Err(format!("unknown release publish arg '{other}'")),
-        }
-        i += 1;
-    }
-    let (Some(plan), Some(artifacts)) = (plan, artifacts) else {
-        return Err(
-            "usage: cargo xtask release publish --plan <path> --artifacts <path>".to_string(),
-        );
-    };
-    let p = read_plan(&plan)?;
-    release_verify(&p, &artifacts)?;
-    release_publish(&p, &artifacts)?;
+    let (plan, artifacts) = stage_args(args, "publish", "--artifacts")?;
+    let p = read_plan(plan)?;
+    release_verify(&p, Path::new(artifacts))?;
+    release_publish(&p, Path::new(artifacts))?;
     println!("release publish: {}", p.tag);
     Ok(())
 }
@@ -124,7 +99,8 @@ fn labeled_asset(path: &std::path::Path) -> std::ffi::OsString {
         (".deb", "Linux installer: x64 (DEB)"),
         (".dmg", "macOS installer: Apple Silicon (DMG)"),
         ("macos-aarch64.app.tar.gz", "macOS updater: Apple Silicon"),
-        ("dezoomify-cli-", "Command line: Linux x64 (tar.gz)"),
+        ("linux-x86_64.tar.gz", "Command line: Linux x64 (tar.gz)"),
+        ("windows-x86_64.zip", "Command line: Windows x64 (ZIP)"),
         ("dezoomify-chromium-", "Browser extension: Chromium (ZIP)"),
         ("dezoomify-firefox-", "Browser extension: Firefox (ZIP)"),
         ("latest.json", "Desktop updater manifest"),
