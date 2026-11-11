@@ -13,6 +13,26 @@ export interface SourceSnapshot {
   inputs: JobInput[];
 }
 
+/** A live metadata observation at the exact document URL replaces that source's
+ * HTML. Other observations remain separate candidates. This prevents a prior
+ * SPA view's inline data from outranking the current viewer's metadata. */
+export function mergeSourceInputs(snapshot: SourceSnapshot, observed: JobInput[]): JobInput[] {
+  const current = observed.find(
+    (input) =>
+      input.kind === "observed-metadata" &&
+      input.url === snapshot.documentUrl &&
+      input.contents !== undefined,
+  );
+  return [
+    ...snapshot.inputs.map((input) =>
+      current && input.kind === "source" && input.url === current.url
+        ? { ...input, contents: current.contents }
+        : input,
+    ),
+    ...observed.filter((input) => input !== current),
+  ];
+}
+
 /** One finite snapshot after explicit source access. Pass limits as arguments:
  * scripting.executeScript serializes this function without module scope.
  * Supply the complete URL inventory; Rust ranks it before attempting reads.

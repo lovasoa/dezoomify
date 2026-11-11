@@ -224,6 +224,20 @@ export interface DesktopOutput {
 export type ImageChoiceEvent = { kind: "catalog"; catalog: Catalog } | { kind: "preview"; index: number; thumbnail: string };
 
 /**
+ * Detached Google Arts viewer metadata. Hosts must pair the current asset's
+ * signing data with its loaded TileInfo XML. Encode in [`JobInput::contents`]
+ * with the current asset URL; decoding rejects another asset and never fetches metadata.
+ */
+export interface GoogleArtsMetadata {
+    format: "google_arts_and_culture";
+    asset_id: string;
+    title: string;
+    base_url: string;
+    token: string;
+    tile_info: string;
+}
+
+/**
  * Durable native reference to a published output; filesystem paths stay in the shell.
  */
 export interface SavedOutput {
