@@ -2,13 +2,30 @@ name: desktop
 on:
   workflow_dispatch:
   pull_request:
-    paths: &desktop-paths [ 'apps/desktop/**', 'crates/**', 'packages/shared-ui/**',
-      'packages/browser-runtime/**', 'packages/wasm-bindings/**', 'testdata/**',
-      'fixtures/**', 'test/**', 'scripts/**', 'favicon.svg', 'installer/**',
-      'generated/**', 'Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml',
-      'clippy.toml', 'deny.toml', 'package.json', 'pnpm-lock.yaml',
-      'pnpm-workspace.yaml', '.node-version', '.github/workflows/desktop.yml',
-      '.github/actions/**' ]
+    paths: &desktop-paths
+      - apps/desktop/**
+      - crates/**
+      - packages/shared-ui/**
+      - packages/browser-runtime/**
+      - packages/wasm-bindings/**
+      - testdata/**
+      - fixtures/**
+      - test/**
+      - scripts/**
+      - favicon.svg
+      - installer/**
+      - generated/**
+      - Cargo.toml
+      - Cargo.lock
+      - rust-toolchain.toml
+      - clippy.toml
+      - deny.toml
+      - package.json
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
+      - .node-version
+      - .github/workflows/desktop.yml
+      - .github/actions/**
   push:
     branches: [main]
     paths: *desktop-paths

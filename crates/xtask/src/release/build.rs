@@ -2,34 +2,13 @@
 //!
 //! Each target builds into `target/release-dist/<version>/<target>/`.
 
-use super::common::{expected_artifact_name, git_commit, plan_dir, read_plan, Plan};
+use super::common::{expected_artifact_name, git_commit, plan_dir, read_plan, stage_args, Plan};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 pub(crate) fn build_cmd(args: &[String]) -> Result<(), String> {
-    let mut plan: Option<PathBuf> = None;
-    let mut target: Option<String> = None;
-    let mut i = 0;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--plan" => {
-                i += 1;
-                plan = Some(PathBuf::from(
-                    args.get(i).ok_or("missing --plan <path>")?.clone(),
-                ));
-            }
-            "--target" => {
-                i += 1;
-                target = Some(args.get(i).ok_or("missing --target <name>")?.clone());
-            }
-            other => return Err(format!("unknown release build arg '{other}'")),
-        }
-        i += 1;
-    }
-    let (Some(plan), Some(target)) = (plan, target) else {
-        return Err("usage: cargo xtask release build --plan <path> --target <name>".to_string());
-    };
-    let built = release_build(&read_plan(&plan)?, &target)?;
+    let (plan, target) = stage_args(args, "build", "--target")?;
+    let built = release_build(&read_plan(plan)?, target)?;
     println!("release build {target}: {}", built.display());
     Ok(())
 }

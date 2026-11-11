@@ -13,6 +13,37 @@ use std::process::Command;
 
 pub(crate) const ARTIFACTS_ROOT: &str = "target/release-dist";
 
+/// Parse the plan and one stage-specific option; both must be supplied with values.
+pub(crate) fn stage_args<'a>(
+    args: &'a [String],
+    stage: &str,
+    option: &str,
+) -> Result<(&'a Path, &'a str), String> {
+    let mut plan = None;
+    let mut value = None;
+    let mut args = args.iter();
+    while let Some(arg) = args.next() {
+        let slot = if arg == "--plan" {
+            &mut plan
+        } else if arg == option {
+            &mut value
+        } else {
+            return Err(format!("unknown release {stage} arg '{arg}'"));
+        };
+        *slot = Some(
+            args.next()
+                .ok_or_else(|| format!("missing {arg} <value>"))?
+                .as_str(),
+        );
+    }
+    match (plan, value) {
+        (Some(plan), Some(value)) => Ok((Path::new(plan), value)),
+        _ => Err(format!(
+            "usage: cargo xtask release {stage} --plan <path> {option} <value>"
+        )),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Release inventory inputs (release/*.toml, generated/*.json)
 // ---------------------------------------------------------------------------
