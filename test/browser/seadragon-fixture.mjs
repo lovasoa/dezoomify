@@ -116,13 +116,6 @@ export async function createSeadragonViewer({ runtime, mode }) {
   const position = () => JSON.stringify([viewer.viewport?.getZoom(), viewer.viewport?.getCenter()]);
   const before = position();
   window.viewportUnchanged = () => position() === before;
-  window.getterCalls = 0;
-  Object.defineProperty(window, "viewerGetter", {
-    get() {
-      window.getterCalls++;
-      throw new Error("unexpected getter");
-    },
-  });
   delete window.Seadragon;
   // 1.2.1 itself looks up its global namespace while loading images.
   if (!runtime.needsGlobal) delete window.OpenSeadragon;

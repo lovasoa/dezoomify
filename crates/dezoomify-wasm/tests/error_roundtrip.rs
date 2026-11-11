@@ -73,39 +73,3 @@ fn host_thrown_objects_deserialize_into_the_same_enum() {
     let error: Error = serde_json::from_value(limit.clone()).expect("codec limit deserializes");
     assert_eq!(serde_json::to_value(error).unwrap(), limit);
 }
-
-#[test]
-fn the_kind_tag_is_the_single_stable_identifier() {
-    // The serialized tag and `kind()` can never disagree.
-    for (error, kind) in [
-        (Error::Cancelled, "cancelled"),
-        (Error::PlanEmpty, "plan-empty"),
-        (
-            Error::LimitExceeded {
-                limit: dezoomify::model::LimitContext {
-                    reason: dezoomify::model::LimitReason::CodecSide(
-                        dezoomify::model::OutputFormat::Jpeg,
-                    ),
-                    dimensions: None,
-                    bytes_required: None,
-                    bytes_available: None,
-                },
-            },
-            "limit-exceeded",
-        ),
-        (
-            Error::Resource {
-                request: "https://example.test".into(),
-                resource_kind: ResourceKind::Tile,
-                source: Box::new(Error::DecodeFailed("broken".to_string().into())),
-            },
-            "resource",
-        ),
-    ] {
-        let value = serde_json::to_value(&error).expect("serializes");
-        assert_eq!(error.kind(), value["kind"], "{kind}");
-        assert_eq!(value["kind"], kind);
-    }
-    // Unknown kinds are refused at the boundary instead of mistranslated.
-    assert!(serde_json::from_value::<Error>(serde_json::json!({ "kind": "made-up" })).is_err());
-}

@@ -5,16 +5,11 @@
   "description": "Headless browser gate for the packaged extension: run the real store packages in Chromium and Firefox through a verified PNG save.",
   "scripts": {
     "install:driver": "node geckodriver.mjs",
-    "test": "node --test-reporter=spec --test \"*.test.mjs\""
+    "test": "node --test-reporter=spec --test headless.test.mjs"
   },
   "devDependencies": {
     "geckodriver": "^8.0.0",
     "ol": "10.11.0",
-    "ol6": "npm:ol@6.15.1",
-    "openseadragon2": "npm:openseadragon@2.4.2",
-    "openseadragon3": "npm:openseadragon@3.1.0",
-    "openseadragon4": "npm:openseadragon@4.1.1",
-    "openseadragon5": "npm:openseadragon@5.0.1",
     "playwright": "1.65.0",
     "selenium-webdriver": "^4.52.0"
   },

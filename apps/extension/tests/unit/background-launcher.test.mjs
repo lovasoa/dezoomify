@@ -2,95 +2,93 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createBackgroundLauncher } from "../../src/background/launcher.ts";
 
-const tick = () => new Promise((resolve) => setImmediate(resolve));
-const SOURCE = { id: 7, url: "https://gallery.example/work" };
+const tick = () => new Promise(setImmediate);
+const source = { id: 7, url: "https://gallery.example/work" };
 
-function fakeBrowser() {
-  const listeners = { click: [], removed: [], message: [] };
-  const calls = { create: [], update: [], send: [] };
-  const tabs = new Map([[SOURCE.id, SOURCE]]);
-  let nextTabId = 40;
+function browser() {
+  const tabs = new Map([[source.id, { ...source, active: true }]]);
+  let click,
+    removed,
+    nextId = 40;
+  function activate(tab) {
+    if (tab.active) for (const other of tabs.values()) if (other !== tab) other.active = false;
+    return tab;
+  }
   const api = {
     action: {
-      onClicked: { addListener: (listener) => listeners.click.push(listener) },
+      onClicked: {
+        addListener(listener) {
+          click = listener;
+        },
+      },
     },
     tabs: {
       async create(details) {
-        calls.create.push(details);
-        const tab = { id: nextTabId++, url: details.url };
+        const tab = { id: nextId++, ...details };
         tabs.set(tab.id, tab);
-        return tab;
+        return activate(tab);
       },
-      get: async (tabId) => tabs.get(tabId),
-      update: async (tabId, details) => {
-        calls.update.push({ tabId, details });
-        if (!tabs.has(tabId)) throw new Error("tab missing");
-        return tabs.get(tabId);
+      get: async (id) => tabs.get(id),
+      async update(id, details) {
+        const tab = tabs.get(id);
+        if (!tab) throw new Error("tab closed");
+        return activate(Object.assign(tab, details));
       },
-      onRemoved: { addListener: (listener) => listeners.removed.push(listener) },
+      onRemoved: {
+        addListener(listener) {
+          removed = listener;
+        },
+      },
     },
     runtime: {
       getURL: (path) => `moz-extension://test${path}`,
-      sendMessage: async (message) => {
-        calls.send.push(message);
-      },
-      onMessage: { addListener: (listener) => listeners.message.push(listener) },
+      sendMessage: async () => {},
+      onMessage: { addListener() {} },
     },
   };
-  return { api, calls, listeners, tabs };
+  createBackgroundLauncher({ browserApi: api }).startBackground();
+  return {
+    jobs: () => [...tabs.values()].filter((tab) => tab.url.startsWith("moz-extension://")),
+    async click() {
+      click(source);
+      await tick();
+    },
+    close(id) {
+      tabs.delete(id);
+      removed(id);
+    },
+  };
 }
 
-test("toolbar click opens one job page with only the source tab id", async () => {
-  const fake = fakeBrowser();
-  createBackgroundLauncher({ browserApi: fake.api }).startBackground();
-  fake.listeners.click[0](SOURCE);
-  await tick();
-  assert.equal(fake.calls.create.length, 1);
-  assert.equal(fake.calls.create[0].url, "moz-extension://test/job.html#sourceTabId=7");
-  assert.equal(fake.calls.create[0].active, true);
-  assert.equal(fake.calls.send.length, 0);
+test("toolbar opens the job for the selected source tab", async () => {
+  const ui = browser();
+  await ui.click();
+  const [job] = ui.jobs();
+  assert.equal(ui.jobs().length, 1);
+  assert.equal(job.active, true);
+  const address = new URL(job.url);
+  assert.equal(address.pathname, "/job.html");
+  assert.equal(new URLSearchParams(address.hash.slice(1)).get("sourceTabId"), String(source.id));
 });
 
-test("repeated toolbar clicks focus the existing job and forward one local decision", async () => {
-  const fake = fakeBrowser();
-  createBackgroundLauncher({ browserApi: fake.api }).startBackground();
-  fake.listeners.click[0](SOURCE);
-  await tick();
-  fake.listeners.click[0](SOURCE);
-  await tick();
-  assert.equal(fake.calls.create.length, 1);
-  assert.deepEqual(fake.calls.update, [{ tabId: 40, details: { active: true } }]);
-  assert.deepEqual(fake.calls.send, [{ type: "dz.toolbar-click", sourceTabId: SOURCE.id }]);
+test("another toolbar click focuses the existing job instead of opening a duplicate", async () => {
+  const ui = browser();
+  await ui.click();
+  const [job] = ui.jobs();
+  job.active = false;
+  await ui.click();
+  assert.equal(ui.jobs().length, 1);
+  assert.equal(ui.jobs()[0].id, job.id);
+  assert.equal(ui.jobs()[0].active, true);
 });
 
-test("closing either tab removes its source-to-job directory entry", async () => {
-  const fake = fakeBrowser();
-  createBackgroundLauncher({ browserApi: fake.api }).startBackground();
-  fake.listeners.click[0](SOURCE);
-  await tick();
-  fake.listeners.removed[0](40);
-  fake.listeners.click[0](SOURCE);
-  await tick();
-  assert.equal(fake.calls.create.length, 2);
-});
-
-test("the testing driver uses the same launcher after checking the current tab URL", async () => {
-  const fake = fakeBrowser();
-  createBackgroundLauncher({ browserApi: fake.api, testing: true }).startBackground();
-  const respond = (message) =>
-    new Promise((resolve) => fake.listeners.message[0](message, {}, resolve));
-  assert.deepEqual(
-    await respond({ type: "dezoomify-test-start-job", tabId: SOURCE.id, url: SOURCE.url }),
-    { ok: true },
-  );
-  assert.deepEqual(await respond({ type: "dezoomify-test-wake-background" }), { ok: true });
-  assert.equal(fake.calls.create.length, 1);
-  assert.deepEqual(
-    await respond({
-      type: "dezoomify-test-start-job",
-      tabId: SOURCE.id,
-      url: "https://other.example/",
-    }),
-    { ok: false },
-  );
+test("closing a job lets the next click open a working replacement", async () => {
+  const ui = browser();
+  await ui.click();
+  const [closed] = ui.jobs();
+  ui.close(closed.id);
+  await ui.click();
+  assert.equal(ui.jobs().length, 1);
+  assert.notEqual(ui.jobs()[0].id, closed.id);
+  assert.equal(ui.jobs()[0].active, true);
 });

@@ -323,21 +323,6 @@ importers:
       ol:
         specifier: 10.11.0
         version: 10.11.0
-      ol6:
-        specifier: npm:ol@6.15.1
-        version: ol@6.15.1
-      openseadragon2:
-        specifier: npm:openseadragon@2.4.2
-        version: openseadragon@2.4.2
-      openseadragon3:
-        specifier: npm:openseadragon@3.1.0
-        version: openseadragon@3.1.0
-      openseadragon4:
-        specifier: npm:openseadragon@4.1.1
-        version: openseadragon@4.1.1
-      openseadragon5:
-        specifier: npm:openseadragon@5.0.1
-        version: openseadragon@5.0.1
       playwright:
         specifier: 1.65.0
         version: 1.65.0
@@ -398,6 +383,30 @@ importers:
       '@dezoomify/browser-runtime':
         specifier: workspace:*
         version: link:../browser-runtime
+
+  test/browser:
+    devDependencies:
+      '@playwright/test':
+        specifier: 1.65.0
+        version: 1.65.0
+      ol:
+        specifier: 10.11.0
+        version: 10.11.0
+      ol6:
+        specifier: npm:ol@6.15.1
+        version: ol@6.15.1
+      openseadragon2:
+        specifier: npm:openseadragon@2.4.2
+        version: openseadragon@2.4.2
+      openseadragon3:
+        specifier: npm:openseadragon@3.1.0
+        version: openseadragon@3.1.0
+      openseadragon4:
+        specifier: npm:openseadragon@4.1.1
+        version: openseadragon@4.1.1
+      openseadragon5:
+        specifier: npm:openseadragon@5.0.1
+        version: openseadragon@5.0.1
 
 packages:
 

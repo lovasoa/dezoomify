@@ -4,6 +4,20 @@
 use serde::{Deserialize, Serialize};
 use std::num::NonZeroU64;
 
+/// Detached Google Arts viewer metadata. Hosts must pair the current asset's
+/// signing data with its loaded TileInfo XML. Encode in [`JobInput::contents`]
+/// with the current asset URL; decoding rejects another asset and never fetches metadata.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "format", rename = "google_arts_and_culture")]
+#[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+pub struct GoogleArtsMetadata {
+    pub asset_id: String,
+    pub title: String,
+    pub base_url: String,
+    pub token: String,
+    pub tile_info: String,
+}
+
 /// Batched CSS queries against inert, UTF-8 HTML. Parsing never fetches or executes.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]

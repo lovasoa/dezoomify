@@ -23,5 +23,6 @@ the page must always be treated as untrusted.
 
 The package exposes the scanner and the direct tile accessors only; message
 transport between worlds belongs to each host. It remains bundleable as one
-script and may not import extension or desktop APIs. Browser tests cover live
-viewer adapters and message transport.
+script and may not import extension or desktop APIs. Run `cargo xtask test page-agent`
+for unit tests and live browser fixtures; [Testing](../../docs/testing.md) explains
+the separation from host transport and packaged-product tests.

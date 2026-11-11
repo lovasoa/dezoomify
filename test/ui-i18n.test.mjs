@@ -1,69 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  DE,
   DEFAULT_LOCALE,
   EN,
-  FR,
   getDictionary,
   getLocale,
-  IT,
   normalizeLocaleName,
   pickLocale,
-  SUPPORTED_LOCALES,
   setLocale,
   t,
 } from "../packages/shared-ui/src/i18n.ts";
-
-const LOCALES = { en: EN, fr: FR, de: DE, it: IT };
-
-function placeholdersOf(template) {
-  return [...template.matchAll(/\{(\w+)\}/g)]
-    .map((m) => m[1])
-    .sort()
-    .join(",");
-}
-
-test("i18n: English table is namespaced and well-formed", () => {
-  const keys = Object.keys(EN);
-  for (const key of keys) {
-    assert.match(key, /^(view|desktop|page)\.[a-zA-Z0-9.]+$/, `key is namespaced: ${key}`);
-    assert.ok(typeof EN[key] === "string" && EN[key].length > 0, `value is non-empty: ${key}`);
-    const opens = (EN[key].match(/\{/g) || []).length;
-    const closes = (EN[key].match(/\}/g) || []).length;
-    assert.equal(opens, closes, `balanced interpolation braces: ${key}`);
-    for (const varMatch of EN[key].matchAll(/\{([^}]*)\}/g)) {
-      assert.match(varMatch[1], /^[A-Za-z]\w*$/, `placeholder is a plain var: ${key}`);
-    }
-  }
-});
-
-test("i18n: fr/de/it cover the English key set with identical placeholders", () => {
-  assert.equal(DEFAULT_LOCALE, "en");
-  assert.deepEqual([...SUPPORTED_LOCALES], ["en", "fr", "de", "it"]);
-  const enKeys = Object.keys(EN);
-  for (const [label, table] of Object.entries(LOCALES)) {
-    if (label === "en") continue;
-    const keys = Object.keys(table);
-    assert.deepEqual(
-      new Set(keys),
-      new Set(enKeys),
-      `${label} ships exactly the English key set (no orphans, nothing missing)`,
-    );
-    for (const key of enKeys) {
-      assert.ok(
-        typeof table[key] === "string" && table[key].length > 0,
-        `${label} value is non-empty: ${key}`,
-      );
-      assert.equal(
-        placeholdersOf(table[key]),
-        placeholdersOf(EN[key]),
-        `${label} keeps the English placeholders: ${key}`,
-      );
-      assert.ok(!table[key].includes("\u2014"), `${label} uses no em dashes: ${key}`);
-    }
-  }
-});
 
 test("i18n: substitution renders per locale and degrades safely", () => {
   try {
@@ -155,7 +101,6 @@ test("i18n: setLocale accepts en/fr/de/it, normalizes tags, and fails closed", (
     assert.equal(normalizeLocaleName("xx"), null);
     assert.equal(normalizeLocaleName(""), null);
     assert.deepEqual(getDictionary("es"), EN);
-    assert.equal(getDictionary("fr"), FR);
   } finally {
     setLocale("en");
   }

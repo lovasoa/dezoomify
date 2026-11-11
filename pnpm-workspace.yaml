@@ -5,6 +5,7 @@ packages:
   - "apps/extension/tests/browser"
   - "apps/desktop/tests/window-e2e"
   - "tests/**"
+  - "test/browser"
 
 overrides:
   sharp: "0.35.5"

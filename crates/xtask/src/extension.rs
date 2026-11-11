@@ -142,6 +142,7 @@ pub fn test_extension(args: &[String]) -> Result<(), String> {
     super::reject_unknown_args("test extension", args)?;
     prepare_extension_tests()?;
     super::command::node_test(&["apps/extension/tests/unit/*.test.mjs"], false)?;
+    super::browser::run_playwright("apps/extension")?;
     test_headless_browser()
 }
 
@@ -151,6 +152,7 @@ pub(crate) fn test_extension_integration() -> Result<(), String> {
         &["apps/extension/tests/unit/manifest-policy.test.mjs"],
         false,
     )?;
+    super::browser::run_playwright("apps/extension")?;
     test_headless_browser()
 }
 

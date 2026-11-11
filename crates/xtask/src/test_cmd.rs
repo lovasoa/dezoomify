@@ -24,6 +24,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
             }
             Some("wasm") => return super::wasm::run(&args[1..]),
             Some("browser") => return super::browser::test_browser(&args[1..]),
+            Some("page-agent") => return super::browser::test_page_agent(&args[1..]),
             Some("web") => return super::browser::test_web(&args[1..]),
             Some("ui") => return test_ui(&args[1..]),
             Some("native") => return super::native::test_native(&args[1..]),
@@ -34,7 +35,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
             _ => {}
         }
         return Err(format!(
-            "unknown test arguments (targets: core, bindings, wasm, browser, ui, web, native, scenario, desktop, extension, all, live): {}",
+            "unknown test arguments (targets: core, bindings, wasm, browser, page-agent, ui, web, native, scenario, desktop, extension, all, live): {}",
             args.join(" ")
         ));
     }

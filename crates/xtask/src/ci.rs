@@ -40,13 +40,16 @@ fn ci_lane(lane: &str) -> Result<(), String> {
         "check" => super::check::run(&[]),
         "rust" => super::command::cargo_test(&["--workspace"]),
         "wasm" => super::wasm::run_node_harness(),
-        "browser" => super::command::node_test(
-            &[
-                "packages/browser-runtime/test/*.test.mjs",
-                "packages/page-agent/test/*.test.mjs",
-            ],
-            true,
-        ),
+        "browser" => {
+            super::command::node_test(
+                &[
+                    "packages/browser-runtime/test/*.test.mjs",
+                    "packages/page-agent/test/*.test.mjs",
+                ],
+                true,
+            )?;
+            super::browser::run_playwright("packages")
+        }
         "ui" => super::test_cmd::test_ui(&[]),
         "web" => super::browser::test_web(&["--e2e".to_string()]),
         "desktop" => super::command::node_test(&["apps/desktop/tests/*.test.mjs"], true),
@@ -63,6 +66,7 @@ fn ci_lane(lane: &str) -> Result<(), String> {
 pub fn test_all() -> Result<(), String> {
     super::test_cmd::run(&[])?;
     super::wasm::run_node_harness()?;
+    super::browser::run_playwright("packages")?;
     super::browser::run_e2e()?;
     super::extension::test_extension_integration()
 }
