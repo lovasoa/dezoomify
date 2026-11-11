@@ -3,6 +3,10 @@ name = "cli-linux-x86_64"
 os = "linux"
 
 [[target]]
+name = "cli-windows-x86_64"
+os = "windows"
+
+[[target]]
 name = "desktop-linux-x86_64"
 os = "linux"
 

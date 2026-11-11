@@ -66,7 +66,7 @@ fn release_build(plan: &Plan, target: &str) -> Result<PathBuf, String> {
         ));
     }
     match target {
-        "cli-linux-x86_64" => build_cli_artifact(&entry.os, &out)?,
+        "cli-linux-x86_64" | "cli-windows-x86_64" => build_cli_artifact(&entry.os, &out)?,
         "desktop-linux-x86_64" | "desktop-windows-x86_64" | "desktop-macos-aarch64" => {
             build_desktop_artifact(target, &entry.os, &out)?
         }
@@ -81,18 +81,26 @@ fn release_build(plan: &Plan, target: &str) -> Result<PathBuf, String> {
 }
 
 fn build_cli_artifact(target_os: &str, out: &Path) -> Result<(), String> {
-    if target_os != "linux" || !cfg!(target_os = "linux") {
-        return Err("target cli-linux-x86_64 must be built on a linux host".to_string());
+    if !matches!(
+        (target_os, std::env::consts::OS),
+        ("linux", "linux") | ("windows", "windows")
+    ) {
+        return Err(format!("CLI target must be built on a {target_os} host"));
     }
     run_cmd(&["cargo", "build", "--release", "-p", "dezoomify-cli"])?;
-    let bin = crate::repo_root().join("target/release/dezoomify-cli");
+    let name = if target_os == "windows" {
+        "dezoomify-cli.exe"
+    } else {
+        "dezoomify-cli"
+    };
+    let bin = crate::repo_root().join("target/release").join(name);
     if !bin.is_file() {
         return Err(format!(
             "cargo build produced no binary at {}",
             bin.display()
         ));
     }
-    tar_gz(&bin, "dezoomify-cli", out)?;
+    cli_archive(&bin, name, out, target_os)?;
     Ok(())
 }
 
@@ -215,7 +223,7 @@ fn build_desktop_artifact(target: &str, target_os: &str, out: &Path) -> Result<(
 }
 
 /// Native CLI archive with its executable and license.
-fn tar_gz(file: &Path, inner_name: &str, out: &Path) -> Result<(), String> {
+fn cli_archive(file: &Path, inner_name: &str, out: &Path, target_os: &str) -> Result<(), String> {
     let staging = out
         .parent()
         .ok_or("bad artifact path")?
@@ -225,7 +233,15 @@ fn tar_gz(file: &Path, inner_name: &str, out: &Path) -> Result<(), String> {
     std::fs::copy(file, &staged).map_err(|e| format!("stage {}: {e}", file.display()))?;
     std::fs::copy(crate::repo_root().join("LICENSE"), staging.join("LICENSE"))
         .map_err(|e| format!("stage LICENSE: {e}"))?;
-    let status = Command::new("tar")
+    let status = if target_os == "windows" {
+        Command::new("powershell")
+            .args(["-NoProfile", "-Command", "Compress-Archive -LiteralPath $env:CLI_BINARY, $env:CLI_LICENSE -DestinationPath $env:CLI_ARCHIVE"])
+            .env("CLI_BINARY", &staged)
+            .env("CLI_LICENSE", staging.join("LICENSE"))
+            .env("CLI_ARCHIVE", out)
+            .status()
+    } else {
+        Command::new("tar")
         .arg("-czf")
         .arg(out)
         .arg("-C")
@@ -233,11 +249,11 @@ fn tar_gz(file: &Path, inner_name: &str, out: &Path) -> Result<(), String> {
         .arg(inner_name)
         .arg("LICENSE")
         .status()
-        .map_err(|e| format!("failed to run tar: {e}"));
+    }.map_err(|e| format!("failed to create CLI archive: {e}"));
     let _ = std::fs::remove_dir_all(&staging);
     let status = status?;
     if !status.success() || !out.is_file() {
-        return Err(format!("tar failed writing {}", out.display()));
+        return Err(format!("archive creation failed writing {}", out.display()));
     }
     Ok(())
 }

@@ -91,82 +91,14 @@ jobs:
           desktop: true
       - name: Build, install, and launch (Linux deb)
         if: runner.os == 'Linux'
-        run: |
-          set -euo pipefail
-          cargo xtask build desktop 2>&1 | tee bundle.log
-          DEB="$(ls -t target/release/bundle/deb/*.deb | head -n 1)"
-          sudo dpkg -i "$DEB" || { sudo apt-get install -f -y; sudo dpkg -i "$DEB"; }
-          PKG="$(dpkg-deb -f "$DEB" Package)"
-          BIN="$(dpkg -L "$PKG" | grep -m1 '/dezoomify-desktop$')"
-          code=0
-          xvfb-run -a timeout 20 "$BIN" >bundle-launch.log 2>&1 || code=$?
-          test "$code" -eq 124
+        run: bash scripts/ci-desktop-linux.sh
       - name: Build, install, and launch (macOS dmg)
         if: runner.os == 'macOS'
-        run: |
-          set -euo pipefail
-          cargo xtask build desktop 2>&1 | tee bundle.log
-          DMG="$(ls -t target/release/bundle/dmg/*.dmg | head -n 1)"
-          MNT="/Volumes/DezoomifyCI"
-          printf 'Y\n' | hdiutil attach "$DMG" -nobrowse -readonly -mountpoint "$MNT"
-          APP_DIR="$(ls -d "$MNT"/*.app | head -n 1)"
-          cmp target/desktop-dmg/background.png "$MNT/.background/background.png"
-          test -s "$MNT/.DS_Store"
-          codesign --verify --deep --strict --verbose=4 "$APP_DIR" 2>&1 | tee signature.log
-          osascript - "$MNT" <<'APPLESCRIPT'
-          on run argv
-            tell application "Finder"
-              open (POSIX file (item 1 of argv) as alias)
-              activate
-            end tell
-          end run
-          APPLESCRIPT
-          sleep 2
-          screencapture -x dmg-installation.png
-          APP_BIN="$APP_DIR/Contents/MacOS/$(/usr/libexec/PlistBuddy -c 'Print CFBundleExecutable' "$APP_DIR/Contents/Info.plist")"
-          "$APP_BIN" >bundle-launch.log 2>&1 & APP_PID=$!
-          sleep 15
-          kill -0 "$APP_PID"
-          kill "$APP_PID"
-          wait "$APP_PID" 2>/dev/null || true
-          hdiutil detach "$MNT"
+        run: bash scripts/ci-desktop-macos.sh
       - name: Build, install, and launch (Windows NSIS)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          cargo xtask build desktop 2>&1 | Tee-Object bundle.log
-          if ($LASTEXITCODE -ne 0) { throw "bundle build failed" }
-          $installer = Get-ChildItem target/release/bundle/nsis/*.exe | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-          if (-not $installer) { throw "NSIS installer missing" }
-          $install = Start-Process -FilePath $installer.FullName -ArgumentList '/S' -Wait -PassThru
-          if ($install.ExitCode -ne 0) { throw "NSIS install failed with exit code $($install.ExitCode)" }
-          $registryRoots = @(
-            'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall',
-            'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall',
-            'HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall'
-          )
-          $registeredDirs = @(
-            foreach ($root in $registryRoots) {
-              Get-ChildItem $root -ErrorAction SilentlyContinue |
-                Get-ItemProperty |
-                Where-Object { $_.DisplayName -eq 'Dezoomify' -and $_.InstallLocation } |
-                ForEach-Object { $_.InstallLocation }
-            }
-          )
-          $locations = @($registeredDirs) + @(
-            "$env:LOCALAPPDATA\Dezoomify",
-            "$env:LOCALAPPDATA\Programs\Dezoomify",
-            "$env:ProgramFiles\Dezoomify"
-          )
-          $exe = $locations | Where-Object { Test-Path $_ } | ForEach-Object {
-            Get-ChildItem $_ -Recurse -Filter dezoomify-desktop.exe -ErrorAction SilentlyContinue
-          } | Select-Object -First 1
-          if (-not $exe) { throw "installed exe missing" }
-          $app = Start-Process -FilePath $exe.FullName -PassThru
-          Start-Sleep -Seconds 15
-          if ($app.HasExited) { throw "installed app exited early" }
-          Stop-Process -Id $app.Id -Force
+        run: ./scripts/ci-desktop-windows.ps1
       - name: Upload bundle install and launch logs
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
