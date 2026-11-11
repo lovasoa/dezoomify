@@ -5,7 +5,9 @@ import { build } from "esbuild";
 export async function openLayersLibrary(packageName = "ol") {
   const result = await build({
     absWorkingDir: import.meta.dirname,
-    entryPoints: [fileURLToPath(new URL("./entries/openlayers.ts", import.meta.url))],
+    entryPoints: [
+      fileURLToPath(new URL("../../../../test/browser/openlayers.ts", import.meta.url)),
+    ],
     alias: { ol: packageName },
     bundle: true,
     write: false,

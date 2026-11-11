@@ -59,7 +59,7 @@ Cached drawables are borrowed; only transferred bitmaps are closed.
 OpenLayers detection follows accessible map references, including element data
 stores, without needing a global `ol`. It supports finite pixel-image grids;
 geographic maps and arbitrary reprojection are not inferred to be artwork.
-The [issue corpus](tests/browser/corpus/openlayers/README.md) records provenance,
+The [issue corpus](../../test/browser/corpus/openlayers/README.md) records provenance,
 replay coverage and unavailable historical examples.
 
 ## Saving and packaging

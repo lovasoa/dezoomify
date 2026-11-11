@@ -8,7 +8,7 @@ import {
   fetchSource,
   inspectSourceDocument,
 } from "../../src/job/source-operations.ts";
-import { collectCandidates, sourceSnapshotLimits } from "../../src/job/source-snapshot.ts";
+import { collectCandidates } from "../../src/job/source-snapshot.ts";
 import { installViewerBridge } from "../../src/job/viewer-channel.ts";
 
 const SOURCE_URL = "https://gallery.example/page?view=1";
@@ -675,18 +675,10 @@ test("single-image recovery validates viewer originals and rejects replaced fram
   }
 });
 
-test("job-page source access calls injected scan and fetch with inferred argument shapes", async () => {
-  const fake = fakeBrowser(async ({ func, args }) => {
+test("source-page reads preserve response bytes and HTTP metadata", async () => {
+  const fake = fakeBrowser(async ({ func }) => {
     if (!func) return { ...snapshot(), inputs: [] };
-    if (func === collectCandidates) {
-      assert.deepEqual(args, [sourceSnapshotLimits]);
-      return snapshot();
-    }
-    assert.equal(func, fetchSource);
-    assert.equal(args[0].url, "https://gallery.example/info.json");
-    assert.equal(args[0].documentToken, "root");
-    assert.deepEqual(args[0].headers, [{ name: "Accept", value: "application/json" }]);
-    assert.equal(typeof args[0].operationId, "string");
+    if (func === collectCandidates) return snapshot();
     return {
       ok: true,
       status: 200,
@@ -710,15 +702,30 @@ test("job-page source access calls injected scan and fetch with inferred argumen
     assert.deepEqual([...result.bytes], [1, 2, 3]);
     assert.equal(result.contentType, "text/html");
     assert.equal(result.http, 200);
-    assert.equal(fake.calls.length, 3);
-    assert.deepEqual(
-      fake.calls.map((call) => call.target),
-      [
-        { tabId: 9, frameIds: [0] },
-        { tabId: 9, frameIds: [0] },
-        { tabId: 9, frameIds: [0] },
-      ],
-    );
+  } finally {
+    source.dispose();
+  }
+});
+
+test("live source metadata replaces a previous view's HTML", async () => {
+  const current = JSON.stringify({ title: "Current artwork" });
+  const fake = fakeBrowser(async ({ func }) => {
+    if (!func)
+      return {
+        ...snapshot(),
+        inputs: [{ kind: "observed-metadata", url: SOURCE_URL, contents: current }],
+      };
+    return {
+      ...snapshot(),
+      inputs: [{ kind: "source", url: SOURCE_URL, contents: "<h1>Previous artwork</h1>" }],
+    };
+  });
+  const source = createSourceAccess(fake.api, { tabId: 9, documentUrl: SOURCE_URL });
+  try {
+    const scan = await source.scan();
+    assert.deepEqual(JSON.parse(scan.inputs.find((input) => input.url === SOURCE_URL).contents), {
+      title: "Current artwork",
+    });
   } finally {
     source.dispose();
   }

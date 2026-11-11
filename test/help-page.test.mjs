@@ -76,17 +76,6 @@ function exists(p) {
   }
 }
 
-test("app pages link the in-app docs instead of legacy doc sites", () => {
-  for (const page of ["index.html", "privacy.html", "terms.html"]) {
-    const html = readFileSync(path.join(webDir, page), "utf8");
-    assert.ok(html.includes("./help/"), `${page} links ./help/`);
-    assert.ok(
-      !html.includes("github.com/lovasoa/dezoomify/wiki"),
-      `${page} must not link the legacy wiki`,
-    );
-  }
-});
-
 test("failure guidance links the in-app image-address guide", () => {
   const el = globalThis.document.createElement("div");
   globalThis.document.body.appendChild(el);

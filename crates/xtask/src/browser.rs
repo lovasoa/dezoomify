@@ -1,10 +1,30 @@
 //! `cargo xtask test browser [--build-only]`, `test web`,
 //! `build web`, `dev ui`, `dev web`: browser-runtime and website gates.
-//! Unit coverage is Node-based with injected fakes (no Playwright browsers
-//! required). Real Chromium/Firefox/WebKit E2E is an explicit exception:
-//! only the chromium engine is installed in this environment.
+//! Fast unit tests use Node; library behavior runs through Playwright's shared
+//! Chromium/Firefox fixtures. Website integration builds and serves the app.
 
 use std::process::Command;
+
+pub fn test_page_agent(args: &[String]) -> Result<(), String> {
+    super::reject_unknown_args("test page-agent", args)?;
+    run_node(&["packages/page-agent/test/*.test.mjs"])?;
+    run_playwright("packages/page-agent")
+}
+
+/// Run browser specs under the given repository-relative directory. Install the
+/// workspace/browsers first; extension specs additionally need current WASM glue.
+pub(crate) fn run_playwright(directory: &str) -> Result<(), String> {
+    let status = super::desktop::pnpm_command()?
+        .args(["--filter", "browser-tests", "test", directory])
+        .env("NODE_NO_WARNINGS", "1")
+        .current_dir(super::repo_root())
+        .status()
+        .map_err(|error| format!("run browser tests: {error}"))?;
+    status
+        .success()
+        .then_some(())
+        .ok_or_else(|| format!("browser tests failed: {directory}"))
+}
 
 pub fn test_browser(args: &[String]) -> Result<(), String> {
     let mut build_only = false;

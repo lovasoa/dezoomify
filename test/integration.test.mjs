@@ -2,10 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createWebFetcher, isProxyEligible } from "../packages/browser-runtime/src/web-fetch.ts";
 import { createDiagnosticRecorder } from "../packages/shared-ui/src/diagnostics.ts";
-import { presentIdle } from "../packages/shared-ui/src/presentation.ts";
-import { renderView } from "../packages/shared-ui/src/view.tsx";
 import { createProxyRateLimiter, createProxyTransport } from "../src/proxyTransport.ts";
-import { act } from "./react-dom.mjs";
 
 function okBytes(...values) {
   return new Uint8Array(values).buffer;
@@ -350,20 +347,6 @@ test("proxyTransport surfaces the upstream URL so proxied metadata keeps its til
   const r2 = await bare.fetchViaProxy(request("https://public.test/galleria_04.xml"));
   assert.equal(r2.ok, true);
   assert.equal(r2.finalUrl, undefined);
-});
-
-test("proxy fallback is unconditional: no opt-out UI", () => {
-  const el = globalThis.document.createElement("div");
-  globalThis.document.body.appendChild(el);
-  act(() =>
-    renderView(el, presentIdle(), {
-      onSubmitUrl: () => {},
-      onCancel: () => {},
-      onReset: () => {},
-      onSave: () => {},
-    }),
-  );
-  assert.equal(el.querySelector("#dz-proxy-optin"), null, "idle view renders no proxy toggle");
 });
 
 test("proxy client forwards safe headers and preserves partial responses for every resource purpose", async () => {

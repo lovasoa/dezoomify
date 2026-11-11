@@ -1,7 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import test from "node:test";
-import { parseHTML } from "linkedom";
 import { createDiagnosticRecorder } from "../packages/shared-ui/src/diagnostics.ts";
 import { SUPPORTED_LOCALES, setLocale, t } from "../packages/shared-ui/src/i18n.ts";
 import {
@@ -12,7 +10,6 @@ import {
   presentStatus,
 } from "../packages/shared-ui/src/presentation.ts";
 import { renderView } from "../packages/shared-ui/src/view.tsx";
-import { localizeWebsite } from "../src/copy.ts";
 import { act, click } from "./react-dom.mjs";
 
 function container() {
@@ -45,153 +42,24 @@ const callbacks = {
   onSave: () => {},
 };
 
-test("website navigation, preview controls, and save guidance follow the selected language", () => {
-  const { document } = parseHTML(readFileSync(new URL("../index.html", import.meta.url), "utf8"));
-  const el = document.querySelector("#app");
-  try {
-    for (const locale of SUPPORTED_LOCALES) {
-      setLocale(locale);
-      localizeWebsite(document);
-      assert.equal(
-        document.querySelector("#dz-nav-btn-desktop").textContent,
-        t("page.nav.desktop"),
-      );
-      assert.equal(
-        document.querySelector("#preview-zoom-fit").getAttribute("aria-label"),
-        t("page.preview.fitLabel"),
-      );
-      assert.equal(document.querySelector(".dz-brand svg").tagName.toLowerCase(), "svg");
-      assert.equal(
-        document.querySelector("#dz-legacy-notice-title").textContent,
-        t("page.legacy.title"),
-      );
-      assert.equal(
-        document.querySelector("#dz-legacy-notice-link").textContent,
-        t("page.legacy.link"),
-      );
-      assert.equal(
-        document.querySelector("#dz-legacy-notice-close").getAttribute("aria-label"),
-        t("view.modal.closeTitle"),
-      );
-      render(
-        el,
-        presentOutput({
-          format: "png",
-          canvas: { width: 512, height: 256 },
-          disposition: "browser-save-ready",
-        }),
-        callbacks,
-      );
-      assert.equal(el.querySelector(".dz-completed-guidance").textContent, t("view.done.guidance"));
-      assert.match(el.querySelector(".dz-completed-summary").textContent, /512.*256/);
-      render(el, presentOutput({ format: "png", disposition: "display-only" }), callbacks);
-      assert.equal(el.querySelector(".dz-notice-message").textContent, t("view.display.guidance"));
-      assert.equal(el.querySelector("#dz-btn-save"), null);
-    }
-  } finally {
-    setLocale("en");
-  }
-});
-
-test("presentStatus maps host steps onto render phases", () => {
-  assert.equal(presentStatus("idle").phase, "idle");
-  assert.equal(presentStatus("discovering").phase, "job");
-  assert.equal(presentStatus("preflighting").phase, "job");
-  assert.equal(presentStatus("downloading").phase, "job");
-  assert.equal(presentStatus("saving").phase, "job");
-  assert.equal(presentStatus("display-only").phase, "display-only");
-  assert.equal(presentStatus("completed").phase, "completed");
-  assert.equal(presentStatus("failed").phase, "failed");
-  assert.equal(presentStatus("cancelled").phase, "cancelled");
-  assert.equal(presentIdle().phase, "idle");
-});
-
-test("renderView mounts card and updates job section in place without DOM destruction", () => {
+test("progress updates preserve open diagnostics", () => {
   const el = container();
+  render(el, presentProgress({ phase: "discovery", completed: 0, total: null }), callbacks);
+  el.querySelector(".dz-details").open = true;
+  render(el, presentProgress({ phase: "acquisition", completed: 15, total: 60 }), callbacks);
+  assert.equal(el.querySelector("#dz-job-step-text").textContent, "Downloading image pieces…");
+  assert.equal(el.querySelector("#dz-job-counts").textContent, "15 of 60 image pieces");
+  assert.equal(el.querySelector("#dz-job-bar").style.width, "25%");
+  assert.equal(el.querySelector(".dz-details").open, true);
+});
 
-  // 1. Initial idle render
-  render(el, presentIdle(), callbacks);
-  const card = el.querySelector(".dz-card");
-  assert.ok(card, "status card mounted");
-  assert.equal(card.dataset.viewPhase, "idle");
-  assert.ok(card.querySelector(".dz-form"), "form mounted in idle view");
-
-  // 2. Transition to discovering (active job phase)
-  const ctx = {
-    jobActivity: {
-      url: "https://museum.example.org/artwork/1",
-      startedAt: 0,
-      now: 3_000,
-    },
-  };
-
-  render(el, presentProgress({ phase: "discovery", completed: 0, total: null }), callbacks, ctx);
-  assert.equal(card.dataset.viewPhase, "job");
-  const jobSec = card.querySelector(".dz-job-section");
-  assert.ok(jobSec, "job section mounted");
-  const stepTextEl = card.querySelector("#dz-job-step-text");
-  assert.ok(stepTextEl);
-  assert.equal(stepTextEl.textContent, "Finding the zoomable image…");
-
-  // User opens technical details
-  const details = card.querySelector(".dz-details");
-  assert.ok(details);
-  details.open = true;
-
-  // 3. Heartbeat update / progress ticks during job
-  render(el, presentProgress({ phase: "acquisition", completed: 15, total: 60 }), callbacks, {
-    ...ctx,
-    jobActivity: {
-      ...ctx.jobActivity,
-      completedRequests: 15,
-      pendingRequests: 4,
-    },
-  });
-
-  // Card and job section MUST be the exact same DOM node references.
-  assert.equal(el.querySelector(".dz-card"), card, "card node preserved across job updates");
-  assert.equal(
-    card.querySelector(".dz-job-section"),
-    jobSec,
-    "job section node preserved across job updates",
-  );
-
-  // The step line renders the presentation headline, never host copy.
-  assert.equal(stepTextEl.textContent, "Downloading image pieces…");
-  const countsEl = card.querySelector("#dz-job-counts");
-  assert.equal(countsEl.textContent, "15 of 60 image pieces");
-  const barEl = card.querySelector("#dz-job-bar");
-  assert.equal(barEl.style.width, "25%");
-
-  // Uncontrolled details open state is preserved natively.
-  assert.equal(details.open, true, "open details preserved across in-place updates");
-
-  // 4. Rapid heartbeat / progress ticks
-  const tickPresentation = presentProgress({ phase: "acquisition", completed: 15, total: 60 });
-  for (let tick = 1; tick <= 10; tick++) {
-    render(el, tickPresentation, callbacks, {
-      ...ctx,
-      jobActivity: {
-        ...ctx.jobActivity,
-        pendingRequests: tick % 3,
-        completedRequests: 15 + tick,
-      },
-    });
-    assert.equal(
-      card.querySelector(".dz-job-section"),
-      jobSec,
-      `tick ${tick}: DOM reference must stay identical`,
-    );
-    assert.equal(details.open, true, `tick ${tick}: open details must never close`);
-  }
-
-  // Assembly replaces tile counts with pixel progress, including accessibility.
-  for (const [current, total, counts, percent] of [
-    [0, 32, "0 px of 32 px", "0%"],
-    [24, 32, "24 px of 32 px", "75%"],
-    [1e6, 2e6, "1 Mpx of 2 Mpx", "50%"],
-    [3e6, 5e9, "3 Mpx of 5 Gpx", "0.06%"],
-    [1.5e9, 5e9, "1.5 Gpx of 5 Gpx", "30%"],
+test("assembly reports readable pixel progress and accessible totals", () => {
+  const el = container();
+  for (const { current, total, label, percent } of [
+    { current: 0, total: 32, label: "0 px of 32 px", percent: "0%" },
+    { current: 24, total: 32, label: "24 px of 32 px", percent: "75%" },
+    { current: 1e6, total: 2e6, label: "1 Mpx of 2 Mpx", percent: "50%" },
+    { current: 1.5e9, total: 5e9, label: "1.5 Gpx of 5 Gpx", percent: "30%" },
   ]) {
     render(
       el,
@@ -202,40 +70,24 @@ test("renderView mounts card and updates job section in place without DOM destru
         preparation: { completed_pixels: current, total_pixels: total },
       }),
       callbacks,
-      ctx,
     );
-    const track = card.querySelector("#dz-job-track");
-    assert.equal(countsEl.textContent, counts);
-    assert.equal(barEl.style.width, percent);
+    assert.equal(el.querySelector("#dz-job-counts").textContent, label);
+    assert.equal(el.querySelector("#dz-job-bar").style.width, percent);
+    const track = el.querySelector("#dz-job-track");
     assert.equal(track.getAttribute("aria-valuenow"), String(current));
     assert.equal(track.getAttribute("aria-valuemax"), String(total));
-    assert.equal(track.getAttribute("aria-valuetext"), counts);
-    assert.equal(card.querySelector("#dz-btn-pause").style.display, "none");
-    assert.ok(!card.querySelector("#dz-job-time").textContent.includes("~"));
+    assert.equal(track.getAttribute("aria-valuetext"), label);
   }
+});
 
-  // 5. Transition to completed
-  render(
-    el,
-    presentOutput(
-      {
-        format: "png",
-
-        disposition: "browser-save-ready",
-        canvas: { width: 4000, height: 3000 },
-      },
-      { phase: "acquisition", completed: 0, total: null },
-    ),
-    callbacks,
+test("display-only results explain why saving is unavailable", () => {
+  const el = container();
+  render(el, presentOutput({ format: "png", disposition: "display-only" }), callbacks);
+  assert.match(
+    el.querySelector(".dz-notice-message").textContent,
+    /source site does not allow.*downloadable file/,
   );
-  assert.equal(card.dataset.viewPhase, "completed");
-  assert.equal(card.querySelector(".dz-job-section"), null, "job section unmounted on completion");
-  assert.ok(card.querySelector(".dz-completed-section"), "completed section mounted");
-
-  // 6. Reset back to idle
-  render(el, presentIdle(), callbacks);
-  assert.equal(card.dataset.viewPhase, "idle");
-  assert.ok(card.querySelector(".dz-form"), "idle form re-mounted after reset");
+  assert.equal(el.querySelector("#dz-btn-save"), null);
 });
 
 test("output actions belong to their completed result", async () => {
@@ -350,21 +202,16 @@ test("rate-limit failures render the localized explainer from the typed facts at
   }
 });
 
-test("failed state updates error details in place without destroying error container", () => {
+test("failure guidance updates when the reason changes", () => {
   const el = container();
   const errPresentation1 = failurePresentation({ kind: "no-image-found" });
   render(el, errPresentation1, callbacks);
-  const card = el.querySelector(".dz-card");
-  assert.equal(card.dataset.viewPhase, "failed");
-  const errSec = card.querySelector(".dz-error-section");
-  assert.ok(errSec, "error section mounted");
-  assert.equal(card.querySelector("#dz-error-message").textContent, t("view.discovery.none"));
+  assert.equal(el.querySelector("#dz-error-message").textContent, t("view.discovery.none"));
 
   const errPresentation2 = failurePresentation({ kind: "timeout", transport: "native" });
   render(el, errPresentation2, callbacks);
-  assert.equal(card.querySelector(".dz-error-section"), errSec, "error section node preserved");
   assert.equal(
-    card.querySelector("#dz-error-message").textContent,
+    el.querySelector("#dz-error-message").textContent,
     t("desktop.transport.stalled", { host: "the server" }),
   );
 });

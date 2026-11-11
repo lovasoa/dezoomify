@@ -1,19 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import test from "node:test";
-import { fileURLToPath } from "node:url";
-import { build } from "esbuild";
-import { chromium, firefox } from "playwright";
+import { test } from "../../../../test/browser/fixtures.mjs";
 
-const bundle = await build({
-  entryPoints: [fileURLToPath(new URL("./entries/tile-session.ts", import.meta.url))],
-  bundle: true,
-  write: false,
-  format: "iife",
-  globalName: "TileSession",
-  target: "es2022",
-  define: { "import.meta.url": JSON.stringify(import.meta.url) },
-});
 const library = readFileSync(
   new URL(import.meta.resolve("openseadragon/build/openseadragon/openseadragon.min.js")),
   "utf8",
@@ -168,124 +156,113 @@ async function loadFixture(mode) {
   };
 }
 
-for (const [name, engine] of [
-  ["Chromium", chromium],
-  ["Firefox", firefox],
-]) {
-  test(`${name}: existing OpenSeadragon loader returns custom and ordinary tiles`, async () => {
-    const browser = await engine.launch({ headless: true });
-    try {
-      const page = await browser.newPage();
-      const requests = [];
-      await page.route(/https:\/\/(?:tiles\.)?fixture\.invalid\//, async (route) => {
-        const request = route.request();
-        if (request.isNavigationRequest())
-          return route.fulfill({ contentType: "text/html", body: "<body></body>" });
-        requests.push(request);
-        if (
-          request.method() !== "OPTIONS" &&
-          new URL(request.url()).searchParams.get("mode") === "http-failure"
-        )
-          return route.fulfill({
-            status: 503,
-            body: "Temporary refusal",
-            headers: {
-              "Access-Control-Allow-Origin": "*",
-              "Access-Control-Expose-Headers": "Retry-After",
-              "Retry-After": "2",
-            },
-          });
-        return route.fulfill({
-          contentType: "image/png",
-          body: tile,
-          headers: { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "*" },
-        });
+test("page transport returns readable tiles and original download failures", async ({
+  page,
+  loadModule,
+}) => {
+  const requests = [];
+  await page.route(/https:\/\/(?:tiles\.)?fixture\.invalid\//, async (route) => {
+    const request = route.request();
+    if (request.isNavigationRequest())
+      return route.fulfill({ contentType: "text/html", body: "<body></body>" });
+    requests.push(request);
+    if (
+      request.method() !== "OPTIONS" &&
+      new URL(request.url()).searchParams.get("mode") === "http-failure"
+    )
+      return route.fulfill({
+        status: 503,
+        body: "Temporary refusal",
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Expose-Headers": "Retry-After",
+          "Retry-After": "2",
+        },
       });
-      await page.goto("https://fixture.invalid/");
-      await page.addScriptTag({
-        content: `(()=>{${library}\nwindow.OpenSeadragon=OpenSeadragon;})()`,
-      });
-      await page.addScriptTag({ content: bundle.outputFiles[0].text });
-      await page.evaluate(() => {
-        Object.defineProperty(window, "__dezoomifyOpenSeadragon", { value: "page-owned" });
-      });
-      const ordinary = await page.evaluate(loadFixture, "image");
-      assert.deepEqual(ordinary, {
-        url: "https://tiles.fixture.invalid/tiles/8/0_0.png?mode=image",
-      });
-      assert.ok(
-        !requests.some((request) => request.url().includes("mode=image")),
-        "resolving a URL does not download it",
-      );
-      for (const mode of [
-        "ajax",
-        "blob-url",
-        "custom-image",
-        "custom-context",
-        "custom-bitmap",
-        "custom-blob",
-      ]) {
-        const result = await page.evaluate(loadFixture, mode);
-        assert.deepEqual(
-          {
-            width: result.width,
-            height: result.height,
-            pixel: result.pixel,
-            closedBitmap: result.closedBitmap,
-            blobStillReadable: result.blobStillReadable,
-          },
-          {
-            width: 256,
-            height: 256,
-            pixel: [196, 48, 48, 255],
-            closedBitmap: true,
-            blobStillReadable: true,
-          },
-          `${mode}: ${JSON.stringify(result)}`,
-        );
-        if (["ajax", "custom-blob", "blob-url"].includes(mode))
-          assert.deepEqual(Buffer.from(result.bytes), tile, `${mode}: preserve encoded bytes`);
-        const request = requests.find(
-          (request) => new URL(request.url()).searchParams.get("mode") === mode,
-        );
-        assert.equal(
-          request.method(),
-          ["blob-url", "custom-image"].includes(mode) ? "GET" : "POST",
-        );
-        if (!["blob-url", "custom-image"].includes(mode)) {
-          assert.equal(request.postData(), "image=256&tile=8/0/0");
-          assert.equal(request.headers()["x-item"], "item");
-          assert.equal(request.headers()["x-tile"], "256");
-          assert.equal(request.headers()["x-override"], "tile");
-        }
-      }
-      assert.equal(
-        requests.filter((request) => request.url().includes("mode=blob-url")).length,
-        1,
-        "reading a blob does not repeat the original download",
-      );
-      const error = await page.evaluate(loadFixture, "failure");
-      assert.equal(error.kind, "network-failure");
-      assert.match(error.detail, /original tile failure/);
-      const http = await page.evaluate(loadFixture, "http-failure");
-      assert.equal(http.kind, "http-error");
-      assert.equal(http.status, 503);
-      assert.equal(http.retry_after_ms, 2000);
-      assert.match(http.request, /mode=http-failure/);
-      for (const [mode, operation] of [
-        ["exception", "loading"],
-        ["encoding-failure", "encoding"],
-      ]) {
-        const internal = await page.evaluate(loadFixture, mode);
-        assert.equal(internal.kind, "internal");
-        assert.ok(
-          internal.detail.includes(`while ${operation} viewer tile (level 8, column 0, row 0)`),
-        );
-      }
-      assert.equal((await page.evaluate(loadFixture, "oversized")).kind, "size-limit");
-      assert.equal(await page.evaluate(() => window.__dezoomifyOpenSeadragon), "page-owned");
-    } finally {
-      await browser.close();
-    }
+    return route.fulfill({
+      contentType: "image/png",
+      body: tile,
+      headers: { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "*" },
+    });
   });
-}
+  await page.goto("https://fixture.invalid/");
+  await page.addScriptTag({
+    content: `(()=>{${library}\nwindow.OpenSeadragon=OpenSeadragon;})()`,
+  });
+  await loadModule(page, "/apps/extension/tests/browser/entries/tile-session.ts");
+  await page.evaluate(() => {
+    Object.defineProperty(window, "__dezoomifyOpenSeadragon", { value: "page-owned" });
+  });
+  const ordinary = await page.evaluate(loadFixture, "image");
+  assert.deepEqual(ordinary, {
+    url: "https://tiles.fixture.invalid/tiles/8/0_0.png?mode=image",
+  });
+  assert.ok(
+    !requests.some((request) => request.url().includes("mode=image")),
+    "resolving a URL does not download it",
+  );
+  for (const mode of [
+    "ajax",
+    "blob-url",
+    "custom-image",
+    "custom-context",
+    "custom-bitmap",
+    "custom-blob",
+  ]) {
+    const result = await page.evaluate(loadFixture, mode);
+    assert.deepEqual(
+      {
+        width: result.width,
+        height: result.height,
+        pixel: result.pixel,
+        closedBitmap: result.closedBitmap,
+        blobStillReadable: result.blobStillReadable,
+      },
+      {
+        width: 256,
+        height: 256,
+        pixel: [196, 48, 48, 255],
+        closedBitmap: true,
+        blobStillReadable: true,
+      },
+      `${mode}: ${JSON.stringify(result)}`,
+    );
+    if (["ajax", "custom-blob", "blob-url"].includes(mode))
+      assert.deepEqual(Buffer.from(result.bytes), tile, `${mode}: preserve encoded bytes`);
+    const request = requests.find(
+      (request) => new URL(request.url()).searchParams.get("mode") === mode,
+    );
+    assert.equal(request.method(), ["blob-url", "custom-image"].includes(mode) ? "GET" : "POST");
+    if (!["blob-url", "custom-image"].includes(mode)) {
+      assert.equal(request.postData(), "image=256&tile=8/0/0");
+      assert.equal(request.headers()["x-item"], "item");
+      assert.equal(request.headers()["x-tile"], "256");
+      assert.equal(request.headers()["x-override"], "tile");
+    }
+  }
+  assert.equal(
+    requests.filter((request) => request.url().includes("mode=blob-url")).length,
+    1,
+    "reading a blob does not repeat the original download",
+  );
+  const error = await page.evaluate(loadFixture, "failure");
+  assert.equal(error.kind, "network-failure");
+  assert.match(error.detail, /original tile failure/);
+  const http = await page.evaluate(loadFixture, "http-failure");
+  assert.equal(http.kind, "http-error");
+  assert.equal(http.status, 503);
+  assert.equal(http.retry_after_ms, 2000);
+  assert.match(http.request, /mode=http-failure/);
+  for (const [mode, operation] of [
+    ["exception", "loading"],
+    ["encoding-failure", "encoding"],
+  ]) {
+    const internal = await page.evaluate(loadFixture, mode);
+    assert.equal(internal.kind, "internal");
+    assert.ok(
+      internal.detail.includes(`while ${operation} viewer tile (level 8, column 0, row 0)`),
+    );
+  }
+  assert.equal((await page.evaluate(loadFixture, "oversized")).kind, "size-limit");
+  assert.equal(await page.evaluate(() => window.__dezoomifyOpenSeadragon), "page-owned");
+});

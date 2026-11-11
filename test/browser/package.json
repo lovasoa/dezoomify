@@ -1,0 +1,17 @@
+{
+  "name": "browser-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.65.0",
+    "ol": "10.11.0",
+    "ol6": "npm:ol@6.15.1",
+    "openseadragon2": "npm:openseadragon@2.4.2",
+    "openseadragon3": "npm:openseadragon@3.1.0",
+    "openseadragon4": "npm:openseadragon@4.1.1",
+    "openseadragon5": "npm:openseadragon@5.0.1"
+  }
+}
