@@ -24,7 +24,12 @@ import type { PublicPath, WxtBrowser } from "wxt/browser";
 import { transportError } from "../runtime/fetch.ts";
 import { findImageDownloadLink, findLoadedImage, type LoadedImage } from "./loaded-image.ts";
 import { cancelSourceFetch, fetchSource, inspectSourceDocument } from "./source-operations.ts";
-import { collectCandidates, type SourceSnapshot, sourceSnapshotLimits } from "./source-snapshot.ts";
+import {
+  collectCandidates,
+  mergeSourceInputs,
+  type SourceSnapshot,
+  sourceSnapshotLimits,
+} from "./source-snapshot.ts";
 import { createViewerChannel, installViewerBridge } from "./viewer-channel.ts";
 
 type SourceApi = Pick<WxtBrowser, "tabs" | "scripting">;
@@ -609,7 +614,7 @@ export function createSourceAccess(
     singleImageFrames.set(frame.frameId, { frame, images });
     return {
       ...snapshot,
-      inputs: [...snapshot.inputs, ...observed].map((input) =>
+      inputs: mergeSourceInputs(snapshot, observed).map((input) =>
         frame.frameId !== 0 && input.kind === "source"
           ? { ...input, kind: "observed-document" as const }
           : input,

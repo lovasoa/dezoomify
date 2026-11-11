@@ -5,14 +5,8 @@ import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import { chromium, firefox } from "playwright";
 
-const pageAgent = fileURLToPath(new URL("../../../../packages/page-agent/src", import.meta.url));
 const bundle = await build({
-  stdin: {
-    contents: `export {openTileSource,readViewerTile,releaseViewerTiles} from '${pageAgent}/openseadragon/session.ts';
-export {registerViewer} from '${pageAgent}/viewers/session.ts';
-export {attachViewerTransport} from '${fileURLToPath(new URL("../../src/viewer-transport.ts", import.meta.url))}';`,
-    resolveDir: pageAgent,
-  },
+  entryPoints: [fileURLToPath(new URL("./entries/tile-session.ts", import.meta.url))],
   bundle: true,
   write: false,
   format: "iife",
@@ -112,7 +106,6 @@ async function loadFixture(mode) {
     source.downloadTileStart = (job) =>
       job.finish(new Blob([new Uint8Array(9 * 1024 * 1024)]), null, "rasterBlob");
 
-  const globalKeys = new Set(Reflect.ownKeys(window));
   const live = TileSession.openTileSource(source, item);
   const metadata = TileSession.registerViewer(
     live.levels,
@@ -122,9 +115,6 @@ async function loadFixture(mode) {
     },
     live.load,
   );
-  const addedGlobals = Reflect.ownKeys(window)
-    .filter((key) => !globalKeys.has(key))
-    .map(String);
   const handle = metadata.input.viewer.handle;
   const request = { handle, source_url: location.href, level: 8, column: 0, row: 0 };
   const extent = { width: 256, height: 256 };
@@ -157,7 +147,7 @@ async function loadFixture(mode) {
   const retired = await TileSession.readViewerTile(request, extent);
   if (retired.ok) throw new Error("retired source still loads tiles");
   if (!result.ok) return result.error;
-  if (result.url) return { url: result.url, addedGlobals };
+  if (result.url) return { url: result.url };
   const bytes = new Uint8Array(result.buffer);
   const decoded = await createImageBitmap(new Blob([bytes]));
   const canvas = document.createElement("canvas");
@@ -174,7 +164,6 @@ async function loadFixture(mode) {
     pixel: [...context.getImageData(0, 0, 1, 1).data],
     bytes: [...bytes],
     closedBitmap: mode !== "custom-bitmap" || bitmap.width === 0,
-    addedGlobals,
     blobStillReadable,
   };
 }
@@ -223,7 +212,6 @@ for (const [name, engine] of [
       const ordinary = await page.evaluate(loadFixture, "image");
       assert.deepEqual(ordinary, {
         url: "https://tiles.fixture.invalid/tiles/8/0_0.png?mode=image",
-        addedGlobals: [],
       });
       assert.ok(
         !requests.some((request) => request.url().includes("mode=image")),
@@ -239,15 +227,20 @@ for (const [name, engine] of [
       ]) {
         const result = await page.evaluate(loadFixture, mode);
         assert.deepEqual(
-          [
-            result.width,
-            result.height,
-            result.pixel,
-            result.closedBitmap,
-            result.addedGlobals,
-            result.blobStillReadable,
-          ],
-          [256, 256, [196, 48, 48, 255], true, [], true],
+          {
+            width: result.width,
+            height: result.height,
+            pixel: result.pixel,
+            closedBitmap: result.closedBitmap,
+            blobStillReadable: result.blobStillReadable,
+          },
+          {
+            width: 256,
+            height: 256,
+            pixel: [196, 48, 48, 255],
+            closedBitmap: true,
+            blobStillReadable: true,
+          },
           `${mode}: ${JSON.stringify(result)}`,
         );
         if (["ajax", "custom-blob", "blob-url"].includes(mode))

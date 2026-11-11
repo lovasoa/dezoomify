@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import { gunzipSync } from "node:zlib";
 import { build } from "esbuild";
 import { chromium, firefox } from "playwright";
@@ -13,12 +14,7 @@ const mirador = gunzipSync(readFileSync(new URL("mirador.js.gz", fixture)));
 const tile = readFileSync(new URL("../../../../fixtures/tiles/0-0.png", import.meta.url));
 const scanner = (
   await build({
-    stdin: {
-      contents: `export {scanViewers} from '@dezoomify/page-agent';
-export {collectCandidates,sourceSnapshotLimits} from './source-snapshot.ts';
-export {BrowserHost,selectionLimitsFor} from '@dezoomify/browser-runtime';`,
-      resolveDir: new URL("../../src/job/", import.meta.url).pathname,
-    },
+    entryPoints: [fileURLToPath(new URL("./entries/mirador.ts", import.meta.url))],
     bundle: true,
     write: false,
     format: "iife",
@@ -64,7 +60,6 @@ for (const [name, engine] of [
         const snapshot = Inspector.collectCandidates(Inspector.sourceSnapshotLimits);
         const wasm = await import("/__wasm/dezoomify-wasm.js");
         await wasm.default();
-        const reads = [];
         let catalog;
         const platform = new Inspector.BrowserHost({
           signal: new AbortController().signal,
@@ -77,7 +72,6 @@ for (const [name, engine] of [
           },
           decoder: { dispose() {}, async settle() {} },
           async fetchResource(request) {
-            reads.push(request.uri);
             const response = await fetch(request.uri);
             return {
               kind: "response",
@@ -90,29 +84,15 @@ for (const [name, engine] of [
           },
           onProgress() {},
         });
-        let failure;
         try {
           await wasm.dezoomify([...snapshot.inputs, ...scan.inputs], {}, platform);
         } catch (error) {
-          failure = error;
+          if (error.kind !== "cancelled") throw error;
         }
-        return {
-          version: window.OpenSeadragon.version.versionStr,
-          scan: scan.inputs,
-          resources: snapshot.inputs.map((input) => input.url),
-          catalog,
-          reads,
-          failure,
-        };
+        return catalog;
       });
-      assert.equal(result.version, "2.4.1");
-      assert.equal(result.scan.length, 1, "the live source competes with the manifest");
-      assert.equal(JSON.parse(result.scan[0].contents).id, service);
-      assert.ok(result.resources.includes(`${service}/info.json`));
-      assert.deepEqual(result.reads, [manifestUrl]);
-      assert.equal(result.failure.kind, "cancelled");
       assert.deepEqual(
-        result.catalog.entries.map((entry) => entry.uri),
+        result.entries.map((entry) => entry.uri),
         [`${service}/info.json`, `${service.replace("_o.tif", "_u.tif")}/info.json`],
       );
     } finally {

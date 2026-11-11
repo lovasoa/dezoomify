@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import { chromium, firefox } from "playwright";
 import { openLayersLibrary } from "./openlayers-fixture.mjs";
@@ -9,11 +10,9 @@ const cases = JSON.parse(readFileSync(new URL("./corpus/openlayers/cases.json", 
 const tile = readFileSync(new URL("../../../../fixtures/tiles/0-0.png", import.meta.url));
 const scanner = (
   await build({
-    stdin: {
-      contents: `export {scanViewers} from './viewer-scanner.ts';
-export {readViewerTile,releaseViewerTiles} from './viewers/session.ts';`,
-      resolveDir: new URL("../../../../packages/page-agent/src", import.meta.url).pathname,
-    },
+    entryPoints: [
+      fileURLToPath(new URL("../../../../packages/page-agent/src/index.ts", import.meta.url)),
+    ],
     bundle: true,
     write: false,
     format: "iife",
@@ -84,8 +83,8 @@ for (const [name, engine] of [
     test(`${name}: ${runtime} replays the historical OpenLayers issue corpus`, {
       timeout: 120000,
     }, async () => {
-      const browser = await engine.launch({ headless: true });
       const library = await openLayersLibrary(runtime);
+      const browser = await engine.launch({ headless: true });
       try {
         for (const fixture of cases) {
           const page = await browser.newPage();
