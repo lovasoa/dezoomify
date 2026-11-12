@@ -117,6 +117,30 @@ async function submissionState(api, browser) {
   }
 }
 
+// Only a public, exact-version AMO result can resolve an uncertain submission.
+// Missing, pending, or different versions leave the ledger blocked. Call while
+// holding the release workflow's store-submission concurrency lock.
+export async function reconcileFirefox(api, { env = process.env, fetcher = fetch } = {}) {
+  const records = await submissionState(api, "firefox");
+  const unresolved = records.filter((record) => !["success", "failure"].includes(record.state));
+  if (!unresolved.length) return;
+  const addon = encodeURIComponent(required(env, "AMO_GUID"));
+  const listing = await request(
+    fetcher,
+    `https://addons.mozilla.org/api/v5/addons/addon/${addon}/`,
+  );
+  const current = listing.current_version;
+  if (!current?.id || current.file?.status !== "public") return;
+  for (const record of unresolved) {
+    if (record.payload.version !== current.version) continue;
+    await api(`deployments/${record.id}/statuses`, "POST", {
+      state: "success",
+      description: `AMO public version ${current.version} confirmed (version ID ${current.id})`,
+      auto_inactive: false,
+    });
+  }
+}
+
 export async function submitRelease({ api, browser, plan, download, submit }) {
   if (!["chromium", "firefox"].includes(browser)) throw new Error("Unknown browser");
   const records = await submissionState(api, browser);
@@ -318,6 +342,7 @@ async function main() {
   const config = await readFile("release/config.toml", "utf8");
   env.EXTENSION_ID = /\[extension.chromium\][\s\S]*?\nid = "([^"]+)"/.exec(config)?.[1];
   env.AMO_GUID = /\[extension.firefox\][\s\S]*?\nid = "([^"]+)"/.exec(config)?.[1];
+  if (env.BROWSER === "firefox") await reconcileFirefox(api, { env });
   console.log(
     await submitRelease({
       api,

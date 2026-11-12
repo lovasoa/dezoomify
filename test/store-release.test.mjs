@@ -6,6 +6,7 @@ import {
   downloadAsset,
   freezeRelease,
   githubApi,
+  reconcileFirefox,
   storeSubmitter,
   submitRelease,
 } from "../scripts/store-release.mjs";
@@ -118,6 +119,9 @@ async function scenario(browser = "chromium") {
     const path = new URL(url).pathname;
     const body = typeof options.body === "string" ? JSON.parse(options.body) : options.body;
     if (fixtures[path]) return json(fixtures[path]);
+    if (url === "https://addons.mozilla.org/api/v5/addons/addon/fixture/") {
+      return json({ current_version: s.publicVersion });
+    }
     if (url.startsWith("https://api.github.com/")) {
       if (path.includes("/releases/assets/")) {
         s.afterDownload?.();
@@ -129,6 +133,7 @@ async function scenario(browser = "chromium") {
   };
   const github = { repository: "owner/repo", token: "fixture", fetcher };
   const api = githubApi(github);
+  s.reconcile = () => reconcileFirefox(api, { env, fetcher });
   s.plan = await freezeRelease(api, version);
   s.run = () =>
     submitRelease({
@@ -189,6 +194,29 @@ test("confirmation or ledger write failures never turn accepted submissions into
     assert.equal(s.records[0].statuses[0].state, fault === "ledger" ? "in_progress" : "error");
     await assert.rejects(s.run(), /reconcile/);
   }
+});
+
+test("a public Firefox version recovers a lost ledger write without uploading twice", async () => {
+  const s = await scenario("firefox");
+  s.fault = "ledger";
+  await assert.rejects(s.run(), /HTTP 403/);
+  s.fault = "";
+  for (const publicVersion of [
+    null,
+    { id: 1, version: "26.10.25", file: { status: "public" } },
+    { id: 1, version, file: { status: "awaiting_review" } },
+  ]) {
+    s.publicVersion = publicVersion;
+    await s.reconcile();
+    await assert.rejects(s.run(), /reconcile/);
+  }
+  s.publicVersion = { id: 1, version, file: { status: "public" } };
+  s.fault = "ledger";
+  await assert.rejects(s.reconcile(), /HTTP 403/);
+  s.fault = "";
+  await s.reconcile();
+  assert.equal(await s.run(), "already submitted");
+  assert.equal(s.uploads, 1);
 });
 
 test("tampered ZIPs and mismatched manifest versions fail before contacting a store", async () => {

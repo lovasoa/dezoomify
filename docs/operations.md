@@ -14,6 +14,9 @@ stores that already accepted that version are not submitted again.
 Manual dispatch publishes the selected branch after its exact commit passes CI.
 Store acceptance does not mean review has completed. Uncertain submissions and
 incomplete draft releases require reconciliation before retrying.
+Firefox submissions automatically reconcile an unresolved ledger entry when AMO
+confirms that exact version is public. Other uncertain outcomes remain blocked
+for manual investigation; rerunning must never blindly repeat a store upload.
 
 Keep signing keys backed up and separate from source. Losing the updater key
 prevents existing installations from trusting future updates. Follow
