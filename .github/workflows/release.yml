@@ -184,4 +184,8 @@ jobs:
           CHROME_WS_REFRESH_TOKEN: ${{ secrets.CHROME_WS_REFRESH_TOKEN }}
           AMO_JWT_ISSUER: ${{ secrets.AMO_JWT_ISSUER }}
           AMO_JWT_SECRET: ${{ secrets.AMO_JWT_SECRET }}
-        run: node scripts/store-release.mjs submit
+        run: |
+          if [ "$BROWSER" = firefox ]; then
+            node scripts/firefox-listing.mjs
+          fi
+          node scripts/store-release.mjs submit
