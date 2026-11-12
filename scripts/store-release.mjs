@@ -259,6 +259,23 @@ function amoToken(env) {
   return `${data}.${createHmac("sha256", required(env, "AMO_JWT_SECRET")).update(data).digest("base64url")}`;
 }
 
+// Patch only supplied description locales; preserve all other listing fields.
+// The caller supplies plain text/Markdown, never pre-escaped HTML.
+export async function updateFirefoxListing(
+  description,
+  { env = process.env, fetcher = fetch } = {},
+) {
+  const addon = encodeURIComponent(required(env, "AMO_GUID"));
+  await request(fetcher, `https://addons.mozilla.org/api/v5/addons/addon/${addon}/`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `JWT ${amoToken(env)}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ description }),
+  });
+}
+
 async function firefox({ version, bytes, beforeMutation }, { env, fetcher, sleep }) {
   const base = "https://addons.mozilla.org/api/v5/addons/";
   const addon = encodeURIComponent(required(env, "AMO_GUID"));

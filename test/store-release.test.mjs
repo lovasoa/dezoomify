@@ -8,6 +8,7 @@ import {
   githubApi,
   storeSubmitter,
   submitRelease,
+  updateFirefoxListing,
 } from "../scripts/store-release.mjs";
 
 // One ZIP containing manifest.json with the calendar version, used by both stores.
@@ -31,6 +32,30 @@ const env = Object.fromEntries(
   ].map((key) => [key, "fixture"]),
 );
 const json = (body, status = 200) => new Response(JSON.stringify(body), { status });
+
+test("Firefox listing updates send localized text without replacing unrelated fields", async () => {
+  const description = { "en-US": "Click the toolbar icon.", fr: "Cliquez sur l’icône." };
+  let calls = 0;
+  await updateFirefoxListing(description, {
+    env,
+    fetcher: async (url, options) => {
+      calls++;
+      assert.equal(url, "https://addons.mozilla.org/api/v5/addons/addon/fixture/");
+      assert.equal(options.method, "PATCH");
+      assert.match(options.headers.Authorization, /^JWT /);
+      assert.deepEqual(JSON.parse(options.body), { description });
+      return json({ description });
+    },
+  });
+  assert.equal(calls, 1);
+  await assert.rejects(
+    updateFirefoxListing(description, {
+      env,
+      fetcher: async () => json({ detail: "Listing update denied" }, 403),
+    }),
+    /HTTP 403:.*Listing update denied/,
+  );
+});
 
 function ledgerResponse(s, path, body) {
   if (path.endsWith("/deployments")) {

@@ -15,6 +15,11 @@ Manual dispatch publishes the selected branch after its exact commit passes CI.
 Store acceptance does not mean review has completed. Uncertain submissions and
 incomplete draft releases require reconciliation before retrying.
 
+The Firefox store job applies the maintained
+[listing descriptions](../release/firefox-description.json) before submitting a
+package. Use plain text or Markdown; escaped HTML appears as literal tags in
+Firefox. Other listing fields and translations are preserved.
+
 Keep signing keys backed up and separate from source. Losing the updater key
 prevents existing installations from trusting future updates. Follow
 [Tauri's signing guidance](https://v2.tauri.app/distribute/sign/macos/) and verify
