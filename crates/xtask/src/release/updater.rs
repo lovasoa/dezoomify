@@ -12,15 +12,26 @@ use minisign_verify::{PublicKey, Signature};
 
 use super::common::{expected_artifact_name, Plan};
 
-pub(crate) fn bundle_name(target: &str, version: &str) -> Option<String> {
+/// Manifest keys include the package format when a platform has multiple bundles.
+/// Keep the bare Linux key for existing Debian installations.
+pub(crate) fn bundles(target: &str, version: &str) -> Vec<(&'static str, String)> {
     match target {
-        "desktop-linux-x86_64" | "desktop-windows-x86_64" => {
-            expected_artifact_name(target, version)
-        }
-        "desktop-macos-aarch64" => Some(format!(
-            "dezoomify-desktop-v{version}-macos-aarch64.app.tar.gz"
-        )),
-        _ => None,
+        "desktop-linux-x86_64" => vec![
+            (
+                "linux-x86_64",
+                expected_artifact_name(target, version).expect("known desktop release target"),
+            ),
+            ("linux-x86_64-appimage", "dezoomify-desktop.AppImage".into()),
+        ],
+        "desktop-windows-x86_64" => vec![(
+            "windows-x86_64",
+            expected_artifact_name(target, version).expect("known desktop release target"),
+        )],
+        "desktop-macos-aarch64" => vec![(
+            "darwin-aarch64",
+            format!("dezoomify-desktop-v{version}-macos-aarch64.app.tar.gz"),
+        )],
+        _ => vec![],
     }
 }
 
@@ -28,9 +39,10 @@ pub(crate) fn assets(plan: &Plan, artifacts: &Path) -> Vec<PathBuf> {
     // Signatures are verified and embedded in latest.json, not uploaded separately.
     plan.targets
         .iter()
-        .filter_map(|target| {
-            bundle_name(&target.name, &plan.version)
-                .map(|name| artifacts.join(&target.name).join(name))
+        .flat_map(|target| {
+            bundles(&target.name, &plan.version)
+                .into_iter()
+                .map(|(_, name)| artifacts.join(&target.name).join(name))
         })
         .collect()
 }
@@ -90,25 +102,19 @@ fn manifest_with_key(
 ) -> Result<serde_json::Value, String> {
     let mut platforms = BTreeMap::new();
     for target in &plan.targets {
-        let platform = match target.name.as_str() {
-            "desktop-linux-x86_64" => "linux-x86_64",
-            "desktop-windows-x86_64" => "windows-x86_64",
-            "desktop-macos-aarch64" => "darwin-aarch64",
-            _ => continue,
-        };
-        let name =
-            bundle_name(&target.name, &plan.version).ok_or("missing updater bundle recipe")?;
-        let dir = artifacts.join(&target.name);
-        let signature = std::fs::read_to_string(dir.join(format!("{name}.sig")))
-            .map_err(|error| format!("missing updater signature for {name}: {error}"))?;
-        verify_bundle(key, &dir.join(&name), &signature)?;
-        platforms.insert(platform, serde_json::json!({
-            "url": format!("https://github.com/lovasoa/dezoomify/releases/download/{}/{name}", plan.tag),
-            "signature": signature.trim(),
-        }));
+        for (platform, name) in bundles(&target.name, &plan.version) {
+            let dir = artifacts.join(&target.name);
+            let signature = std::fs::read_to_string(dir.join(format!("{name}.sig")))
+                .map_err(|error| format!("missing updater signature for {name}: {error}"))?;
+            verify_bundle(key, &dir.join(&name), &signature)?;
+            platforms.insert(platform, serde_json::json!({
+                "url": format!("https://github.com/lovasoa/dezoomify/releases/download/{}/{name}", plan.tag),
+                "signature": signature.trim(),
+            }));
+        }
     }
-    if platforms.len() != 3 {
-        return Err("updater manifest requires all three desktop platforms".into());
+    if platforms.len() != 4 {
+        return Err("updater manifest requires all four desktop bundles".into());
     }
     let notes = std::fs::read_to_string(artifacts.join("notes.md"))
         .map_err(|error| format!("read updater release notes: {error}"))?;
@@ -136,7 +142,7 @@ mod tests {
         let plan = plan_from_repo();
         std::fs::write(root.join("notes.md"), "Release notes").unwrap();
         for target in &plan.targets {
-            if let Some(name) = bundle_name(&target.name, &plan.version) {
+            for (_, name) in bundles(&target.name, &plan.version) {
                 let dir = root.join(&target.name);
                 std::fs::create_dir_all(&dir).unwrap();
                 std::fs::write(dir.join(&name), b"test").unwrap();
@@ -147,9 +153,10 @@ mod tests {
         assert_eq!(manifest["version"], plan.version);
         assert_eq!(manifest["notes"], "Release notes");
         let platforms = manifest["platforms"].as_object().unwrap();
-        assert_eq!(assets(&plan, &root).len(), 3);
+        assert_eq!(assets(&plan, &root).len(), 4);
         for (platform, target, extension) in [
             ("linux-x86_64", "desktop-linux-x86_64", ".deb"),
+            ("linux-x86_64-appimage", "desktop-linux-x86_64", ".AppImage"),
             ("windows-x86_64", "desktop-windows-x86_64", ".exe"),
             ("darwin-aarch64", "desktop-macos-aarch64", ".app.tar.gz"),
         ] {
@@ -157,15 +164,12 @@ mod tests {
             assert!(url.contains(&format!("/releases/download/{}/", plan.tag)));
             assert!(url.ends_with(extension));
             assert_eq!(platforms[platform]["signature"], signature);
-            assert!(assets(&plan, &root).contains(
-                &root
-                    .join(target)
-                    .join(bundle_name(target, &plan.version).unwrap())
-            ));
+            assert!(assets(&plan, &root)
+                .contains(&root.join(target).join(url.rsplit('/').next().unwrap())));
         }
         let bundle = root
             .join("desktop-linux-x86_64")
-            .join(bundle_name("desktop-linux-x86_64", &plan.version).unwrap());
+            .join("dezoomify-desktop.AppImage");
         std::fs::write(&bundle, b"Test").unwrap();
         assert!(manifest_with_key(&plan, &root, &key).is_err());
         std::fs::write(&bundle, b"test").unwrap();

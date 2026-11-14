@@ -97,6 +97,7 @@ fn labeled_asset(path: &std::path::Path) -> std::ffi::OsString {
     let label = [
         (".exe", "Windows installer: x64 (NSIS)"),
         (".deb", "Linux installer: x64 (DEB)"),
+        (".AppImage", "Linux portable app: x64 (AppImage)"),
         (".dmg", "macOS installer: Apple Silicon (DMG)"),
         ("macos-aarch64.app.tar.gz", "macOS updater: Apple Silicon"),
         ("linux-x86_64.tar.gz", "Command line: Linux x64 (tar.gz)"),

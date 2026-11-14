@@ -4,18 +4,25 @@ export interface LoadedImage {
   height: number;
 }
 
-/** Injected without module closures. Prefer identified viewer originals over
- * incidental DOM images; supplied candidates must belong to live scanned documents.
+/** Injected without module closures. Prefer viewer originals, then body images,
+ * then navigation images. Supplied candidates must belong to live scanned documents.
  * Read intrinsic sizes without fetching or decoding. */
 export function findLoadedImage(viewerImages: LoadedImage[] = []) {
   let image: LoadedImage | undefined;
   for (const candidate of viewerImages) select(candidate);
   if (image) return { documentUrl: location.href, image };
-  for (const img of document.images) {
-    const { naturalWidth: width, naturalHeight: height } = img;
-    const url = img.currentSrc || img.src;
-    if (img.complete && Math.min(width, height) >= 512 && width * height >= 2_000_000)
-      select({ url, width, height });
+  for (const navigation of [false, true]) {
+    for (const img of document.images) {
+      const inNavigation = !!img.closest(
+        'header, nav, footer, [role="banner"], [role="navigation"], [role="contentinfo"]',
+      );
+      if (inNavigation !== navigation) continue;
+      const { naturalWidth: width, naturalHeight: height } = img;
+      const url = img.currentSrc || img.src;
+      if (img.complete && Math.min(width, height) >= 512 && width * height >= 2_000_000)
+        select({ url, width, height });
+    }
+    if (image) break;
   }
   return { documentUrl: location.href, image };
 
