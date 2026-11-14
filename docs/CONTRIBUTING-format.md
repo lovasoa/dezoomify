@@ -14,7 +14,12 @@ matchers provide [specificity defaults](../crates/dezoomify/src/core/discovery.r
 explicit matcher overrides take precedence. Mark weak evidence, such as ordinary
 element IDs, as `Low`. Resource inventory alone initiates a read only with Medium
 or High URL evidence; avoid URL matchers for generic extensions or API paths.
-Routes run in declaration order, so place broad fallbacks after specific routes.
+Decoders run in declaration order, so place broad fallbacks after specific routes.
+Reference routes declare independently openable resources. Discovery collects all
+matches from equally specific reference routes, resolves document bases and HTML
+entities, and removes duplicate addresses. A sole reference is followed directly;
+multiple references become deferred image choices. Keep custom decoders for
+references that require earlier parsing context.
 Content matchers strengthen evidence only after matching available bytes;
 they do not justify fetching arbitrary resources to try them. Wildcard/schema
 decoders retain the caller's evidence; explicitly broad matches also lower the
