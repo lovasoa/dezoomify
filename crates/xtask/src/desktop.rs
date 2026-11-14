@@ -7,8 +7,8 @@
 //!
 //! Bundle matrix (built on the matching host, `tauri.conf.json`
 //! `bundle.targets` stays `all` and the CLI selects the host bundle):
-//! Linux builds `deb` via the prebuilt Tauri CLI
-//! (`pnpm --filter ./apps/desktop exec tauri build --bundles deb`) (needs
+//! Linux builds `deb` and `appimage` via the prebuilt Tauri CLI
+//! (`pnpm --filter ./apps/desktop exec tauri build --bundles deb,appimage`) (needs
 //! `dpkg-deb` plus the generated PNG icons); Windows builds `nsis`
 //! (needs WebView2, NSIS, and `icon.ico`);
 //! macOS builds `app`/`dmg` (needs the Xcode Command Line Tools plus `icon.icns`).
@@ -473,12 +473,12 @@ fn tauri_system_ready() -> bool {
         .unwrap_or(false)
 }
 
-/// The bundler set for this host. Linux produces a real `deb`; Windows
+/// The bundler set for this host. Linux produces `deb` and `appimage`; Windows
 /// produces `nsis`; macOS produces `app`/`dmg`. Any other host has no
 /// bundle recipe.
 #[cfg(target_os = "linux")]
 fn bundle_targets() -> &'static [&'static str] {
-    &["deb"]
+    &["deb", "appimage"]
 }
 
 #[cfg(target_os = "windows")]

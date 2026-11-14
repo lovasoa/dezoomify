@@ -68,7 +68,7 @@ jobs:
             runner: windows-latest
             cache: cli-release
           - target: desktop-linux-x86_64
-            runner: ubuntu-latest
+            runner: ubuntu-24.04
             cache: desktop-bundle
           - target: desktop-windows-x86_64
             runner: windows-latest

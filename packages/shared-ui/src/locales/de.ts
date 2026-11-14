@@ -85,9 +85,9 @@ export const de = {
   "view.desktop.title": "Dezoomify Desktop-App",
   "view.desktop.download.windows": "Windows-Installationsprogramm · x64 (NSIS)",
   "view.desktop.download.macos": "macOS-Installationsprogramm · Apple Silicon (DMG)",
-  "view.desktop.download.linux": "Linux-Installationsprogramm · x64 (DEB)",
+  "view.desktop.download.linux": "Linux x64 (AppImage)",
   "view.desktop.step1":
-    "Laden Sie oben das Installationsprogramm für Ihr System herunter und installieren Sie es.",
+    "Laden Sie oben die Datei für Ihr System herunter. Installieren Sie sie oder machen Sie unter Linux das AppImage ausführbar und starten Sie es.",
   "view.desktop.subtitle": "Große Bilder direkt auf Ihrem Computer speichern",
   "view.desktop.whyTitle": "Warum die Desktop-App verwenden?",
   "view.desktop.why1Title": "Größere Bilder herunterladen:",
@@ -174,7 +174,7 @@ export const de = {
   "view.resolution.download": "Volle Auflösung mit der Desktop-App erhalten",
   "view.desktop.handoffTitle": "Dieses Bild in der Desktop-App herunterladen",
   "view.desktop.handoffInstall":
-    "Wählen Sie das Installationsprogramm für Ihr Betriebssystem und öffnen Sie Dezoomify.",
+    "Laden Sie Dezoomify für Ihr System herunter und öffnen Sie es. Machen Sie unter Linux zuerst das AppImage ausführbar.",
   "view.desktop.handoffPaste": "Fügen Sie diese Adresse in die Desktop-App ein:",
   "view.desktop.handoffCopy": "Adresse kopieren",
   "view.desktop.handoffCopied": "Adresse kopiert. Fügen Sie sie in die Desktop-App ein.",

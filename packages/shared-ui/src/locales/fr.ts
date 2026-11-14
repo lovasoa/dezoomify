@@ -83,9 +83,9 @@ export const fr = {
   "view.desktop.title": "Application de bureau Dezoomify",
   "view.desktop.download.windows": "Programme d’installation Windows · x64 (NSIS)",
   "view.desktop.download.macos": "Programme d’installation macOS · Apple Silicon (DMG)",
-  "view.desktop.download.linux": "Programme d’installation Linux · x64 (DEB)",
+  "view.desktop.download.linux": "Linux x64 (AppImage)",
   "view.desktop.step1":
-    "Téléchargez le programme d’installation ci-dessus pour votre système, puis installez-le.",
+    "Téléchargez le fichier ci-dessus pour votre système. Installez-le ou, sous Linux, rendez l’AppImage exécutable et lancez-la.",
   "view.desktop.subtitle": "Enregistrez de grandes images directement sur votre ordinateur",
   "view.desktop.whyTitle": "Pourquoi utiliser l’application de bureau ?",
   "view.desktop.why1Title": "Téléchargez de plus grandes images :",
@@ -171,7 +171,7 @@ export const fr = {
   "view.resolution.download": "Obtenir la résolution maximale avec l’application de bureau",
   "view.desktop.handoffTitle": "Télécharger cette image dans l’application de bureau",
   "view.desktop.handoffInstall":
-    "Choisissez l’installeur pour votre système, puis ouvrez Dezoomify.",
+    "Téléchargez et ouvrez Dezoomify pour votre système. Sous Linux, rendez d’abord l’AppImage exécutable.",
   "view.desktop.handoffPaste": "Collez cette adresse dans l’application de bureau :",
   "view.desktop.handoffCopy": "Copier l’adresse",
   "view.desktop.handoffCopied": "Adresse copiée. Collez-la dans l’application de bureau.",

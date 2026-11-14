@@ -8,3 +8,7 @@ BIN="$(dpkg -L "$PKG" | grep -m1 '/dezoomify-desktop$')"
 code=0
 xvfb-run -a timeout 20 "$BIN" >bundle-launch.log 2>&1 || code=$?
 test "$code" -eq 124
+APPIMAGE="$(ls -t target/release/bundle/appimage/*.AppImage | head -n 1)"
+code=0
+APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a timeout 20 "$APPIMAGE" >appimage-launch.log 2>&1 || code=$?
+test "$code" -eq 124
