@@ -9,11 +9,12 @@ use crate::Vec2d;
 use crate::core::discovery::{
     Metadata,
     Specificity::{High, Low},
-    any, css, image_url, js_matches, metadata, url_matches, viewer, xml_metadata,
+    any, css, image_url, js_matches, metadata, resource_matches, url_matches, viewer, xml_metadata,
 };
 use crate::core::{
-    CatalogPlan, DiscoveryError, DiscoveryResource, DiscoveryRoute, FormatSpec, Grid, ImagePlan,
-    ParsedResource, RejectionKind, Request, ResolvedLevel,
+    CatalogPlan, DiscoveredEntry, DiscoveryCatalog, DiscoveryError, DiscoveryResource,
+    DiscoveryRoute, FormatSpec, Grid, ImagePlan, ParsedResource, RejectionKind, Request,
+    ResolvedLevel,
 };
 use crate::json_utils::all_json;
 
@@ -51,7 +52,8 @@ const ROUTES: &[DiscoveryRoute] = &[
     paris::MANIFEST_ROUTE.then_decode(decode_catalog),
     viewer(js_matches(&SEADRAGON_EMBED)).decode(follow_seadragon_embed),
     viewer(js_matches(&WDL_MARKER_RE)).decode(follow_wdl_template),
-    DiscoveryRoute::regex_link(&DZI_LINK_RE, "$url"),
+    viewer(resource_matches(|resource| DZI_LINK_RE.is_match(resource.bytes())).specificity(High))
+        .decode(follow_dzi_links),
     DiscoveryRoute::regex_link(&OPEN_DZI_XML_RE, "$url"),
     viewer(css("[dzi]"))
         .follow_attribute("dzi")
@@ -92,6 +94,32 @@ static DZI_LINK_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
     )
     .expect("constant DZI link pattern")
 });
+
+/// Resolve a sole link directly; leave multiple images selectable before reading them.
+fn follow_dzi_links(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
+    let base = crate::web_page::page_base(resource);
+    let mut urls = Vec::new();
+    for captures in DZI_LINK_RE.captures_iter(resource.bytes()) {
+        let reference = String::from_utf8_lossy(&captures["url"]);
+        let url = crate::core::resolve_relative(
+            &base,
+            &html_escape::decode_html_entities(reference.trim()),
+        );
+        if !urls.contains(&url) {
+            urls.push(url);
+        }
+    }
+    if urls.len() == 1 {
+        return Ok(ParsedResource::FollowWith(
+            Request::new(urls.remove(0)),
+            decode_catalog,
+        ));
+    }
+    Ok(ParsedResource::Complete(DiscoveryCatalog::new(
+        urls.into_iter()
+            .map(|url| DiscoveredEntry::deferred(url, None, Vec::new())),
+    )))
+}
 
 static OPEN_DZI_XML_RE: LazyLock<BytesRegex> = LazyLock::new(|| {
     BytesRegex::new(r#"(?i)\bopenDzi\s*\(\s*["'](?P<url>[^"'<>]+\.xml(?:[?#][^"'<>]*)?)["']"#)
