@@ -1,5 +1,13 @@
 # Desktop application
 
+The desktop product combines the [shared interface](../../packages/shared-ui/)
+with the [native runtime](../../crates/dezoomify-native/) for large images,
+local sources, and saving directly to disk. It shares the download engine with
+the CLI and browser products.
+
+Tauri connects the interface to native work and provides operating-system
+integration such as opening files and installing updates.
+
 Installation and use: [desktop guide](desktop-app.md).
 
 ## Development and tests

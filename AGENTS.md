@@ -24,9 +24,11 @@ behavior tests before claiming a guarantee; update the owning declaration when
 behavior changes. Do not narrate code or repeat a contract at its callers.
 
 Keep development instructions short in `AGENTS.md` at the deepest directory
-containing their scope. Put explanations of code beside that code. Preserve
-user-facing help in `docs/user/` and `apps/desktop/desktop-app.md`; link to source
-or command help for changing inventories, values, and schemas.
+containing their scope. Keep component READMEs as short introductions to purpose,
+responsibilities, and relationships. Put implementation details and contracts
+beside the code. Preserve user-facing help in `docs/user/` and
+`apps/desktop/desktop-app.md`; link to source or command help for changing
+inventories, values, and schemas.
 
 ## Validation
 

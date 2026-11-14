@@ -61,3 +61,23 @@ Contribution rules are scoped in `AGENTS.md`. Start format support in
 [`crates/dezoomify/`](crates/dezoomify/AGENTS.md) with a
 [shared product fixture](fixtures/AGENTS.md). [Release recovery](release/README.md)
 and [licensing provenance](docs/licensing.md) have separate records.
+
+## Project structure
+
+All four apps use the same Rust downloader. Platform adapters connect it to
+browser or operating-system capabilities, while each app handles its own user
+interaction. The graphical apps also share their presentation layer.
+
+| Piece | Role |
+| --- | --- |
+| [Website](src/README.md) | Browser app and public-resource proxy; [functions](functions/) provide deployed server entry points. |
+| [CLI](apps/cli/README.md), [desktop](apps/desktop/README.md), [extension](apps/extension/README.md) | Product entry points for terminal use, native saving, and browser-session access. |
+| [Shared algorithm](crates/dezoomify/README.md) | Image discovery, resolution selection, and tile-download policy used by every product. |
+| [Native runtime](crates/dezoomify-native/README.md), [browser runtime](packages/browser-runtime/README.md) | Platform capabilities supplied to the shared algorithm. |
+| [WASM bridge](crates/dezoomify-wasm/README.md), [bindings](packages/wasm-bindings/README.md) | Connection between the Rust algorithm and JavaScript products. |
+| [Shared UI](packages/shared-ui/README.md) | Common screens, presentation, and translations for the graphical apps. |
+| [Page agent](packages/page-agent/README.md) | Viewer information and tile access available inside a source page. |
+| [Tests](test/README.md), [product fixtures](fixtures/README.md), [historical data](testdata/README.md) | Shared regression coverage and reproducible image sources, alongside component-local tests. |
+| [Task runner](crates/xtask/README.md), [scripts](scripts/README.md), [workflows](.github/workflows/) | Development, validation, packaging, and publication. |
+| [User guides](docs/user/README.md), [release runbook](release/README.md) | Help for using the apps and operating releases. |
+| [Legacy website](legacy/) | Preserved older app, served separately from the current website. |
