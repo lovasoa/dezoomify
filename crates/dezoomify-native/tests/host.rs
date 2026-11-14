@@ -11,7 +11,8 @@ use support::{http_response, scenario_payload, serve_counted, temp_dir, tile_req
 fn known_codec_limits_fail_before_ordinary_tile_fetches() {
     use dezoomify::model::{Error, LimitReason};
     let work = temp_dir("preflight");
-    let metadata = DZI_512.replace("512", "70000");
+    let side = 70_000;
+    let metadata = DZI_512.replace("512", &side.to_string());
     let counts = Arc::new(Mutex::new(HashMap::new()));
     let base = serve_counted(
         Arc::new(Mutex::new(HashMap::from([(
@@ -22,7 +23,7 @@ fn known_codec_limits_fail_before_ordinary_tile_fetches() {
     );
     for codec in dezoomify::model::OUTPUT_CODECS
         .iter()
-        .filter(|codec| codec.max_side.is_some())
+        .filter(|codec| codec.max_side.is_some_and(|limit| limit < side))
     {
         let extension = codec.format.extension();
         let host = NativeHost::new(JobOptions {
