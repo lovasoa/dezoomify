@@ -124,84 +124,98 @@ pub(crate) fn decode_error(error: image::ImageError) -> Error {
 
 // Bounded structural checks do not decompress pixels or validate entropy/zlib.
 fn check_structure(bytes: &[u8], format: NativeFormat) -> Result<(), Error> {
-    let invalid = || Error::DecodeFailed("truncated or invalid encoded tile structure".into());
     match format {
-        NativeFormat::Image(image::ImageFormat::Png) => {
-            let mut pos = 8usize;
-            let mut data = false;
-            while let Some(header) = bytes.get(pos..pos + 8) {
-                let len =
-                    u32::from_be_bytes(header[..4].try_into().expect("chunk length")) as usize;
-                let end = pos
-                    .checked_add(len)
-                    .and_then(|v| v.checked_add(12))
-                    .ok_or_else(invalid)?;
-                if end > bytes.len() {
-                    return Err(invalid());
-                }
-                match &header[4..] {
-                    b"IHDR" if pos == 8 && len != 13 => return Err(invalid()),
-                    b"IDAT" => data = true,
-                    b"IEND" => {
-                        return if len == 0 && data {
-                            Ok(())
-                        } else {
-                            Err(invalid())
-                        }
-                    }
-                    _ => {}
-                }
-                pos = end;
-            }
-            Err(invalid())
-        }
-        NativeFormat::Image(image::ImageFormat::Jpeg) => {
-            let mut pos = 2;
-            let mut scan = false;
-            while bytes.get(pos) == Some(&0xff) {
-                while bytes.get(pos) == Some(&0xff) {
-                    pos += 1;
-                }
-                let marker = *bytes.get(pos).ok_or_else(invalid)?;
-                pos += 1;
-                if marker == 0xd9 {
-                    return if scan { Ok(()) } else { Err(invalid()) };
-                }
-                if marker == 0 || marker == 0xd8 {
-                    return Err(invalid());
-                }
-                if marker == 1 || (0xd0..=0xd7).contains(&marker) {
-                    continue;
-                }
-                let length = bytes.get(pos..pos + 2).ok_or_else(invalid)?;
-                let len = u16::from_be_bytes(length.try_into().expect("segment length")) as usize;
-                if len < 2 || len > bytes.len().saturating_sub(pos) {
-                    return Err(invalid());
-                }
-                pos += len;
-                if marker == 0xda {
-                    scan = true;
-                    while pos < bytes.len() {
-                        if bytes[pos] != 0xff {
-                            pos += 1;
-                            continue;
-                        }
-                        let start = pos;
-                        while bytes.get(pos) == Some(&0xff) {
-                            pos += 1;
-                        }
-                        let next = *bytes.get(pos).ok_or_else(invalid)?;
-                        if next == 0 || (0xd0..=0xd7).contains(&next) {
-                            pos += 1;
-                        } else {
-                            pos = start;
-                            break;
-                        }
-                    }
-                }
-            }
-            Err(invalid())
-        }
+        NativeFormat::Image(image::ImageFormat::Png) => check_png_structure(bytes),
+        NativeFormat::Image(image::ImageFormat::Jpeg) => check_jpeg_structure(bytes),
         _ => Ok(()),
     }
+}
+
+fn invalid_structure() -> Error {
+    Error::DecodeFailed("truncated or invalid encoded tile structure".into())
+}
+
+fn check_png_structure(bytes: &[u8]) -> Result<(), Error> {
+    let mut pos = 8usize;
+    let mut data = false;
+    while let Some(header) = bytes.get(pos..pos + 8) {
+        let len = u32::from_be_bytes(header[..4].try_into().expect("chunk length")) as usize;
+        let end = pos
+            .checked_add(len)
+            .and_then(|v| v.checked_add(12))
+            .ok_or_else(invalid_structure)?;
+        if end > bytes.len() {
+            return Err(invalid_structure());
+        }
+        match &header[4..] {
+            b"IHDR" if pos == 8 && len != 13 => return Err(invalid_structure()),
+            b"IDAT" => data = true,
+            b"IEND" => {
+                return if len == 0 && data {
+                    Ok(())
+                } else {
+                    Err(invalid_structure())
+                }
+            }
+            _ => {}
+        }
+        pos = end;
+    }
+    Err(invalid_structure())
+}
+
+fn check_jpeg_structure(bytes: &[u8]) -> Result<(), Error> {
+    let mut pos = 2;
+    let mut scan = false;
+    while bytes.get(pos) == Some(&0xff) {
+        while bytes.get(pos) == Some(&0xff) {
+            pos += 1;
+        }
+        let marker = *bytes.get(pos).ok_or_else(invalid_structure)?;
+        pos += 1;
+        if marker == 0xd9 {
+            return if scan {
+                Ok(())
+            } else {
+                Err(invalid_structure())
+            };
+        }
+        if marker == 0 || marker == 0xd8 {
+            return Err(invalid_structure());
+        }
+        if marker == 1 || (0xd0..=0xd7).contains(&marker) {
+            continue;
+        }
+        let length = bytes.get(pos..pos + 2).ok_or_else(invalid_structure)?;
+        let len = u16::from_be_bytes(length.try_into().expect("segment length")) as usize;
+        if len < 2 || len > bytes.len().saturating_sub(pos) {
+            return Err(invalid_structure());
+        }
+        pos += len;
+        if marker == 0xda {
+            scan = true;
+            pos = jpeg_scan_end(bytes, pos)?;
+        }
+    }
+    Err(invalid_structure())
+}
+
+fn jpeg_scan_end(bytes: &[u8], mut pos: usize) -> Result<usize, Error> {
+    while pos < bytes.len() {
+        if bytes[pos] != 0xff {
+            pos += 1;
+            continue;
+        }
+        let start = pos;
+        while bytes.get(pos) == Some(&0xff) {
+            pos += 1;
+        }
+        let next = *bytes.get(pos).ok_or_else(invalid_structure)?;
+        if next == 0 || (0xd0..=0xd7).contains(&next) {
+            pos += 1;
+        } else {
+            return Ok(start);
+        }
+    }
+    Ok(pos)
 }

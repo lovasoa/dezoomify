@@ -225,14 +225,21 @@ mod tests {
         );
         drop(host);
         let transcript = String::from_utf8(transcript.into_inner()).unwrap();
-        assert!(transcript.contains("Found the following images:"));
-        assert!(transcript.contains("Found the following zoom levels:"));
-        assert!(transcript.contains("256 x   256 pixels"));
-        assert!(transcript.contains("1 tiles"));
-        assert!(transcript.contains("'999' is not a valid image number"));
-        assert!(transcript.contains("'no' is not a valid image number"));
-        assert!(transcript.contains("'-1' is not a valid level number"));
-        assert!(transcript.contains("'999' is not a valid level number"));
+        for expected in [
+            "Found the following images:",
+            "Found the following zoom levels:",
+            "256 x   256 pixels",
+            "1 tiles",
+            "'999' is not a valid image number",
+            "'no' is not a valid image number",
+            "'-1' is not a valid level number",
+            "'999' is not a valid level number",
+        ] {
+            assert!(
+                transcript.contains(expected),
+                "missing {expected:?}: {transcript}"
+            );
+        }
     }
 
     #[test]

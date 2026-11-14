@@ -158,31 +158,7 @@ fn interrupted_documents_publish_only_complete_pages() {
         ("last", &first, true),
     ] {
         let input = source(directory.path(), name, bytes);
-        let host = NativeHost::new(options(&input, &output))
-            .unwrap()
-            .with_document_page(document.page().unwrap())
-            .unwrap();
-        if cancel {
-            host.controls().cancel();
-        }
-        let result = host.transport.block_on(dezoomify::dezoomify(
-            host.inputs(),
-            host.algorithm_options(),
-            &host,
-        ));
-        if cancel {
-            assert!(matches!(result.unwrap_err(), Error::Cancelled));
-        } else {
-            assert_eq!(
-                result.unwrap().disposition,
-                OutputDisposition::NativePrepared
-            );
-        }
-        assert!(host.publication().is_none());
-        assert!(
-            !output.exists(),
-            "a prepared page must not report a published document"
-        );
+        prepare_document_page(&mut document, &input, &output, cancel);
     }
     let publication = document.finish().unwrap().unwrap();
     assert_eq!(publication.pages, 2);
@@ -190,6 +166,34 @@ fn interrupted_documents_publish_only_complete_pages() {
     assert_eq!(pdf.pages().len(), 2);
     assert_eq!(payloads(&pdf, 0), [first]);
     assert_eq!(payloads(&pdf, 1), [second]);
+}
+
+fn prepare_document_page(document: &mut OutputDocument, input: &Path, output: &Path, cancel: bool) {
+    let host = NativeHost::new(options(input, output))
+        .unwrap()
+        .with_document_page(document.page().unwrap())
+        .unwrap();
+    if cancel {
+        host.controls().cancel();
+    }
+    let result = host.transport.block_on(dezoomify::dezoomify(
+        host.inputs(),
+        host.algorithm_options(),
+        &host,
+    ));
+    if cancel {
+        assert!(matches!(result.unwrap_err(), Error::Cancelled));
+    } else {
+        assert_eq!(
+            result.unwrap().disposition,
+            OutputDisposition::NativePrepared
+        );
+    }
+    assert!(host.publication().is_none());
+    assert!(
+        !output.exists(),
+        "a prepared page must not report a published document"
+    );
 }
 
 #[test]

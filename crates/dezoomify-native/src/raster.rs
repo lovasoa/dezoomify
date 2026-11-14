@@ -291,31 +291,7 @@ fn encode(
                 directory.finish().map_err(encoding_error)?;
             }
             _ if format.codec().layout == OutputLayout::Buffered => {
-                let length = u64::from(pipe.size.width) * u64::from(pipe.size.height) * 4;
-                let length = usize::try_from(length).map_err(encoding_error)?;
-                let mut pixels = Vec::new();
-                pixels.try_reserve_exact(length).map_err(encoding_error)?;
-                while let Some(strip) = pipe.receive()? {
-                    pixels.extend_from_slice(&strip.rgba);
-                    pipe.consumed_strip(&strip);
-                }
-                if let Some(error) = pipe.error() {
-                    return Err(error);
-                }
-                let image =
-                    image::RgbaImage::from_raw(pipe.size.width, pipe.size.height, pixels)
-                        .ok_or_else(|| Error::InvalidState("incomplete buffered pixels".into()))?;
-                let (icc, _) = pipe.metadata()?;
-                crate::imaging::encode_buffered_to(
-                    &mut output,
-                    &image,
-                    format,
-                    compression,
-                    icc.as_deref(),
-                )?;
-                if let Some(error) = pipe.error() {
-                    return Err(error);
-                }
+                encode_buffered(&mut output, pipe, format, compression)?;
             }
             _ => return Err(Error::InvalidState("tile format in raster encoder".into())),
         }
@@ -350,6 +326,34 @@ fn encode(
     }
     Ok(staging)
 }
+
+fn encode_buffered(
+    output: impl Write + Seek,
+    pipe: &PixelPipe,
+    format: OutputFormat,
+    compression: u8,
+) -> Result<(), Error> {
+    let length = u64::from(pipe.size.width) * u64::from(pipe.size.height) * 4;
+    let length = usize::try_from(length).map_err(encoding_error)?;
+    let mut pixels = Vec::new();
+    pixels.try_reserve_exact(length).map_err(encoding_error)?;
+    while let Some(strip) = pipe.receive()? {
+        pixels.extend_from_slice(&strip.rgba);
+        pipe.consumed_strip(&strip);
+    }
+    if let Some(error) = pipe.error() {
+        return Err(error);
+    }
+    let image = image::RgbaImage::from_raw(pipe.size.width, pipe.size.height, pixels)
+        .ok_or_else(|| Error::InvalidState("incomplete buffered pixels".into()))?;
+    let (icc, _) = pipe.metadata()?;
+    crate::imaging::encode_buffered_to(output, &image, format, compression, icc.as_deref())?;
+    if let Some(error) = pipe.error() {
+        return Err(error);
+    }
+    Ok(())
+}
+
 fn encoding_error(error: impl std::fmt::Display) -> Error {
     Error::EncodeFailed(error.to_string().into())
 }
@@ -432,37 +436,49 @@ fn metadata_header(
     } else {
         crate::imaging::encode_jpeg(&pixel, 95, icc)?
     };
+    Ok(if format == OutputFormat::Png {
+        png_metadata_header(&encoded)
+    } else {
+        jpeg_metadata_header(&encoded)
+    })
+}
+
+fn png_metadata_header(encoded: &[u8]) -> Vec<u8> {
     let mut result = Vec::new();
-    let mut pos = if format == OutputFormat::Png { 8 } else { 2 };
+    let mut pos = 8;
     while pos + 8 <= encoded.len() {
-        if format == OutputFormat::Png {
-            let len =
-                u32::from_be_bytes(encoded[pos..pos + 4].try_into().expect("PNG chunk length"))
-                    as usize;
-            let end = pos + len + 12;
-            if end > encoded.len() {
-                break;
-            }
-            if matches!(&encoded[pos + 4..pos + 8], b"iCCP" | b"eXIf") {
-                result.extend_from_slice(&encoded[pos..end]);
-            }
-            pos = end;
-        } else {
-            if encoded[pos] != 0xff || encoded[pos + 1] == 0xda {
-                break;
-            }
-            let len = u16::from_be_bytes([encoded[pos + 2], encoded[pos + 3]]) as usize;
-            let end = pos + len + 2;
-            if end > encoded.len() {
-                break;
-            }
-            if encoded[pos + 1] == 0xe2 && encoded[pos + 4..end].starts_with(b"ICC_PROFILE\0") {
-                result.extend_from_slice(&encoded[pos..end]);
-            }
-            pos = end;
+        let len = u32::from_be_bytes(encoded[pos..pos + 4].try_into().expect("PNG chunk length"))
+            as usize;
+        let end = pos + len + 12;
+        if end > encoded.len() {
+            break;
         }
+        if matches!(&encoded[pos + 4..pos + 8], b"iCCP" | b"eXIf") {
+            result.extend_from_slice(&encoded[pos..end]);
+        }
+        pos = end;
     }
-    Ok(result)
+    result
+}
+
+fn jpeg_metadata_header(encoded: &[u8]) -> Vec<u8> {
+    let mut result = Vec::new();
+    let mut pos = 2;
+    while pos + 8 <= encoded.len() {
+        if encoded[pos] != 0xff || encoded[pos + 1] == 0xda {
+            break;
+        }
+        let len = u16::from_be_bytes([encoded[pos + 2], encoded[pos + 3]]) as usize;
+        let end = pos + len + 2;
+        if end > encoded.len() {
+            break;
+        }
+        if encoded[pos + 1] == 0xe2 && encoded[pos + 4..end].starts_with(b"ICC_PROFILE\0") {
+            result.extend_from_slice(&encoded[pos..end]);
+        }
+        pos = end;
+    }
+    result
 }
 
 #[cfg(test)]

@@ -693,10 +693,13 @@ mod tests {
         assert_eq!(parse_duration("1m"), Ok(Duration::from_secs(60)));
         assert_eq!(parse_duration("1h"), Ok(Duration::from_secs(3600)));
         assert_eq!(parse_duration("100ns"), Ok(Duration::from_nanos(100)));
-        assert!(parse_duration("").is_err());
-        assert!(parse_duration("ms").is_err());
-        assert!(parse_duration("1j").is_err());
-        assert!(parse_duration("1 2 ms").is_err());
+    }
+
+    #[test]
+    fn parse_duration_rejects_invalid_values() {
+        for value in ["", "ms", "1j", "1 2 ms"] {
+            assert!(parse_duration(value).is_err(), "accepted {value:?}");
+        }
     }
 
     #[test]
@@ -938,6 +941,11 @@ mod tests {
         assert_eq!(args.logging, "info");
         assert_eq!(args.parallelism, 16);
         assert_eq!(args.format, "auto");
+    }
+
+    #[test]
+    fn selection_defaults() {
+        let args = parse(&["https://example.com/x.dzi".to_string()]).expect("defaults");
         assert!(!args.largest);
         assert_eq!(args.max_height, None);
         assert_eq!(args.zoom_level, None);

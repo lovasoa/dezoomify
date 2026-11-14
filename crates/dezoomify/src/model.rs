@@ -1833,7 +1833,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn compression_estimates_follow_encoder_mapping_and_output_layout() {
+    fn compression_estimates_follow_encoder_mapping() {
         let avif = OutputFormat::Avif.codec();
         assert!((avif.estimated_bytes_per_pixel(9) - 0.33).abs() < 1e-12);
         assert_eq!(avif.estimated_bytes_per_pixel(100), 0.012);
@@ -1846,6 +1846,10 @@ mod tests {
             webp.estimated_bytes_per_pixel(100)
         );
         assert_eq!(OutputFormat::Zif.codec().estimated_bytes_per_pixel(5), 4.0);
+    }
+
+    #[test]
+    fn output_options_include_auto_compression_estimates() {
         let auto = output_options().remove(0);
         assert_eq!(auto.format, OutputPreference::Auto);
         assert_eq!(auto.max_side, None);
@@ -1891,7 +1895,7 @@ mod tests {
     }
 
     #[test]
-    fn verdicts_derive_from_the_variant_and_its_facts() {
+    fn cancellation_and_output_errors_have_terminal_verdicts() {
         assert!(Error::Cancelled.retry_after_ms().is_none());
         assert!(!Error::Cancelled.retryable());
         assert!(Error::Cancelled.is_terminal());
@@ -1901,6 +1905,10 @@ mod tests {
         // The browser's canvas refusal settles the job typed at once; it is
         // never one tile's failure.
         assert!(Error::PlanInvalid(Failure::default()).is_output());
+    }
+
+    #[test]
+    fn wrapped_throttling_preserves_retry_facts() {
         let throttled = Error::RateLimited {
             retry_after_ms: Some(9_000),
             transport: ErrorTransport::MetadataProxy,

@@ -62,6 +62,7 @@ jobs:
           desktop: true
       - run: cargo xtask test desktop
       - run: cargo xtask build desktop --unsigned-test
+      - run: cargo clippy -p dezoomify-desktop --all-targets --features tauri,testing-webdriver -- -D warnings
       - name: Real-window E2E (Linux, Xvfb)
         if: runner.os == 'Linux'
         shell: bash

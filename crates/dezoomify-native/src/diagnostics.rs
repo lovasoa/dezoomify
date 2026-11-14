@@ -101,6 +101,67 @@ struct State {
     phase: String,
 }
 
+impl State {
+    fn group_failure(&mut self, entry: &DiagnosticRecord) -> bool {
+        if !matches!(entry.level, DiagnosticLevel::Warn | DiagnosticLevel::Error) {
+            return false;
+        }
+        let key = failure_key(entry);
+        if let Some(group) = self.report.failures.iter_mut().find(|g| g.key == key) {
+            group.count = group.count.saturating_add(1);
+            group.last = entry.clone();
+            return true;
+        }
+        if self.report.failures.len() < 16 {
+            self.report.failures.push(DiagnosticFailureGroup {
+                key,
+                count: 1,
+                first: entry.clone(),
+                last: entry.clone(),
+            });
+        }
+        false
+    }
+
+    fn retain_record(&mut self, entry: &DiagnosticRecord) {
+        let bytes = serde_json::to_vec(entry).map_or(0, |v| v.len());
+        while !self.report.records.is_empty()
+            && (self.report.records.len() >= 1000 || self.bytes + bytes > 256 * 1024)
+        {
+            let first = self.report.records.remove(0);
+            self.bytes = self
+                .bytes
+                .saturating_sub(serde_json::to_vec(&first).map_or(0, |v| v.len()));
+            self.report.omitted_records += 1;
+        }
+        self.bytes += bytes;
+        self.report.records.push(entry.clone());
+    }
+}
+
+// Group on typed error facts at any composition depth so distinct causes keep
+// separate evidence even when their event names match.
+fn failure_key(entry: &DiagnosticRecord) -> String {
+    let mut key = entry.event.clone();
+    for (name, value) in &entry.fields {
+        let leaf = name.rsplit('.').next().unwrap_or(name.as_str());
+        if matches!(
+            leaf,
+            "kind" | "status" | "transport" | "resource_kind" | "purpose"
+        ) {
+            key.push('|');
+            key.push_str(name);
+            key.push('=');
+            match value {
+                DiagnosticValue::Text(text) => key.push_str(text),
+                DiagnosticValue::Number(number) => key.push_str(&number.to_string()),
+                DiagnosticValue::Bool(flag) => key.push_str(&flag.to_string()),
+            }
+        }
+    }
+    key
+}
+
 impl std::fmt::Debug for Diagnostics {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("Diagnostics { .. }")
@@ -172,54 +233,9 @@ impl Diagnostics {
                 event: event.chars().take(128).collect(),
                 fields: fields(facts, &mut state.report.truncated_fields),
             };
-            let mut repeated = false;
-            if matches!(level, DiagnosticLevel::Warn | DiagnosticLevel::Error) {
-                // Groups key on the typed error facts (kind/status/transport/
-                // purpose at any composition depth), so distinct causes never
-                // collapse into one group and hide intermediate evidence.
-                let mut key = entry.event.clone();
-                for (name, value) in &entry.fields {
-                    let leaf = name.rsplit('.').next().unwrap_or(name.as_str());
-                    if matches!(
-                        leaf,
-                        "kind" | "status" | "transport" | "resource_kind" | "purpose"
-                    ) {
-                        key.push('|');
-                        key.push_str(name);
-                        key.push('=');
-                        match value {
-                            DiagnosticValue::Text(text) => key.push_str(text),
-                            DiagnosticValue::Number(number) => key.push_str(&number.to_string()),
-                            DiagnosticValue::Bool(flag) => key.push_str(&flag.to_string()),
-                        }
-                    }
-                }
-                if let Some(group) = state.report.failures.iter_mut().find(|g| g.key == key) {
-                    group.count = group.count.saturating_add(1);
-                    group.last = entry.clone();
-                    repeated = true;
-                } else if state.report.failures.len() < 16 {
-                    state.report.failures.push(DiagnosticFailureGroup {
-                        key,
-                        count: 1,
-                        first: entry.clone(),
-                        last: entry.clone(),
-                    });
-                }
-            }
+            let repeated = state.group_failure(&entry);
             if level != DiagnosticLevel::Trace && !repeated {
-                let bytes = serde_json::to_vec(&entry).map_or(0, |v| v.len());
-                while !state.report.records.is_empty()
-                    && (state.report.records.len() >= 1000 || state.bytes + bytes > 256 * 1024)
-                {
-                    let first = state.report.records.remove(0);
-                    state.bytes = state
-                        .bytes
-                        .saturating_sub(serde_json::to_vec(&first).map_or(0, |v| v.len()));
-                    state.report.omitted_records += 1;
-                }
-                state.bytes += bytes;
-                state.report.records.push(entry.clone());
+                state.retain_record(&entry);
             }
             if !repeated {
                 notification = state.sink.clone().map(|sink| (sink, entry));
