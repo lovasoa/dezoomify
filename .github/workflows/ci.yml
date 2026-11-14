@@ -1,6 +1,7 @@
 name: ci
 on:
   pull_request: {}
+  merge_group: {}
   push:
     # Single-branch repository: main holds legacy/ and the new app.
 
