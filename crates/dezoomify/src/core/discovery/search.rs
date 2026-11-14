@@ -431,19 +431,19 @@ impl Search {
         }
         catalogs.sort_by_key(|(rank, _)| *rank);
         let mut seen = Vec::new();
-        DiscoveryCatalog::new(
-            catalogs
-                .into_iter()
-                .filter_map(|(_, catalog)| {
-                    let public = catalog.public_catalog();
-                    if seen.contains(&public) {
-                        return None;
-                    }
-                    seen.push(public);
-                    Some(catalog)
-                })
-                .flat_map(DiscoveryCatalog::into_entries),
-        )
+        let mut entries = Vec::new();
+        for (_, catalog) in catalogs {
+            let previous = seen.len();
+            let public = catalog.public_catalog();
+            for (entry, choice) in catalog.into_entries().into_iter().zip(public.entries) {
+                // Preserve repeated canvases within a declared catalog.
+                if !seen[..previous].contains(&choice) {
+                    seen.push(choice);
+                    entries.push(entry);
+                }
+            }
+        }
+        DiscoveryCatalog::new(entries)
     }
 
     /// Admit only peers of the strongest pending remote work. Local reads are
@@ -641,8 +641,8 @@ where
 /// Discover through matcher evidence and a shared table of bounded resource reads.
 /// Supplied contents and accessible Host observations run before remote fallback.
 /// Collect equally strong source catalogs in discovery priority order, coalescing
-/// identical catalogs. Weaker matches and viewer snapshots remain fallbacks when
-/// declared sources are available.
+/// overlapping choices across catalogs. Weaker matches and viewer snapshots remain
+/// fallbacks when declared sources are available.
 /// Hosts bound response sizes and stop I/O when the owning job is cancelled.
 pub async fn discover<F, Fut, P, PFut, O, OFut>(
     inputs: Vec<DiscoveryInput>,

@@ -101,3 +101,35 @@ fn the_same_catalog_found_on_two_pages_appears_once() {
     );
     assert_eq!(catalog.unwrap().len(), 1);
 }
+
+#[test]
+fn overlapping_catalogs_offer_each_shared_image_once() {
+    let first = include_str!("../../../fixtures/iiif/catalog/manifest.json");
+    let second = first.replace("\"second\"", "\"third\"");
+    let (catalog, _) = support::discover_inputs(
+        default_registry(),
+        vec![
+            DiscoveryInput::with_contents("https://museum.test/one.json", first),
+            DiscoveryInput::with_contents("https://museum.test/two.json", second),
+        ],
+        Default::default(),
+        |_| panic!("image metadata is resolved after selection"),
+    );
+    let urls: Vec<_> = catalog
+        .unwrap()
+        .into_entries()
+        .into_iter()
+        .map(|entry| match entry {
+            dezoomify::core::DiscoveredEntry::Deferred(image) => image.uri,
+            _ => panic!("expected image choices"),
+        })
+        .collect();
+    assert_eq!(
+        urls,
+        [
+            "https://museum.test/first/info.json",
+            "https://museum.test/second/info.json",
+            "https://museum.test/third/info.json"
+        ]
+    );
+}
