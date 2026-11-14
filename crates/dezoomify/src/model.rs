@@ -417,6 +417,19 @@ const AVIF_SIZES: &[(u8, f64)] = &[
     (100, 1.15),
 ];
 
+// RGB8 target rates (3 bytes/pixel divided by 1 + compression), followed
+// by a heuristic for reversible coding at compression zero.
+const JPEG2000_SIZES: &[(u8, f64)] = &[
+    (0, 3.0 / 101.0),
+    (50, 3.0 / 51.0),
+    (75, 3.0 / 26.0),
+    (90, 3.0 / 11.0),
+    (95, 0.5),
+    (98, 1.0),
+    (99, 1.5),
+    (100, 1.6),
+];
+
 // Warning thresholds are conservative UI heuristics, not universal usability
 // cutoffs. JPEG guidance describes <50 as low quality and 5-10 as index-only:
 // https://github.com/libjpeg-turbo/libjpeg-turbo/blob/main/doc/usage.txt
@@ -428,7 +441,7 @@ image_codecs! {
     Jpeg => (&["jpg", "jpeg"], "jpeg", "JPEG", &["jpg", "jpeg"], Some(65_535), OutputControl::Quality { minimum: 0, warning_below: 25 }, Streaming, "compressed", JPEG_SIZES),
     Tiff => (&["tif", "tiff"], "tiff", "TIFF", &["tif", "tiff"], None, OutputControl::Effort, Streaming, "archival", &[(100, 3.0)]),
     Webp => (&["webp"], "webp", "WebP", &["webp"], Some(16_383), OutputControl::None, Buffered, "lossless", &[(100, 1.3)]),
-    Jpeg2000 => (&["jp2", "j2k", "j2c", "jpc"], "jpeg2000", "JPEG 2000", &["jp2"], Some(i32::MAX as u32), OutputControl::Quality { minimum: 0, warning_below: 25 }, Tiled, "tiled", &[(0, 0.03), (50, 0.06), (99, 1.5), (100, 1.6)]),
+    Jpeg2000 => (&["jp2", "j2k", "j2c", "jpc"], "jpeg2000", "JPEG 2000", &["jp2"], Some(i32::MAX as u32), OutputControl::Quality { minimum: 0, warning_below: 25 }, Tiled, "tiled", JPEG2000_SIZES),
   }
   output {
     Avif => ("avif", "AVIF", &["avif"], Some(65_535), OutputControl::Quality { minimum: 1, warning_below: 30 }, Buffered, "advancedCompression", AVIF_SIZES),
