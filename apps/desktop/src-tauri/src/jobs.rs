@@ -285,6 +285,7 @@ mod tests {
     fn cancellation_after_registration_prevents_native_work_and_publication() {
         use dezoomify_native::{JobOptions, NativeHost, OutputTarget};
 
+        let runtime = dezoomify_native::transport::NativeTransport::create_runtime().unwrap();
         for release in [false, true] {
             let work = std::env::temp_dir().join(format!(
                 "dezoomify-desktop-registration-{}-{release}",
@@ -301,14 +302,18 @@ mod tests {
             } else {
                 table.live("job:test").unwrap().controls.cancel();
             }
-            let mut host = NativeHost::new(JobOptions {
-                input_url: work.join("image.dzi").to_string_lossy().into_owned(),
-                output: OutputTarget::File(output.clone()),
-                cache_dir: Some(work.join("cache")),
-                ..JobOptions::default()
-            })
+            let host = NativeHost::with_runtime(
+                JobOptions {
+                    input_url: work.join("image.dzi").to_string_lossy().into_owned(),
+                    output: OutputTarget::File(output.clone()),
+                    cache_dir: Some(work.join("cache")),
+                    ..JobOptions::default()
+                },
+                registration.diagnostics.child(),
+                registration.controls.clone(),
+                runtime.clone(),
+            )
             .unwrap();
-            host.controls = registration.controls.clone();
             let error = host
                 .transport
                 .block_on(dezoomify::dezoomify(

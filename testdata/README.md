@@ -1,14 +1,9 @@
-# Test Data
+# Regression data
 
-- **Responsibility:** Store deterministic, reviewed fixtures shared across
-  crates, packages, and applications.
-- **Allowed dependencies:** Tests and fixture tooling may read these files;
-  production code must not require repository testdata at runtime.
-- **Forbidden responsibilities:** No live endpoints as sole coverage, generated
-  build output, oversized unexplained binaries, credentials, private user data,
-  or fixtures with unknown redistribution terms.
-- **Interfaces and tests:** Document fixture provenance, license,
-  expected behavior, and regeneration. Validate schemas and ensure scenarios
-  remain hermetic and minimal.
-- **Sources:** Curate the minimal payload for a scenario from the real site it
-  represents; never bulk-copy a site's files.
+Local source material reproduces image formats and failures encountered on
+real sites. It supports focused regression tests independently of changes to
+those sites or their availability.
+
+[Historical scenarios](scenarios/README.md) retain imported reproductions and
+their source grants. New cross-product download cases live in
+[fixtures](../fixtures/), and [test infrastructure](../test/) serves both collections.

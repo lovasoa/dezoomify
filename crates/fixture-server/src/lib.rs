@@ -1,13 +1,9 @@
-//! Corpus readers and process adapters for Node test servers.
+//! Rust test fixtures require Node on PATH. [`NodeServer`] ties a server's
+//! lifetime to its owner; [`start`] intentionally keeps one per test process.
 mod node;
 pub use node::{server_script, NodeServer, RawRequest, RawResponse};
 use std::path::PathBuf;
 
-// ---------------------------------------------------------------------------
-// Scenario corpus access: this test-tool crate owns testdata/scenarios.
-// ---------------------------------------------------------------------------
-
-/// The shared scenario corpus under `testdata/scenarios`.
 #[must_use]
 pub fn scenarios_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../testdata/scenarios")
@@ -73,7 +69,8 @@ pub fn format_inputs() -> Vec<FormatInput> {
     inputs
 }
 
-/// A fresh temp directory for one scenario run, cleared of leftovers.
+/// Reusing a name in this process deletes the earlier directory. Choose distinct
+/// names for overlapping tests and remove the returned directory after use.
 #[must_use]
 pub fn temp_dir(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("dezoomify-tests-{}-{name}", std::process::id()));

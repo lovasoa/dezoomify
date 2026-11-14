@@ -492,7 +492,7 @@ test("desktop guidance downloads directly without leaving the website", async ({
   const windows = downloads.getByRole("link", { name: "Windows installer · x64 (NSIS)" });
   await expect(windows).toHaveAttribute("href", installerUrl);
   await expect(downloads.getByRole("link", { name: "macOS installer · Apple Silicon (DMG)" })).toHaveAttribute("href", /\/releases\/latest\/download\/dezoomify-desktop\.dmg$/);
-  await expect(downloads.getByRole("link", { name: "Linux installer · x64 (DEB)" })).toHaveAttribute("href", /\/releases\/latest\/download\/dezoomify-desktop\.deb$/);
+  await expect(downloads.getByRole("link", { name: "Linux x64 (AppImage)" })).toHaveAttribute("href", /\/releases\/latest\/download\/dezoomify-desktop\.AppImage$/);
   const pending = page.waitForEvent("download");
   await windows.click();
   expect((await pending).suggestedFilename()).toBe("dezoomify-test.exe");
@@ -540,7 +540,7 @@ test("lower resolution opens a desktop handoff with the exact URL and keyboard n
   const dialog = page.getByRole("dialog");
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole("link")).toHaveCount(3);
-  await expect(dialog.getByRole("link", { name: "Linux installer · x64 (DEB)" })).toHaveAttribute("href", /\/releases\/latest\/download\/dezoomify-desktop\.deb$/);
+  await expect(dialog.getByRole("link", { name: "Linux x64 (AppImage)" })).toHaveAttribute("href", /\/releases\/latest\/download\/dezoomify-desktop\.AppImage$/);
   const source = dialog.getByRole("textbox");
   await expect(source).toHaveValue("https://fixtures.test/resolution/big.dzi");
   await expect(source).toHaveAttribute("readonly", "");

@@ -113,10 +113,10 @@ fn concurrent_optional_acquisitions_share_approval_and_keep_user_pause() {
             async {
                 tokio::task::yield_now().await;
                 assert_eq!(prompts.get(), 1);
-                host.controls.pause();
+                host.controls().pause();
                 send.send(RetryChoice::Retry).unwrap();
                 tokio::task::yield_now().await;
-                host.controls.resume();
+                host.controls().resume();
             }
         );
         first.unwrap();
@@ -1242,7 +1242,7 @@ fn cancel_during_acquisition_quiesces_without_publication() {
         ..Default::default()
     })
     .expect("host initializes");
-    let controls = host.controls.clone();
+    let controls = host.controls().clone();
     host.on_progress(move |progress| {
         if progress.phase == ProgressPhase::Acquisition {
             controls.cancel();
@@ -1310,7 +1310,7 @@ fn cancellation_during_unanswered_approval_preserves_destination() {
         ..Default::default()
     })
     .expect("host initializes");
-    let controls = host.controls.clone();
+    let controls = host.controls().clone();
     host.on_retry(move |_| {
         controls.cancel();
         Box::pin(std::future::pending())

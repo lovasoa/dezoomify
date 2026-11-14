@@ -1,6 +1,8 @@
 import type { TileAcquisition } from "@dezoomify/wasm-bindings";
 
-/** A job-wide approval grants one further attempt to every tile at that attempt number. */
+/** Use one instance per invocation: approvals also cover tiles arriving later at
+ * the same attempt number. Cancellation is terminal. `changed` runs synchronously
+ * and may answer the pending question before `acquire` returns. */
 export class RetryApproval {
   private approvedAttempt = -1;
   private pending:

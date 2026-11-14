@@ -29,6 +29,9 @@ function yieldTask(): Promise<void> {
   });
 }
 
+/** One scan shares budgets across adapters and frames. Charge inspected work,
+ * including failed probes, so hostile object graphs cannot replenish limits.
+ * Yielding affects responsiveness only; elapsed time never selects findings. */
 export class ScanState {
   readonly inputs: JobInput[] = [];
   readonly images: LoadedImage[] = [];

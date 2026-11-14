@@ -16,7 +16,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
         match version_of("nasm", &["-v"]) {
             Ok(version) => println!("nasm: {version}"),
             Err(error) => failures.push(format!(
-                "{error} (install NASM for native AVIF; see docs/development.md)"
+                "{error} (install NASM for native AVIF; see README.md#build-and-contribute)"
             )),
         }
     }

@@ -337,11 +337,13 @@ fn an_earlier_ordinary_read_keeps_precedence_over_a_later_ready_image() {
     );
 }
 #[test]
-fn a_later_stalled_read_cannot_delay_an_earlier_winner() {
+fn discovery_waits_for_other_images_within_the_resource_budget() {
     for resources in [1, 2] {
         let started = Cell::new(0);
         let (send, receive) = futures::channel::oneshot::channel();
         let receive = RefCell::new(Some(receive));
+        let (send_second, receive_second) = futures::channel::oneshot::channel();
+        let receive_second = RefCell::new(Some(receive_second));
         let registry = registry();
         let future = registry.discover(
             vec![DiscoveryInput::new("https://test/root")],
@@ -354,14 +356,14 @@ fn a_later_stalled_read_cannot_delay_an_earlier_winner() {
                 let receive = if request.uri.ends_with("/a") {
                     receive.borrow_mut().take()
                 } else {
-                    None
+                    receive_second.borrow_mut().take()
                 };
                 async move {
-                    if request.uri.ends_with("/b") {
-                        return std::future::pending().await;
-                    }
-                    receive.expect("first read waits").await.unwrap();
-                    Ok(response("first"))
+                    receive
+                        .expect("each image has a response barrier")
+                        .await
+                        .unwrap();
+                    Ok(response(&request.uri))
                 }
             },
             support::parse_html,
@@ -371,16 +373,20 @@ fn a_later_stalled_read_cannot_delay_an_earlier_winner() {
         assert!(future.as_mut().now_or_never().is_none());
         assert_eq!(started.get(), resources);
         send.send(()).unwrap();
-        assert_eq!(
-            selected(
-                future
-                    .as_mut()
-                    .now_or_never()
-                    .expect("later pending read must not block")
-                    .unwrap()
-            ),
-            "first"
-        );
+        if resources == 2 {
+            assert!(future.as_mut().now_or_never().is_none());
+            send_second.send(()).unwrap();
+        }
+        let catalog = futures::executor::block_on(future).unwrap();
+        let titles: Vec<_> = catalog
+            .entries()
+            .iter()
+            .map(|entry| match entry {
+                DiscoveredEntry::Ready(image) => image.title.as_deref().unwrap(),
+                _ => panic!("expected ready images"),
+            })
+            .collect();
+        assert_eq!(titles, ["https://test/a", "https://test/b"][..resources]);
     }
 }
 #[test]

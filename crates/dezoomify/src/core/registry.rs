@@ -1,4 +1,5 @@
-//! Stable registration and precedence policy for pure formats.
+//! Format order breaks ties after evidence strength, path length, and input
+//! order, so a later format can win without reading earlier weak candidates.
 
 use super::discovery::{DiscoveryInput, DiscoveryLimits, FormatSpec};
 use crate::{
@@ -7,7 +8,6 @@ use crate::{
     zif, zoomify,
 };
 
-/// Every built-in format, in candidate priority order.
 const BUILTINS: &[FormatSpec] = &[
     custom_yaml::SPEC,
     google_arts_and_culture::SPEC,
@@ -33,12 +33,11 @@ const BUILTINS: &[FormatSpec] = &[
     viewer::SPEC,
 ];
 
-/// Built-in format names in candidate priority order.
 pub fn builtin_names() -> impl Iterator<Item = &'static str> {
     BUILTINS.iter().map(FormatSpec::name)
 }
 
-/// An ordered set of formats to try. Earlier registrations have priority.
+/// Registration order is the final tie-breaker for equally supported candidates.
 #[derive(Default, Clone)]
 pub struct Registry {
     specs: Vec<FormatSpec>,
@@ -50,12 +49,13 @@ impl Registry {
         Self::default()
     }
 
-    /// Register one format. Earlier registrations are tried first.
     pub fn register(&mut self, spec: FormatSpec) {
         self.specs.push(spec);
     }
 
-    /// Resolve supplied sources with platform resource acquisition.
+    /// Callbacks must bound response sizes and honor the owning job's cancellation.
+    /// Reads may overlap; interactive access is deferred until accessible work
+    /// is exhausted. Observation batches reuse this search's cache and allowance.
     pub async fn discover<F, Fut, P, PFut, O, OFut>(
         &self,
         inputs: Vec<DiscoveryInput>,

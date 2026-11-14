@@ -1,15 +1,9 @@
-# dezoomify-wasm
+# WebAssembly bridge
 
-Exposes the async Rust `dezoomify` function and generated `Host` contract to
-JavaScript. The function awaits the capabilities supplied by `BrowserHost` in
-`packages/browser-runtime`. Rust owns the algorithm; the Host owns browser I/O.
+Makes the [shared Rust algorithm](../dezoomify/) available to JavaScript in the
+website and extension. It carries asynchronous calls and shared data across the
+language boundary, so browser products can use the same algorithm as native apps.
 
-```sh
-cargo xtask build wasm   # wasm32 build
-cargo xtask test wasm    # real WASM Host ABI and promise harness
-```
-
-Bare `cargo xtask test` covers the crate's native Rust tests but does not
-generate WASM bindings. `cargo xtask test wasm` and the WASM portion of
-`test all` generate current Node bindings and run the dot-reporter harness;
-website browser coverage is Chromium and remains a separate E2E step.
+[Browser runtime](../../packages/browser-runtime/) supplies browser access and
+image saving. Keeping those capabilities separate lets the bridge serve both
+browser products without depending on their user interfaces or permissions.

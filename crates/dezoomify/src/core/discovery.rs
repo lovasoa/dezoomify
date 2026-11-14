@@ -1,4 +1,6 @@
-//! Format parsing and bounded asynchronous discovery.
+//! Routes separate evidence that justifies a read from decoding bytes already
+//! available. A broad content decoder must not cause a fetch of every page asset;
+//! [`Specificity`] and [`FormatSpec`] define admission and fallback separately.
 
 use std::{
     borrow::Cow,
@@ -143,6 +145,9 @@ impl ParsedResource {
         }
     }
 }
+/// A decoder sees the current response separately from its branch's ancestors.
+/// Resolve relative references through this value so redirects and HTML bases
+/// survive navigation; constructing URLs from the originally entered source loses them.
 #[derive(Clone, Copy, Debug)]
 pub struct DiscoveryResource<'a> {
     request: Option<&'a Request>,
@@ -223,7 +228,6 @@ impl<'a> DiscoveryResource<'a> {
         self
     }
 
-    /// Decode resource bytes as UTF-8, replacing malformed sequences.
     #[must_use]
     pub fn text_lossy(self) -> Cow<'a, str> {
         String::from_utf8_lossy(self.bytes)
@@ -261,6 +265,9 @@ impl HtmlElement {
     }
 }
 
+/// Branch-local ancestry, excluding the current response and unrelated reads
+/// shared by other branches. Incremental parsers can replay successful ancestors
+/// with their original range headers without retaining mutable parser state.
 #[derive(Clone, Copy, Debug)]
 pub struct DiscoveryContext<'a> {
     history: &'a [ReadResource],
@@ -283,6 +290,8 @@ impl<'a> DiscoveryContext<'a> {
         })
     }
 }
+/// Missing bytes are returned as follow requests; discovery owns acquisition and
+/// may invoke the same decoder for multiple branches. Keep decoding free of I/O.
 pub type Decoder = for<'a> fn(DiscoveryResource<'a>) -> Result<ParsedResource, DiscoveryError>;
 type FailureHandler = for<'a> fn(
     &DiscoveryContext<'a>,

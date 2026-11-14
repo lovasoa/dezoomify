@@ -1,13 +1,5 @@
-// Shared-UI message dictionary (English plus French, German, Italian).
-//
-// English (`en`) is the canonical source: every other locale covers it key
-// for key with identical `{placeholders}`, and lookups fall back to English
-// per key. Rules for user copy: `packages/shared-ui/AGENTS.md`.
-//
-// Locale selection: hosts call `setLocale()` (explicit picker choice) or
-// `pickLocale()` (`Accept-Language` / `navigator.languages`); unknown tags
-// fail closed to English. This module is erasable-syntax-only TypeScript so
-// node can type-strip it directly in tests.
+// Locale selection is shared mutable state within a loaded UI. Hosts select it
+// before rendering; independent simultaneous locales must use t's explicit override.
 
 import { de } from "./locales/de.ts";
 import { fr } from "./locales/fr.ts";
@@ -25,7 +17,6 @@ export function getLocale(): Locale {
   return activeLocale;
 }
 
-/** True only for the four shipped locale names (case-insensitive, base tag). */
 export function isSupportedLocaleName(name: string): boolean {
   return normalizeLocaleName(name) !== null;
 }
@@ -173,8 +164,9 @@ const en = {
   "view.desktop.title": "Dezoomify Desktop App",
   "view.desktop.download.windows": "Windows installer · x64 (NSIS)",
   "view.desktop.download.macos": "macOS installer · Apple Silicon (DMG)",
-  "view.desktop.download.linux": "Linux installer · x64 (DEB)",
-  "view.desktop.step1": "Download the installer above for your system, then install it.",
+  "view.desktop.download.linux": "Linux x64 (AppImage)",
+  "view.desktop.step1":
+    "Download the file above for your system. Install it, or on Linux make the AppImage executable and run it.",
   "view.desktop.subtitle": "Save large images directly to your computer",
   "view.desktop.whyTitle": "Why use the Desktop App?",
   "view.desktop.why1Title": "Download larger images:",
@@ -260,7 +252,7 @@ const en = {
   "view.resolution.download": "Get full resolution with the desktop app",
   "view.desktop.handoffTitle": "Download this image in the desktop app",
   "view.desktop.handoffInstall":
-    "Choose the installer for your operating system, then open Dezoomify.",
+    "Download and open Dezoomify for your system. On Linux, make the AppImage executable first.",
   "view.desktop.handoffPaste": "Paste this address into the desktop app:",
   "view.desktop.handoffCopy": "Copy address",
   "view.desktop.handoffCopied": "Address copied. Paste it into the desktop app.",
@@ -507,19 +499,15 @@ const en = {
 
 export type I18nKey = keyof typeof en;
 
-/** Canonical English templates. Tests enumerate this table. */
 export const EN: Record<string, string> = en;
 
-/** French templates (same keys, same placeholders). */
 export const FR: Record<string, string> = fr;
 
-/** German templates (same keys, same placeholders). */
 export const DE: Record<string, string> = de;
 
-/** Italian templates (same keys, same placeholders). */
 export const IT: Record<string, string> = it;
 
-const dictionaries: Record<string, Record<string, string>> = { en, fr, de, it };
+const dictionaries = { en, fr, de, it } satisfies Record<Locale, Record<I18nKey, string>>;
 
 /** Read one locale table with English fallback (never undefined). */
 export function getDictionary(locale: string): Record<string, string> {
@@ -534,7 +522,7 @@ export function getDictionary(locale: string): Record<string, string> {
  * missing from the active locale fall back to English per key.
  */
 export function t(key: I18nKey, vars?: I18nVars, locale?: string): string {
-  const want: string =
+  const want: Locale =
     typeof locale === "string" && locale !== ""
       ? (normalizeLocaleName(locale) ?? activeLocale)
       : activeLocale;

@@ -5,20 +5,24 @@ name: website-deploy
 # (dezoomify) with wrangler; the project's automatic git deployments are
 # disabled, so this workflow is the only publisher (see docs/development.md).
 # Pushes to main are production deployments; same-repository pull requests
-# get stable PR-number preview aliases. Nothing generated is committed.
+# get stable PR-number preview aliases; merge groups get commit-specific previews.
+# Nothing generated is committed.
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
     types: [opened, synchronize, reopened]
+  merge_group: {}
   workflow_dispatch: {}
 env:
   # Verify against Pages' pages.dev host: it avoids the production zone's bot
   # management, which starts blocking curl's TLS fingerprint after a few
   # bursts and would make the verification flap.
-  SITE_HOST: ${{ github.event_name == 'pull_request' && format('pr-{0}.dezoomify.pages.dev', github.event.pull_request.number) || 'dezoomify.pages.dev' }}
-  DEPLOY_BRANCH: ${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.ref_name }}
+  SITE_HOST: ${{ github.event_name == 'merge_group' && format('queue-{0}.dezoomify.pages.dev', github.sha) || github.event_name == 'pull_request' && format('pr-{0}.dezoomify.pages.dev', github.event.pull_request.number) || 'dezoomify.pages.dev' }}
+  DEPLOY_BRANCH: ${{ github.event_name == 'merge_group' && format('queue-{0}', github.sha) || github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.ref_name }}
+  # Match the commit tracked by GitHub's automatic deployment record.
+  DEPLOY_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
   CLOUDFLARE_PROJECT: dezoomify
 permissions:
   contents: read
@@ -28,16 +32,17 @@ concurrency:
   cancel-in-progress: true
 jobs:
   deploy:
-    # Never give deploy credentials to code from a fork. Same-repository PRs
-    # retain the normal pull_request event and are checked out at the merge ref.
+    # Never give deploy credentials to code from a fork.
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     environment:
-      name: ${{ github.event_name == 'pull_request' && 'preview' || 'production' }}
-      url: ${{ github.event_name == 'pull_request' && format('https://pr-{0}.dezoomify.pages.dev', github.event.pull_request.number) || 'https://dezoomify.pages.dev' }}
+      name: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && 'preview' || 'production' }}
+      url: https://${{ env.SITE_HOST }}/
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.DEPLOY_COMMIT }}
       - uses: ./.github/actions/setup-pnpm
         with:
           install: true
@@ -69,8 +74,8 @@ jobs:
           pnpm exec wrangler pages deploy dist \
             --project-name "$CLOUDFLARE_PROJECT" \
             --branch "$DEPLOY_BRANCH" \
-            --commit-hash "${{ github.sha }}" \
-            --commit-message "deploy ${{ github.sha }}"
+            --commit-hash "$DEPLOY_COMMIT" \
+            --commit-message "deploy $DEPLOY_COMMIT"
       - name: Verify the deployment serves both apps and no repository files
         if: steps.creds.outputs.ready == 'true'
         run: |

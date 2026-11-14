@@ -1,11 +1,8 @@
 # Historical regression fixtures
 
-New product fixtures live in [`fixtures/`](../../fixtures/README.md).
-These historical reproductions remain inputs to focused parser, transport, and
-product failure tests. Files are ordinary reviewed source; Git records their
-history. Discovery and failure expectations live directly in the focused tests.
-The hash registry, scenario inventories, and capture/verification framework
-are removed. Identical payloads share relative symlinks.
+Focused regressions use these imported payloads; new product saves belong in
+[fixtures](../../fixtures/AGENTS.md). Replay and handler contracts are documented
+at [the fixture server](../../test/fixture-server.mjs).
 
 ## Provenance
 
@@ -30,33 +27,3 @@ https://bruun-rasmussen.dk/m/lots/B7651D2E4677/images/1.
 Observed Zoomify inputs reproduce Museum Ludwig behavior with synthetic data.
 Live-triage fixtures (2026-09-07) are synthetic. Memorix demo keys and Arts
 fixture tokens are public test doubles; they are never real credentials.
-
-## Serving reproductions
-
-Use ordinary loopback URLs for local files. For a recorded remote URL, use
-`/fetch?url=<encoded URL>` (the Node `replayUrl` helper builds this).
-This is the only replay form. The standard URL parser normalizes requests;
-bad test requests produce a logged exception rather than a simulated API contract.
-
-A file at `payloads/{host}/{path}` answers that host/path. Alternate paths use
-relative symlinks; content types follow file extensions (or the symlink target
-for extensionless files). Captured text URLs can omit `.html`, `.json`, `.xml`,
-or `.txt`; directory URLs use `index` with those extensions. Percent-encoded
-paths and their decoded spellings identify the same file. Duplicate host/path
-files must contain identical bytes; conflicting copies fail at startup.
-
-A local `server.js` exports `serve(request, { file, origin })` and returns a
-standard Response for requests it owns, or null to fall through to static files.
-Returning a 404 finishes the request. The file argument is the matching static
-file; tile fallbacks yield to metadata files, while authentication checks run
-before protected files are served. Headers, cookies, redirects, and generated
-responses belong in these handlers. They can use `fileResponse` from
-`test/fixture-files.mjs` to infer MIME types and supply Response options.
-
-Text substitutes `{{origin}}`, `{{localhost_origin}}`, and `{{host}}`.
-Encoded bodies are sent unchanged. Format code stays outside the generic server.
-
-The server binds ephemeral loopback ports and never forwards unknown requests
-to public hosts. Cookie values stay out of request logs. Handlers use local bytes
-and deterministic synthetic responses. Third-party image servers are test
-subjects, not replacement fixture infrastructure.

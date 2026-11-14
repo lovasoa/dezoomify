@@ -1,4 +1,5 @@
-// Deterministic loopback origins for every product. Uses only Node built-ins.
+// Replays local bytes even for recorded remote URLs; unknown requests never
+// reach the network. Keep protocol-specific behavior in fixture-local handlers.
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
@@ -62,6 +63,17 @@ function template(bytes, headers, file, origin, host) {
   );
 }
 
+/**
+ * Each fixture-local server.js exports serve(request, { file, origin }). All
+ * handlers see requests; return null for paths you do not own so static serving
+ * or another handler can answer. Any Response, including 404, is final. `file`
+ * is the matching local payload, or null; auth handlers must check it before
+ * allowing static fallthrough. Use fileResponse for MIME inference from symlinks.
+ *
+ * /fetch?url= replays payloads/{host}/{path}; duplicate host/path bodies must
+ * agree. Unencoded fixture responses expand the tokens in template(). The caller
+ * owns the returned HTTP server and must close it after its requests settle.
+ */
 export async function startFixtureServer({
   port = 0,
   scenariosDir = path.join(root, "testdata/scenarios"),

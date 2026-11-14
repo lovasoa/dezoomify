@@ -553,9 +553,11 @@ test("desktop handoff shows and copies the discovered URL, handles failure and u
     offerDesktopApp: true,
     sourceUrl: "https://museum.test/page",
     desktopSourceUrl: source,
+    platformHints: { platform: "Linux x86_64" },
   });
   click(el.querySelector("#dz-btn-download-desktop"));
   let dialog = document.querySelector('[role="dialog"]');
+  assert.ok(dialog.querySelector(".dz-desktop-downloads a").href.endsWith(".AppImage"));
   assert.ok(
     dialog.querySelector(
       'a[href="https://github.com/lovasoa/dezoomify/releases/latest/download/dezoomify-desktop.exe"]',

@@ -69,7 +69,7 @@ impl Resource {
 struct Search {
     resources: BTreeMap<Request, Resource>,
     ready: Vec<Branch>,
-    winner: Option<(Priority, DiscoveryCatalog)>,
+    catalogs: Vec<(Priority, DiscoveryCatalog)>,
     observations: BTreeMap<usize, (Priority, DiscoveryCatalog)>,
     /// A rescan can return the same job-owned loader more than once.
     observed: BTreeSet<String>,
@@ -290,11 +290,7 @@ impl Search {
                     self.observations.insert(priority.2, (priority, catalog));
                 }
             }
-            Ok(catalog) => {
-                if self.winner.as_ref().is_none_or(|(old, _)| priority < *old) {
-                    self.winner = Some((priority, catalog));
-                }
-            }
+            Ok(catalog) => self.catalogs.push((priority, catalog)),
             Err(error) => self.rejected(branch.spec, error)?,
         }
         Ok(())
@@ -401,33 +397,53 @@ impl Search {
         }
     }
 
-    fn best(&self) -> Option<Priority> {
-        self.winner
+    fn specificity(&self) -> Option<Specificity> {
+        self.catalogs
             .iter()
-            .map(|(rank, _)| *rank)
-            .chain(self.observations.values().map(|(rank, _)| *rank))
+            .chain(self.observations.values())
+            .map(|(rank, _)| rank.0)
             .min()
     }
 
     fn settled(&self) -> bool {
-        self.best().is_some_and(|best| {
+        self.specificity().is_some_and(|specificity| {
             self.resources.values().all(|entry| {
                 matches!(entry.state, State::Complete(_) | State::Exhausted)
-                    || entry.priority().is_none_or(|rank| rank >= best)
+                    || entry.priority().is_none_or(|rank| rank.0 > specificity)
             })
         })
     }
 
-    fn catalog(mut self) -> DiscoveryCatalog {
-        let best = self.best().expect("settled result");
-        if self.winner.as_ref().is_some_and(|(rank, _)| *rank == best) {
-            return self.winner.take().expect("winning catalog").1;
+    fn catalog(self) -> DiscoveryCatalog {
+        let specificity = self.specificity().expect("settled result");
+        let mut catalogs: Vec<_> = self
+            .catalogs
+            .into_iter()
+            .filter(|(rank, _)| rank.0 == specificity)
+            .collect();
+        if catalogs.is_empty() {
+            return DiscoveryCatalog::new(
+                self.observations
+                    .into_values()
+                    .filter(|(rank, _)| rank.0 == specificity)
+                    .flat_map(|(_, catalog)| catalog.into_entries()),
+            );
         }
-        DiscoveryCatalog::new(
-            self.observations
-                .into_values()
-                .flat_map(|(_, catalog)| catalog.into_entries()),
-        )
+        catalogs.sort_by_key(|(rank, _)| *rank);
+        let mut seen = Vec::new();
+        let mut entries = Vec::new();
+        for (_, catalog) in catalogs {
+            let previous = seen.len();
+            let public = catalog.public_catalog();
+            for (entry, choice) in catalog.into_entries().into_iter().zip(public.entries) {
+                // Preserve repeated canvases within a declared catalog.
+                if !seen[..previous].contains(&choice) {
+                    seen.push(choice);
+                    entries.push(entry);
+                }
+            }
+        }
+        DiscoveryCatalog::new(entries)
     }
 
     /// Admit only peers of the strongest pending remote work. Local reads are
@@ -624,7 +640,9 @@ where
 
 /// Discover through matcher evidence and a shared table of bounded resource reads.
 /// Supplied contents and accessible Host observations run before remote fallback.
-/// Source catalogs precede viewer snapshots; snapshots keep loader-only siblings.
+/// Collect equally strong source catalogs in discovery priority order, coalescing
+/// overlapping choices across catalogs. Weaker matches and viewer snapshots remain
+/// fallbacks when declared sources are available.
 /// Hosts bound response sizes and stop I/O when the owning job is cancelled.
 pub async fn discover<F, Fut, P, PFut, O, OFut>(
     inputs: Vec<DiscoveryInput>,

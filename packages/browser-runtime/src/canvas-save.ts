@@ -1,13 +1,8 @@
-// Browser canvas save shared by browser products.
-// The browser canvas path (createImageBitmap -> drawImage -> toBlob) never
-// preserves the source ICC color profile or EXIF metadata (native keeps the
-// first tile's profile); callers warn so archived colors are not trusted
-// blindly. The canvas host is injected so node tests drive the encode path
-// with fakes.
+// Canvas re-encoding strips the source ICC profile and EXIF metadata. Products
+// must surface BROWSER_SAVE_COLOR_WARNING when presenting a browser save.
 
 import { outputError } from "./failure.ts";
 
-/** Warning logged beside every completed browser save (profile stripped). */
 export const BROWSER_SAVE_COLOR_WARNING =
   "Colors may shift slightly: the browser save does not keep the original color profile. For exact colors, use the desktop app.";
 
@@ -34,7 +29,8 @@ export function isCanvasTaintError(error: unknown): boolean {
   return candidate.name === "SecurityError" || candidate.code === 18;
 }
 
-/** Encode the assembled canvas as a PNG Blob (origin-clean only). */
+/** Cancellation waits for toBlob's callback because the browser cannot stop
+ * encoding. Preserve SecurityError so assembly can retain display-only output. */
 export function canvasToPngBlob(canvas: CanvasLike, signal?: AbortSignal): Promise<Blob> {
   signal?.throwIfAborted();
   return new Promise((resolve, reject) => {
@@ -64,10 +60,8 @@ export function canvasToPngBlob(canvas: CanvasLike, signal?: AbortSignal): Promi
   });
 }
 
-/**
- * Save an already-encoded object URL through a blob anchor (the website save
- * needs no `downloads` permission).
- */
+/** The caller retains ownership of blobUrl. Clicking starts a browser download
+ * but supplies no saved-file confirmation; keep it available for later saves. */
 export function saveBlobViaAnchor(doc: DocumentLike, blobUrl: string, filename: string): void {
   const anchor = doc.createElement("a");
   anchor.href = blobUrl;
