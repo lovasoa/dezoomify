@@ -5,7 +5,9 @@
 #![deny(clippy::unwrap_used)]
 
 mod arguments;
+mod bulk_document;
 mod interactive;
+mod interrupt;
 mod report;
 
 use std::collections::BTreeMap;
@@ -42,6 +44,17 @@ impl Throttler {
             }
         }
         self.last = Some(Instant::now());
+    }
+
+    fn wait_interruptible(&mut self, interrupt: &interrupt::Interrupt) -> bool {
+        let remaining = self.last.map_or(Duration::ZERO, |last| {
+            self.min_interval.saturating_sub(last.elapsed())
+        });
+        if interrupt.wait(remaining) {
+            return false;
+        }
+        self.last = Some(Instant::now());
+        true
     }
 }
 
@@ -305,6 +318,21 @@ fn run_bulk(parsed: Args) {
         std::process::exit(1);
     }
     let base = parsed.bulk_output_file();
+    if base
+        .as_deref()
+        .and_then(|path| dezoomify_native::output::infer_from_path(path).ok())
+        .is_some_and(|format| format.supports_pages())
+    {
+        let status = bulk_document::run(
+            &parsed,
+            &entries,
+            base.as_deref().expect("document destination"),
+        );
+        if status != 0 {
+            std::process::exit(status);
+        }
+        return;
+    }
     let mut throttler = Throttler::new(parsed.min_interval);
     let mut items: Vec<report::BulkItem> = Vec::new();
     let mut first = true;
@@ -435,6 +463,27 @@ fn run_native(
     output: &Path,
     interaction: Option<&interactive::Interaction>,
 ) -> Result<(dezoomify_native::Publication, u64), dezoomify::model::Error> {
+    let result = run_native_with_page(parsed, input, output, interaction, None, None)?;
+    let publication = result
+        .publication
+        .ok_or_else(|| dezoomify::model::Error::Internal("output was not published".into()))?;
+    Ok((publication, result.sequence))
+}
+
+struct NativeRun {
+    output: dezoomify::model::Output,
+    publication: Option<dezoomify_native::Publication>,
+    sequence: u64,
+}
+
+fn run_native_with_page(
+    parsed: &Args,
+    input: &str,
+    output: &Path,
+    interaction: Option<&interactive::Interaction>,
+    page: Option<dezoomify_native::DocumentPage>,
+    controls: Option<dezoomify_native::Controls>,
+) -> Result<NativeRun, dezoomify::model::Error> {
     use dezoomify::model::Error;
     let started = Instant::now();
     let mut progress_gate = report::ProgressGate::default();
@@ -448,6 +497,14 @@ fn run_native(
         job_options_for(parsed, input, output),
         report::job_diagnostics(&parsed.logging, &display),
     )?;
+    let host = match controls {
+        Some(controls) => host.with_controls(controls),
+        None => host,
+    };
+    let host = match page {
+        Some(page) => host.with_document_page(page)?,
+        None => host,
+    };
     if let Some(interaction) = interaction {
         interaction.register(&host, &display);
     }
@@ -476,7 +533,8 @@ fn run_native(
             }
         }
     });
-    host.transport
+    let output = host
+        .transport
         .block_on(dezoomify::dezoomify(
             host.inputs(),
             host.algorithm_options(),
@@ -492,10 +550,11 @@ fn run_native(
                 serde_json::json!({ "error": error }),
             );
         })?;
-    let publication = host
-        .publication()
-        .ok_or_else(|| Error::Internal("output was not published".to_string().into()))?;
-    Ok((publication, sequence.get() + 1))
+    Ok(NativeRun {
+        output,
+        publication: host.publication(),
+        sequence: sequence.get() + 1,
+    })
 }
 
 fn parse_text_list(content: &str) -> Vec<(String, Option<String>)> {

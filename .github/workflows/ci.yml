@@ -95,3 +95,9 @@ jobs:
             cargo xtask ci "$lane"
             echo "::endgroup::"
           done
+      - name: Install PDF renderer
+        if: matrix.lane-group == 'rust'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends poppler-utils
+      - name: Render PDF output
+        if: matrix.lane-group == 'rust'
+        run: cargo xtask test pdf

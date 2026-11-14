@@ -287,6 +287,60 @@ test("cancelling before the first batch event preserves results and ignores reti
   assert.equal(root.querySelector(".dz-batch-results"), null);
 });
 
+test("document pages become saved together and expose one shared file", async () => {
+  const { root, start, native, historyStore } = mountDesktop();
+  const invocation = await start();
+  const prepared = { ...output, format: "pdf", disposition: "native-prepared" };
+  const items = [
+    { id: 0, title: "First", state: { kind: "prepared", output: prepared } },
+    { id: 1, title: "Second", state: { kind: "running" } },
+  ];
+  act(() => invocation.callbacks.batch({ items, cancelled: false }));
+  assert.match(root.querySelector(".dz-batch-totals").textContent, /1 of 2 pages ready/);
+  assert.equal(root.querySelector(".dz-batch-actions"), null);
+  const saved = { id: "saved:pdf", filename: "dezoomify.pdf" };
+  await act(() =>
+    invocation.resolveBatch({
+      cancelled: true,
+      saved_output: saved,
+      items: [
+        {
+          ...items[0],
+          state: {
+            kind: "saved",
+            result: {
+              output: { ...prepared, disposition: "native-publication" },
+              saved_output: saved,
+            },
+          },
+        },
+        { ...items[1], state: { kind: "cancelled" } },
+      ],
+    }),
+  );
+  assert.equal(root.querySelectorAll(".dz-batch-actions").length, 1);
+  assert.equal(root.querySelector(".dz-batch-item .dz-batch-actions"), null);
+  assert.match(root.querySelector(".dz-batch-document").textContent, /dezoomify.pdf/);
+  const recent = JSON.parse(historyStore.get("dezoomify.desktop.history.v2"))[0];
+  assert.equal(recent.status, "cancelled");
+  assert.equal(recent.savedOutput.id, saved.id);
+  const opened = [];
+  native.openBatchOutput = async (...args) => opened.push(args);
+  click(root.querySelector(".dz-batch-document button"));
+  await flush();
+  assert.deepEqual(opened, [[saved, false]]);
+  const forgotten = [];
+  native.forgetSavedOutput = async (reference) => forgotten.push(reference);
+  const historyOpened = [];
+  native.openHistoryOutput = async (reference) => historyOpened.push(reference);
+  click(root.querySelector(".dz-batch-results .dz-actions-row button"));
+  await flush();
+  assert.deepEqual(forgotten, [], "the shared file remains available in history after reset");
+  click(root.querySelector(".dz-history-output"));
+  await flush();
+  assert.deepEqual(historyOpened, [saved]);
+});
+
 test("a failed image answer closes the picker and exposes recovery", async () => {
   const { root, start } = mountDesktop();
   const invocation = await start();

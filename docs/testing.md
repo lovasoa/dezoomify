@@ -16,6 +16,9 @@ assert source-file contents or invent architectural tests.
 - `cargo xtask ci local`: static checks, tests, WASM portability, and dependency audit.
 - `cargo xtask test desktop --e2e-window`: real desktop window; needs a display
   (headless Linux: `xvfb-run -a`) and stays outside `test all` and `ci local`.
+- `cargo xtask test pdf`: independent PDF rendering with installed Poppler
+  (`pdftoppm`). The Rust CI job runs this separately, keeping a renderer outside
+  ordinary Rust builds and test dependencies.
 
 Choose validation by the risk and reach of the change. Live source-site checks
 are opt-in and advisory, never sole coverage. Setup and prerequisites:

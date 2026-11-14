@@ -135,7 +135,8 @@ async function resetToIdle(driver) {
       byId("dz-btn-another") ??
       byId("dz-btn-reset") ??
       byId("dz-btn-start-over") ??
-      byId("dz-btn-try-again");
+      byId("dz-btn-try-again") ??
+      document.querySelector(".dz-batch-head .dz-actions-row button");
     button?.click();
   });
   await waitFor(driver, async () => (await snapshot(driver)).idle, 60000, "idle after reset");
@@ -330,6 +331,44 @@ describe("Dezoomify desktop window", () => {
       "deleted file history",
     );
     assert.equal(await title.isEnabled(), false);
+  });
+
+  it("Download all saves one PDF with a shared document action", async () => {
+    clearOutput();
+    await chooseQuickOption(driver, "Format", "PDF");
+    try {
+      await submitUrl(driver, `${fixture.base}/fixtures/deepzoom/catalog/viewer.html`);
+      await driver.wait(
+        async () => (await driver.findElements(By.css("#dz-btn-download-all"))).length > 0,
+        60000,
+      );
+      await (await driver.findElement(By.css("#dz-btn-download-all"))).click();
+      await waitFor(
+        driver,
+        () =>
+          driver.executeScript(
+            () => !!document.querySelector('.dz-batch-results[data-running="false"]'),
+          ),
+        60000,
+        "PDF document publication",
+      );
+      const results = await driver.executeScript(() => ({
+        saved: document.querySelectorAll('.dz-batch-item[data-state="saved"]').length,
+        actions: document.querySelectorAll(".dz-batch-actions").length,
+        filename: document.querySelector(".dz-batch-document .dz-batch-filename")?.textContent,
+      }));
+      assert.equal(results.saved, 2);
+      assert.equal(results.actions, 1);
+      const outputs = outputFiles(runOutputDir(), ".pdf");
+      assert.equal(outputs.length, 1);
+      assert.equal(path.basename(outputs[0]), results.filename);
+      assert.equal(path.extname(outputs[0]), ".pdf");
+      assert.equal(readFileSync(outputs[0]).subarray(0, 5).toString(), "%PDF-");
+    } finally {
+      await resetToIdle(driver);
+      await chooseQuickOption(driver, "Format", "PNG");
+      for (const file of outputFiles(runOutputDir(), ".pdf")) rmSync(file, { force: true });
+    }
   });
 
   for (const fixtureInput of formats) {

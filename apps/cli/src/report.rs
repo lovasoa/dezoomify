@@ -166,6 +166,7 @@ pub struct BulkItem {
     pub status: String,
     pub detail: String,
     pub error: Option<serde_json::Value>,
+    pub page: Option<usize>,
 }
 
 impl BulkItem {
@@ -178,6 +179,7 @@ impl BulkItem {
             status: "ok".to_string(),
             detail: String::new(),
             error: None,
+            page: None,
         }
     }
 
@@ -190,6 +192,7 @@ impl BulkItem {
             status: "failed".to_string(),
             detail: format!("{}: {}", error.cause().kind(), error),
             error: Some(serde_json::to_value(error).unwrap_or(serde_json::Value::Null)),
+            page: None,
         }
     }
 }
@@ -222,6 +225,9 @@ pub fn machine_bulk_item(item: &BulkItem) -> String {
     });
     if let Some(error) = &item.error {
         event["error"] = error.clone();
+    }
+    if let Some(page) = item.page {
+        event["page"] = page.into();
     }
     event.to_string()
 }

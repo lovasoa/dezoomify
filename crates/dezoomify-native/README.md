@@ -35,16 +35,26 @@ its commit decision even after cancellation.
 Tiled outputs preserve compatible compressed source bytes. Convert locally only
 when required by the chosen output; preserve failures in acquisition's retry
 handling. Encoder compatibility rules live in
-[tile_output.rs](src/tile_output.rs) and [zif_output.rs](src/zif_output.rs).
+[IIIF](src/iiif_output.rs), [ZIF](src/zif_output.rs), and
+[PDF](src/pdf_images.rs); inspection, probe spooling, geometry, and pyramids
+are shared independently of the container.
+
+PDF writes tile objects directly to staging and keeps its cross-reference index
+on disk. Compatible JPEG and PNG payloads need no pixel decoding; other inputs
+use bounded, lossless tile conversion with transparency. Its dependency only
+serializes individual objects. Ordinary tests use a minimal parser without image
+codecs; independent rendering uses installed Poppler through `cargo xtask test pdf`.
 
 ## Publication and cleanup
 
 All output routes share [staging and publication](src/output.rs). Reserve unique
 staging paths; check cancellation and destination conflicts before committing.
-An uncommitted cancellation publishes nothing and preserves existing files;
-committed output survives retirement. Cleanup waits for owned decoders and
-encoders before removing staging. Every required tile must succeed before
-finalization; incomplete downloads are not published.
+Single-image cancellation publishes nothing. A multi-image document owner closes
+and publishes completed pages after all page Hosts settle, including after an
+error or cancellation; the unfinished page is rolled back. Page preparation is
+distinct from file publication. Committed output survives retirement, and existing
+destinations remain protected. Every required tile must succeed before its image
+can be finalized.
 
 Tests: `cargo xtask test native` and `cargo xtask test scenario`.
 User-facing formats and limits: [command-line guide](../../docs/user/command-line.md).

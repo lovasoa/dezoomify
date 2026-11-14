@@ -55,10 +55,10 @@ export const fr = {
   "desktop.done.open": "Ouvrir l’image",
   "desktop.done.reveal": "Afficher dans le dossier",
   "desktop.done.openError":
-    "Impossible d’ouvrir l’image. Vérifiez qu’une visionneuse par défaut est installée.",
+    "Impossible d’ouvrir le fichier enregistré. Vérifiez qu’une application par défaut est installée.",
   "desktop.done.folderError":
     "Impossible d’ouvrir le dossier. Vérifiez qu’un gestionnaire de fichiers est installé.",
-  "desktop.done.missingError": "L’image ou le dossier n’existe plus.",
+  "desktop.done.missingError": "Le fichier ou le dossier n’existe plus.",
   "desktop.batch.title": "Résultats des téléchargements",
   "desktop.batch.runningTitle": "Téléchargement des images",
   "desktop.batch.cancelledTitle": "Téléchargements arrêtés",
@@ -66,6 +66,9 @@ export const fr = {
   "desktop.batch.remainingSummary": "{remaining} restantes",
   "desktop.batch.statusSummary": "{failed} en échec · {cancelled} annulées · {remaining} restantes",
   "desktop.batch.pending": "En attente",
+  "desktop.batch.prepared": "Prête à enregistrer",
+  "desktop.batch.preparedSummary": "{prepared} pages prêtes sur {total}",
+  "desktop.batch.openDocument": "Ouvrir le document",
   "desktop.batch.running": "Téléchargement en cours",
   "desktop.batch.saved": "Enregistrée",
   "desktop.batch.failed": "Échec",
@@ -357,6 +360,9 @@ export const fr = {
   "desktop.quick.hint.archival": "archivage",
   "desktop.quick.hint.zoomable": "zoomable",
   "desktop.quick.hint.tiled": "tuilé",
+  "desktop.quick.hint.document": "document",
+  "desktop.quick.format.pdf":
+    "Conserve les tuiles sources compatibles. Tout télécharger enregistre les images comme pages d’un seul PDF.",
   "desktop.quick.format.auto":
     "JPEG pour les images opaques jusqu’à {maxSide} pixels par côté ; PNG pour la transparence ou les images plus grandes. La compression s’applique aussi au mode automatique.",
   "desktop.quick.format.png":

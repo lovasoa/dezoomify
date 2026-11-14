@@ -396,7 +396,11 @@ export function createDesktopApplication(
     if (currentAttempt.localSavedOutput)
       void forgetSavedOutput(currentAttempt.localSavedOutput).catch(() => {});
     for (const item of currentAttempt.batch?.items ?? []) {
-      if (item.state.kind === "saved" && item.state.result.saved_output)
+      if (
+        item.state.kind === "saved" &&
+        item.state.result.saved_output &&
+        item.state.result.saved_output.id !== currentAttempt.batch?.saved_output?.id
+      )
         void forgetSavedOutput(item.state.result.saved_output).catch(() => {});
     }
     const handle = currentAttempt.activeHandle;
@@ -535,13 +539,21 @@ export function createDesktopApplication(
       return;
     }
     attempt.batch = result.batch;
+    recordBatchResult(attempt, result.batch);
+  }
+
+  function recordBatchResult(attempt: DesktopAttempt, batch: DesktopBatch): void {
+    if (attempt.source?.kind === "file") attempt.localSavedOutput = batch.saved_output ?? null;
+    const saved = batch.items.find((item) => item.state.kind === "saved");
     desktopHistory.update(attempt.historyEntry, {
-      status: result.batch.cancelled
+      status: batch.cancelled
         ? "cancelled"
-        : result.batch.items.some((item) => item.state.kind === "failed")
+        : batch.error || batch.items.some((item) => item.state.kind === "failed")
           ? "failed"
           : "completed",
       title: t("desktop.batch.title"),
+      savedOutput: batch.saved_output,
+      format: saved?.state.kind === "saved" ? saved.state.result.output.format : undefined,
     });
   }
 
@@ -644,6 +656,8 @@ export function createDesktopApplication(
     if (answer.kind === "all") {
       attempt.batch = {
         cancelled: false,
+        saved_output: undefined,
+        error: undefined,
         items: choice.catalog.entries.map((entry, id) => ({
           id,
           title: entry.title,

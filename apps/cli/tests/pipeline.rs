@@ -280,3 +280,139 @@ fn bulk_continues_after_failure_in_human_and_json_modes() {
         }
     }
 }
+
+#[test]
+fn pdf_bulk_saves_one_document_and_reports_partial_completion() {
+    let dir = temp_dir("cli-pdf-bulk");
+    for failed_at in [None, Some(0), Some(1)] {
+        std::fs::write(
+            dir.join("list.txt"),
+            (0..3)
+                .map(|index| {
+                    format!(
+                        "{} image-{index}\n",
+                        source(if failed_at == Some(index) {
+                            "broken.dzi"
+                        } else {
+                            "pyramid.dzi"
+                        })
+                    )
+                })
+                .collect::<String>(),
+        )
+        .unwrap();
+        let output = dir.join("collection.pdf");
+        let _ = std::fs::remove_file(&output);
+        let run = cli(
+            &dir,
+            &[
+                "--bulk",
+                "list.txt",
+                "--outfile",
+                "collection.pdf",
+                "--json",
+            ],
+        );
+        assert_eq!(run.status.success(), failed_at.is_none());
+        let expected = failed_at.unwrap_or(3);
+        assert_eq!(output.exists(), expected > 0);
+        assert!(!dir.join("collection_1.pdf").exists());
+        let events = events(&run);
+        let summary = events.last().unwrap();
+        assert_eq!(summary["succeeded"], expected);
+        assert_eq!(summary["failed"], usize::from(failed_at.is_some()));
+        let pages: Vec<_> = events
+            .iter()
+            .filter(|event| event["kind"] == "bulk-item" && event["status"] == "ok")
+            .map(|event| event["page"].as_u64().unwrap())
+            .collect();
+        assert_eq!(pages, (1..=expected as u64).collect::<Vec<_>>());
+        if expected > 0 {
+            assert_eq!(summary["pages"], expected);
+        }
+        if failed_at.is_some() {
+            assert!(summary["error"].is_object());
+        }
+    }
+    std::fs::write(dir.join("collection.pdf"), b"keep this file").unwrap();
+    let run = cli(&dir, &["--bulk", "list.txt", "--outfile", "collection.pdf"]);
+    assert!(!run.status.success());
+    assert_eq!(
+        std::fs::read(dir.join("collection.pdf")).unwrap(),
+        b"keep this file"
+    );
+}
+
+#[test]
+#[cfg(unix)]
+fn interrupting_a_pdf_bulk_download_closes_completed_pages() {
+    use std::{
+        sync::{mpsc, Mutex},
+        time::Duration,
+    };
+    let dir = temp_dir("cli-pdf-interrupt");
+    let (arrived, observed) = mpsc::channel();
+    let (release, blocked) = mpsc::channel();
+    let blocked = Mutex::new(blocked);
+    let server = dezoomify_fixture_server::NodeServer::raw("127.0.0.1", move |_| {
+        let _ = arrived.send(());
+        let _ = blocked.lock().unwrap().recv();
+        b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            .to_vec()
+            .into()
+    });
+    struct Release(mpsc::Sender<()>);
+    impl Drop for Release {
+        fn drop(&mut self) {
+            let _ = self.0.send(());
+        }
+    }
+    let _release = Release(release);
+    std::fs::write(
+        dir.join("list.txt"),
+        format!("{}\n{}/held.dzi\n", source("pyramid.dzi"), server.origin),
+    )
+    .unwrap();
+    let child = Command::new(env!("CARGO_BIN_EXE_dezoomify-cli"))
+        .args([
+            "--bulk",
+            "list.txt",
+            "--outfile",
+            "collection.pdf",
+            "--json",
+        ])
+        .current_dir(&dir)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let pid = child.id().to_string();
+    let (finished, result) = mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        let _ = finished.send(child.wait_with_output().unwrap());
+    });
+    observed
+        .recv_timeout(Duration::from_secs(10))
+        .expect("second image reached the held response");
+    assert!(Command::new("kill")
+        .args(["-INT", &pid])
+        .status()
+        .unwrap()
+        .success());
+    let run = match result.recv_timeout(Duration::from_secs(10)) {
+        Ok(run) => run,
+        Err(error) => {
+            let _ = Command::new("kill").args(["-KILL", &pid]).status();
+            worker.join().unwrap();
+            panic!("interrupt did not settle the download: {error}");
+        }
+    };
+    worker.join().unwrap();
+    assert!(!run.status.success());
+    assert!(dir.join("collection.pdf").is_file());
+    let events = events(&run);
+    let summary = events.last().unwrap();
+    assert_eq!(summary["pages"], 1);
+    let error: dezoomify::model::Error = serde_json::from_value(summary["error"].clone()).unwrap();
+    assert!(matches!(error.cause(), dezoomify::model::Error::Cancelled));
+}

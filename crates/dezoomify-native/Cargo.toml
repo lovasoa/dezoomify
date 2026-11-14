@@ -27,6 +27,7 @@ fdeflate = "0.3"
 zif-tiff = "0.3.0"
 png = "0.18.1"
 flate2 = "1"
+pdf-writer = { version = "0.15", default-features = false }
 
 [target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
 rustix = { version = "1", features = ["fs"] }
@@ -34,6 +35,7 @@ rustix = { version = "1", features = ["fs"] }
 [dev-dependencies]
 tokio.workspace = true
 dezoomify-fixture-server = { path = "../fixture-server" }
+hayro-syntax = { version = "0.9", default-features = false, features = ["std"] }
 
 [lints]
 workspace = true

@@ -26,7 +26,8 @@
     "tiff",
     "webp",
     "avif",
-    "zif"
+    "zif",
+    "pdf"
   ],
   "outputFormats": [
     "png",
@@ -35,7 +36,8 @@
     "webp",
     "avif",
     "zif",
-    "iiif-dir"
+    "iiif-dir",
+    "pdf"
   ],
   "eventChannels": [
     "dezoomify://batch",

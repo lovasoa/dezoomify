@@ -30,7 +30,7 @@ impl EncoderTask {
         }
         crate::imaging::check_dimensions(format, &size)?;
         if format.codec().layout == OutputLayout::Buffered {
-            crate::tile_output::memory_check(
+            crate::tile_budget::memory_check(
                 crate::imaging::buffered_workspace(format, &size),
                 memory_hint,
             )?;

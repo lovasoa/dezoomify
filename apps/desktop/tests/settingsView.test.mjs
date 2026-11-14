@@ -381,7 +381,7 @@ test("label information opens the existing modal with every format explanation",
   assert.equal(dialog.querySelector("h2").textContent, "Format");
   assert.deepEqual(
     [...dialog.querySelectorAll("dt")].map((item) => item.textContent),
-    ["Auto", "PNG", "JPEG", "TIFF", "WebP", "AVIF", "ZIF", "IIIF folder"],
+    ["Auto", "PNG", "JPEG", "TIFF", "WebP", "AVIF", "ZIF", "IIIF folder", "PDF"],
   );
   assert.match(dialog.textContent, /65,535/);
   assert.match(dialog.textContent, /16,383/);

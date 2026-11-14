@@ -191,6 +191,7 @@ pub enum OutputLayout {
     Buffered,
     Pyramid,
     Directory,
+    Document,
 }
 
 /// The meaning of the existing compression setting for a codec.
@@ -356,6 +357,14 @@ macro_rules! output_codecs {
             pub fn is_directory(self) -> bool {
                 matches!(self.codec().layout, OutputLayout::Directory)
             }
+            /// Encoded tiles can join this output without a full raster canvas.
+            pub fn uses_encoded_tiles(self) -> bool {
+                matches!(self.codec().layout, OutputLayout::Pyramid | OutputLayout::Directory | OutputLayout::Document)
+            }
+            /// Several independently acquired images can share one output file.
+            pub fn supports_pages(self) -> bool {
+                matches!(self.codec().layout, OutputLayout::Document)
+            }
             pub fn from_extension(extension: &str) -> Option<Self> {
                 OUTPUT_CODECS.iter().find(|codec| codec.extensions.contains(&extension))
                     .map(|codec| codec.format)
@@ -408,6 +417,7 @@ output_codecs! {
     Avif => ("avif", "AVIF", &["avif"], Some(65_535), OutputControl::Quality { minimum: 1, warning_below: 30 }, Buffered, "advancedCompression", AVIF_SIZES),
     Zif => ("zif", "ZIF", &["zif"], None, OutputControl::Effort, Pyramid, "zoomable", &[(100, 3.0)]),
     IiifDir => ("iiif-dir", "IIIF folder", &["iiif", ""], None, OutputControl::Quality { minimum: 0, warning_below: 25 }, Directory, "tiled", JPEG_SIZES),
+    Pdf => ("pdf", "PDF", &["pdf"], None, OutputControl::Effort, Document, "document", &[(100, 1.6)]),
 }
 
 /// File suffixes accepted by native output, for command help and diagnostics.
@@ -1282,6 +1292,8 @@ impl Default for Progress {
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub enum OutputDisposition {
     NativePublication,
+    /// The image is complete inside an unpublished native document.
+    NativePrepared,
     BrowserSaveInitiated,
     BrowserSaveReady,
     DisplayOnly,
@@ -1346,6 +1358,7 @@ pub enum DesktopImageChoice {
 pub enum DesktopBatchItemState {
     Pending,
     Running,
+    Prepared { output: Output },
     Saved { result: DesktopOutput },
     Failed { error: Error },
     Cancelled,
@@ -1367,6 +1380,12 @@ pub struct DesktopBatchItem {
 pub struct DesktopBatch {
     pub items: Vec<DesktopBatchItem>,
     pub cancelled: bool,
+    /// One shared document, registered only after its completed pages are published.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub saved_output: Option<SavedOutput>,
+    /// A document may preserve complete pages while reporting why the batch stopped.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<Error>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

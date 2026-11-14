@@ -65,7 +65,7 @@ pub struct Args {
     /// Resume folder wired to native `cache_dir`.
     pub tile_cache: Option<PathBuf>,
     /// Bulk source: local text-list file or URL (including IIIF collection
-    /// manifests, best-effort). When present, one output per entry.
+    /// manifests, best-effort). Document formats combine entries as pages.
     pub bulk: Option<String>,
 }
 
@@ -551,7 +551,7 @@ fn help() -> String {
         "  --logging <level>           log verbosity: error, warn, info, debug, trace (default info)",
         "  -c, --tile-cache <dir>      resume folder reusing downloaded tiles",
         "  --bulk <file-or-url>        text list file (URL plus optional title per line, # comments)",
-        "                              or IIIF collection manifest URL; saves one output per entry",
+        "                              or IIIF collection manifest URL; PDF combines entries as pages",
         &output_help,
         "                              or extensionless iiif-dir), or bulk base name (bulk_1.ext, …)",
         "  -?, --help                  show this help",

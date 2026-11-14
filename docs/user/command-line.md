@@ -46,7 +46,7 @@ ignores caps. Error records include a stable `kind`; use it for scripts and
 bug reports rather than matching the human sentence.
 
 Output names choose the format: `.png`, `.jpg`/`.jpeg`, `.tif`/`.tiff`, `.zif`,
-`.webp`, `.avif`, or `.iiif`. An extensionless destination also creates an IIIF tile
+`.webp`, `.avif`, `.pdf`, or `.iiif`. An extensionless destination also creates an IIIF tile
 folder. Other extensions are rejected. See
 [choosing a format](../../apps/desktop/desktop-app.md#choosing-the-file-format).
 
@@ -83,6 +83,12 @@ failed. Bulk mode selects the largest level unless you supply level caps or a
 selector. `--min-interval` paces entries. A single IIIF collection address can
 also supply the list; each referenced manifest saves its first image.
 
+With `--outfile collection.pdf`, entries become pages in one PDF in list order.
+An unrecoverable error or Ctrl+C stops the batch and saves complete pages, omitting
+the unfinished image. The command reports the cause and exits nonzero. If no page
+completed, no file is created. JSON success records include the shared path and
+page number only after the PDF has been saved.
+
 ## Limits
 
 Very large images are limited by available memory. Explicit raster formats can
@@ -99,7 +105,7 @@ cause. Increase `--retries` for transient failures or repeat the job to reuse
 good cached tiles; see [resuming](../../apps/desktop/desktop-app.md#resuming-an-interrupted-save).
 
 IIIF directories must have unused destinations, even with `--overwrite`.
-Compatible IIIF/ZIF tiles retain their original encoding; compression settings
+Compatible IIIF/ZIF/PDF tiles retain their original encoding; compression settings
 affect converted tiles and new levels. ZIF omits alpha. Open an IIIF export's
 `viewer.html` in your browser to view and zoom offline; keep the entire folder
 together, including `full/` overview images. For another IIIF web viewer,
