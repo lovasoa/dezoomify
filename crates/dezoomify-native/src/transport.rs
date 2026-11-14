@@ -105,11 +105,11 @@ const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(15);
 /// Worker threads multiplexing sockets for one invocation.
 const RUNTIME_WORKERS: usize = 2;
 
-/// One reusable HTTP scope: Tokio runtime plus a single connection-pooling
-/// client. Create one per job attempt and share it for every fetch.
+/// One reusable HTTP scope with a fresh connection-pooling client per job.
+/// Its Tokio runtime can be shared across jobs without sharing HTTP policy.
 pub struct NativeTransport {
     pub(crate) diagnostics: Option<crate::diagnostics::Diagnostics>,
-    runtime: tokio::runtime::Runtime,
+    runtime: std::sync::Arc<tokio::runtime::Runtime>,
     client: reqwest::Client,
 }
 
@@ -118,6 +118,12 @@ impl NativeTransport {
     /// the TLS hatch come from `limits`; per-fetch byte/deadline bounds stay
     /// per call so one transport serves a whole job.
     pub fn new(limits: &FetchLimits) -> Result<Self, Error> {
+        Self::with_runtime(limits, Self::create_runtime()?)
+    }
+
+    /// Create the native worker runtime for a job or batch. Retain an owner on a
+    /// synchronous thread until all hosts have settled, then drop it there.
+    pub fn create_runtime() -> Result<std::sync::Arc<tokio::runtime::Runtime>, Error> {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .worker_threads(RUNTIME_WORKERS)
@@ -132,6 +138,15 @@ impl NativeTransport {
                     .into(),
                 )
             })?;
+        Ok(std::sync::Arc::new(runtime))
+    }
+
+    /// Build a fresh HTTP client on a caller-owned runtime. Keep an owning runtime
+    /// reference outside async work so its final drop occurs on a synchronous thread.
+    pub fn with_runtime(
+        limits: &FetchLimits,
+        runtime: std::sync::Arc<tokio::runtime::Runtime>,
+    ) -> Result<Self, Error> {
         let mut builder = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
             .retry(reqwest::retry::never())

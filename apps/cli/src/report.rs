@@ -166,6 +166,7 @@ pub struct BulkItem {
     pub status: String,
     pub detail: String,
     pub error: Option<serde_json::Value>,
+    pub page: Option<usize>,
 }
 
 impl BulkItem {
@@ -178,6 +179,7 @@ impl BulkItem {
             status: "ok".to_string(),
             detail: String::new(),
             error: None,
+            page: None,
         }
     }
 
@@ -190,6 +192,7 @@ impl BulkItem {
             status: "failed".to_string(),
             detail: format!("{}: {}", error.cause().kind(), error),
             error: Some(serde_json::to_value(error).unwrap_or(serde_json::Value::Null)),
+            page: None,
         }
     }
 }
@@ -200,14 +203,41 @@ pub fn human_bulk_summary(total: usize, succeeded: usize, failed: usize) -> Stri
 }
 
 #[must_use]
-pub fn machine_bulk_summary(total: usize, succeeded: usize, failed: usize) -> String {
+pub fn machine_bulk_summary(total: usize, succeeded: usize, failed: usize) -> serde_json::Value {
     serde_json::json!({
         "kind": "bulk-completed",
         "total": total,
         "succeeded": succeeded,
         "failed": failed,
     })
-    .to_string()
+}
+
+/// Summarize settled items; document publication must have finished first.
+pub(crate) fn print_bulk_summary(
+    parsed: &crate::arguments::Args,
+    total: usize,
+    items: &[BulkItem],
+    failure: Option<&dezoomify::model::Error>,
+    publication: Option<&dezoomify_native::DocumentPublication>,
+) -> Result<(), dezoomify::model::Error> {
+    let succeeded = items.iter().filter(|item| item.status == "ok").count();
+    let failed = items.len().saturating_sub(succeeded);
+    if parsed.json {
+        let mut summary = machine_bulk_summary(total, succeeded, failed);
+        summary["skipped"] = total.saturating_sub(items.len()).into();
+        if let Some(publication) = publication {
+            summary["output"] = publication.path.to_string_lossy().as_ref().into();
+            summary["pages"] = publication.pages.into();
+        }
+        if let Some(error) = failure {
+            summary["error"] = serde_json::to_value(error)
+                .map_err(|error| dezoomify::model::Error::Internal(error.to_string().into()))?;
+        }
+        println!("{summary}");
+    } else if show_success(&parsed.logging) {
+        eprintln!("{}", human_bulk_summary(total, succeeded, failed));
+    }
+    Ok(())
 }
 
 #[must_use]
@@ -223,7 +253,25 @@ pub fn machine_bulk_item(item: &BulkItem) -> String {
     if let Some(error) = &item.error {
         event["error"] = error.clone();
     }
+    if let Some(page) = item.page {
+        event["page"] = page.into();
+    }
     event.to_string()
+}
+
+/// Print only settled files or pages whose document has been published.
+pub(crate) fn print_bulk_item(parsed: &crate::arguments::Args, item: &BulkItem) {
+    if parsed.json {
+        println!("{}", machine_bulk_item(item));
+    } else if item.status == "failed" {
+        eprintln!("failed {} -> {}: {}", item.url, item.output, item.detail);
+    } else if show_success(&parsed.logging) {
+        if let Some(page) = item.page {
+            eprintln!("saved page {page} to {} from {}", item.output, item.url);
+        } else {
+            eprintln!("saved {} from {}", item.output, item.url);
+        }
+    }
 }
 
 /// Log verbosity rank for `--logging`: error=0, warn=1, info=2, debug=3,
@@ -368,8 +416,7 @@ mod tests {
             human_bulk_summary(3, 2, 1),
             "bulk: 2 succeeded, 1 failed, 3 total"
         );
-        let machine: serde_json::Value =
-            serde_json::from_str(&machine_bulk_summary(3, 2, 1)).expect("json");
+        let machine = machine_bulk_summary(3, 2, 1);
         assert_eq!(machine["kind"], "bulk-completed");
         assert_eq!(machine["total"], 3);
         assert_eq!(machine["succeeded"], 2);

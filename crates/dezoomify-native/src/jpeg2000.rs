@@ -322,12 +322,49 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn encodes_before_acquisition_finishes_and_cleans_up_on_failure() {
-        for compression in [0, 1, 100] {
+    async fn encodes_before_acquisition_finishes_and_cleans_up_on_cancellation() {
+        let work = tempfile::tempdir().unwrap();
+        let path = work.path().join("out.jp2");
+        std::fs::write(&path, b"existing destination").unwrap();
+        let controls = Controls::default();
+        let task = EncoderTask::start(
+            &path,
+            Size {
+                width: 34,
+                height: 11,
+            },
+            Some(&grid()),
+            OutputFormat::Jpeg2000,
+            0,
+            8 << 20,
+            controls.clone(),
+        )
+        .unwrap();
+        put(
+            &task.pipe,
+            0,
+            0,
+            0,
+            image::RgbaImage::from_pixel(17, 11, image::Rgba([40, 80, 120, 255])),
+        );
+        tokio::time::timeout(std::time::Duration::from_secs(3), async {
+            while task.pipe.consumed() == 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("first tile must encode before remaining downloads");
+        controls.cancel();
+        assert!(matches!(task.wait().await, Err(Error::Cancelled)));
+        assert_eq!(std::fs::read(path).unwrap(), b"existing destination");
+        assert_eq!(std::fs::read_dir(work.path()).unwrap().count(), 1);
+    }
+
+    #[tokio::test]
+    async fn lossy_compression_encodes_within_tolerance() {
+        for compression in [1, 100] {
             let work = tempfile::tempdir().unwrap();
             let path = work.path().join("out.jp2");
-            std::fs::write(&path, b"existing destination").unwrap();
-            let controls = Controls::default();
             let task = EncoderTask::start(
                 &path,
                 Size {
@@ -338,7 +375,7 @@ mod tests {
                 OutputFormat::Jpeg2000,
                 compression,
                 8 << 20,
-                controls.clone(),
+                Controls::default(),
             )
             .unwrap();
             put(
@@ -348,36 +385,22 @@ mod tests {
                 0,
                 image::RgbaImage::from_pixel(17, 11, image::Rgba([40, 80, 120, 255])),
             );
-            tokio::time::timeout(std::time::Duration::from_secs(3), async {
-                while task.pipe.consumed() == 0 {
-                    tokio::task::yield_now().await;
-                }
-            })
-            .await
-            .expect("first tile must encode before remaining downloads");
-            if compression == 0 {
-                controls.cancel();
-                assert!(matches!(task.wait().await, Err(Error::Cancelled)));
-            } else {
-                put(
-                    &task.pipe,
-                    1,
-                    16,
-                    0,
-                    image::RgbaImage::from_pixel(18, 11, image::Rgba([40, 80, 120, 255])),
-                );
-                task.pipe.finish(&[]).unwrap();
-                let staged = task.wait().await.unwrap();
-                let decoded = load_image_with_metadata(&std::fs::read(staged.path()).unwrap())
-                    .unwrap()
-                    .image;
-                assert_eq!(decoded.dimensions(), (34, 11));
-                assert!(decoded.pixels().all(|p| p[0].abs_diff(40) < 5
-                    && p[1].abs_diff(80) < 5
-                    && p[2].abs_diff(120) < 5));
-            }
-            assert_eq!(std::fs::read(path).unwrap(), b"existing destination");
-            assert_eq!(std::fs::read_dir(work.path()).unwrap().count(), 1);
+            put(
+                &task.pipe,
+                1,
+                16,
+                0,
+                image::RgbaImage::from_pixel(18, 11, image::Rgba([40, 80, 120, 255])),
+            );
+            task.pipe.finish(&[]).unwrap();
+            let staged = task.wait().await.unwrap();
+            let decoded = load_image_with_metadata(&std::fs::read(staged.path()).unwrap())
+                .unwrap()
+                .image;
+            assert_eq!(decoded.dimensions(), (34, 11));
+            assert!(decoded
+                .pixels()
+                .all(|p| p[0].abs_diff(40) < 5 && p[1].abs_diff(80) < 5 && p[2].abs_diff(120) < 5));
         }
     }
 

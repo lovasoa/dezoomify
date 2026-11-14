@@ -1,14 +1,61 @@
-//! Output writer: atomic file replacement, format/extension validation,
-//! overwrite refusal unless explicitly requested.
-//! Single-file formats (PNG, JPEG, TIFF, WebP) encode to one file; `zif`
-//! encodes one multi-directory TIFF pyramid file; `iiif-dir`
-//! writes a static tiled directory with `info.json`, tiles, and an offline viewer.
+//! Staging, destination naming and validation, and atomic publication. Concrete
+//! writers own encoding; unpublished output owns its cleanup.
 
 use std::io::{Read, Seek, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use dezoomify::model::{Error, Failure, OutputFormat, Size};
+pub(crate) fn safe_output_stem(title: Option<&str>) -> String {
+    let mut stem = String::new();
+    let mut previous_separator = false;
+    for character in title.unwrap_or("dezoomify").chars() {
+        if character.is_alphanumeric() {
+            stem.push(character);
+            previous_separator = false;
+        } else if !previous_separator {
+            stem.push('-');
+            previous_separator = true;
+        }
+        if stem.len() >= 120 {
+            break;
+        }
+    }
+    let stem = stem.trim_matches('-');
+    let lower = stem.to_ascii_lowercase();
+    let reserved_windows_name = matches!(lower.as_str(), "con" | "prn" | "aux" | "nul")
+        || (lower.len() == 4
+            && (lower.starts_with("com") || lower.starts_with("lpt"))
+            && lower
+                .as_bytes()
+                .last()
+                .is_some_and(|byte| matches!(byte, b'1'..=b'9')));
+    if stem.is_empty() || reserved_windows_name {
+        "dezoomify".to_string()
+    } else {
+        stem.to_string()
+    }
+}
+
+pub(crate) fn auto_output_path(
+    output_dir: &Path,
+    title: Option<&str>,
+    format: OutputFormat,
+) -> PathBuf {
+    let stem = safe_output_stem(title);
+    let extension = format.extension();
+    let first = output_dir.join(format!("{stem}.{extension}"));
+    if !first.exists() {
+        return first;
+    }
+    for suffix in 2..=9_999 {
+        let candidate = output_dir.join(format!("{stem}-{suffix}.{extension}"));
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+    first
+}
 
 pub(crate) fn temp_sibling(destination: &Path) -> std::path::PathBuf {
     static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -27,8 +74,44 @@ pub(crate) fn temp_sibling(destination: &Path) -> std::path::PathBuf {
     ))
 }
 
-/// All routes end here, including a future encoded JPEG join. Preparation
-/// owns staging; publication can choose another name without re-encoding.
+/// Resolve a destination without reserving it; publication checks again.
+pub(crate) fn destination_for(
+    target: &crate::OutputTarget,
+    title: Option<&str>,
+    format: OutputFormat,
+) -> std::path::PathBuf {
+    match target {
+        crate::OutputTarget::File(path) => path.clone(),
+        crate::OutputTarget::AutoDir { dir, format } => auto_output_path(dir, title, *format),
+        crate::OutputTarget::AutoImageDir { dir } => auto_output_path(dir, title, format),
+    }
+}
+
+/// Blocking publication shared by images and documents. Automatic collisions
+/// reuse staging; explicit destinations are never renamed.
+pub(crate) fn publish(
+    mut output: StagedOutput,
+    target: &crate::OutputTarget,
+    title: Option<&str>,
+    format: OutputFormat,
+    overwrite: bool,
+    cancelled: &AtomicBool,
+) -> Result<(std::path::PathBuf, u64), Error> {
+    for _ in 0..10_000 {
+        let destination = destination_for(target, title, format);
+        let result = validate_destination(&destination, &format, overwrite)
+            .and_then(|()| output.publish(&destination, overwrite, cancelled));
+        match result {
+            Ok(bytes) => return Ok((destination, bytes)),
+            Err(Error::OutputExists) if !matches!(target, crate::OutputTarget::File(_)) => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Err(Error::OutputExists)
+}
+
+/// Prepared image. Publication can choose another automatic name
+/// without encoding again; a document page awaits its document owner's commit.
 pub(crate) struct PreparedOutput {
     pub(crate) staging: StagedOutput,
     pub(crate) size: Size,
@@ -38,15 +121,16 @@ pub(crate) struct PreparedOutput {
 pub(crate) enum StagedOutput {
     File(StagedFile),
     Directory(StagedDirectory),
+    DocumentPage,
 }
-impl PreparedOutput {
+impl StagedOutput {
     pub(crate) fn publish(
         &mut self,
         destination: &Path,
         overwrite: bool,
         cancelled: &AtomicBool,
     ) -> Result<u64, Error> {
-        match &mut self.staging {
+        match self {
             StagedOutput::File(file) => file.publish(destination, overwrite, cancelled),
             StagedOutput::Directory(directory) => {
                 // Relative service IDs remain valid across automatic renaming.
@@ -54,6 +138,9 @@ impl PreparedOutput {
                 directory.publish(destination, cancelled)?;
                 Ok(bytes)
             }
+            StagedOutput::DocumentPage => Err(Error::InvalidState(
+                "a document page is not independently publishable".into(),
+            )),
         }
     }
 }
@@ -122,6 +209,16 @@ impl StagedFile {
 
     pub(crate) fn check_error(&self) -> Result<(), Error> {
         self.io_error.clone().map_or(Ok(()), Err)
+    }
+
+    /// Roll back an incomplete document page only after its workers have settled.
+    /// A previous disk failure remains terminal and prevents publication.
+    pub(crate) fn truncate(&mut self, length: u64) -> Result<(), Error> {
+        self.check_error()?;
+        let file = self.file.as_mut().expect("unpublished staging file");
+        file.set_len(length)
+            .and_then(|()| file.seek(std::io::SeekFrom::Start(length)).map(|_| ()))
+            .map_err(|e| write_failed("output rollback failed", &e))
     }
 
     pub(crate) fn publish(

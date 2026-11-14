@@ -55,10 +55,10 @@ export const it = {
   "desktop.done.open": "Apri immagine",
   "desktop.done.reveal": "Mostra nella cartella",
   "desktop.done.openError":
-    "Impossibile aprire l’immagine. Verifica che sia installato un visualizzatore predefinito.",
+    "Impossibile aprire il file salvato. Verifica che sia installata un’applicazione predefinita.",
   "desktop.done.folderError":
     "Impossibile aprire la cartella. Verifica che sia installato un gestore di file.",
-  "desktop.done.missingError": "L’immagine o la cartella non esiste più.",
+  "desktop.done.missingError": "Il file o la cartella non esiste più.",
   "desktop.batch.title": "Risultati dei download",
   "desktop.batch.runningTitle": "Download delle immagini",
   "desktop.batch.cancelledTitle": "Download interrotti",
@@ -67,6 +67,9 @@ export const it = {
   "desktop.batch.statusSummary":
     "{failed} non riuscite · {cancelled} annullate · {remaining} rimanenti",
   "desktop.batch.pending": "In attesa",
+  "desktop.batch.prepared": "Pronta da salvare",
+  "desktop.batch.preparedSummary": "{prepared} pagine pronte su {total}",
+  "desktop.batch.openDocument": "Apri documento",
   "desktop.batch.running": "Download in corso",
   "desktop.batch.saved": "Salvata",
   "desktop.batch.failed": "Non riuscita",
@@ -357,6 +360,9 @@ export const it = {
   "desktop.quick.hint.archival": "archivio",
   "desktop.quick.hint.zoomable": "ingrandibile",
   "desktop.quick.hint.tiled": "a tasselli",
+  "desktop.quick.hint.document": "documento",
+  "desktop.quick.format.pdf":
+    "Conserva i tasselli sorgente compatibili. Scarica tutto salva le immagini come pagine di un unico PDF.",
   "desktop.quick.format.auto":
     "JPEG per immagini opache fino a {maxSide} pixel per lato; PNG per trasparenza o immagini più grandi. La compressione vale anche per Automatico.",
   "desktop.quick.format.png":

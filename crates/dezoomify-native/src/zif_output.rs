@@ -1,9 +1,11 @@
 //! Baseline ZIF: tiled BigTIFF with self-contained JPEG or RGB PNG payloads.
 use crate::{
+    codecs::{tile_metadata, NativeFormat},
+    encoded_tile::EncodedTile,
     output::StagedFile,
-    tile_output::{downsample, memory_check, EncodedTile, Rect, StoredTile, TileBytes, TileLevel},
+    tile_budget::memory_check,
+    tile_pyramid::{downsample, Rect, StoredTile, TileBytes, TileLevel},
 };
-use dezoomify::model::InputFormat;
 use dezoomify::model::{Error, OutputPlan, Point, ReusedTile, Size};
 use std::{
     collections::BTreeMap,
@@ -17,88 +19,23 @@ enum Profile {
     Jpeg { sampling: (u16, u16) },
 }
 
-/// Container eligibility only. Future coefficient joining can inspect the same
-/// encoded input without inheriting these output-specific rules.
+/// Apply ZIF's color and sampling requirements to shared encoded header facts.
 fn profile(bytes: &[u8]) -> Option<Profile> {
-    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
-        return png_profile(bytes);
+    if let Some(header) = crate::encoded_tile::png_header(bytes) {
+        return (header.bits == 8
+            && header.color == 2
+            && !header.transparent
+            && (!header.color_chunks || header.icc))
+            .then_some(Profile::PngRgb);
     }
-    if !bytes.starts_with(&[0xff, 0xd8]) {
-        return None;
-    }
-    let mut at = 2;
-    let mut jfif = false;
-    let mut frame = None;
-    while at + 4 <= bytes.len() {
-        if bytes[at] != 0xff {
-            return None;
-        }
-        while bytes.get(at) == Some(&0xff) {
-            at += 1;
-        }
-        let marker = *bytes.get(at)?;
-        at += 1;
-        if marker == 0xda {
-            break;
-        }
-        let length = usize::from(u16::from_be_bytes([*bytes.get(at)?, *bytes.get(at + 1)?]));
-        if length < 2 {
-            return None;
-        }
-        let data = bytes.get(at + 2..at.checked_add(length)?)?;
-        if marker == 0xe0 && data.starts_with(b"JFIF\0") {
-            jfif = true;
-        }
-        if marker == 0xee && data.starts_with(b"Adobe") && data.get(11) == Some(&0) {
-            return None;
-        }
-        if matches!(marker, 0xc0 | 0xc2) {
-            if data.len() != 15
-                || data[0] != 8
-                || data[5] != 3
-                || data[6] != 1
-                || data[9] != 2
-                || data[12] != 3
-                || data[10] != 0x11
-                || data[13] != 0x11
-            {
-                return None;
-            }
-            let sampling = (u16::from(data[7] >> 4), u16::from(data[7] & 15));
-            frame = ((1..=4).contains(&sampling.0) && (1..=4).contains(&sampling.1))
-                .then_some(Profile::Jpeg { sampling });
-        }
-        at += length;
-    }
-    if jfif {
-        frame
+    let header = crate::encoded_tile::jpeg_header(bytes)?;
+    if header.jfif && header.adobe_transform != Some(0) {
+        header
+            .ycbcr_sampling
+            .map(|sampling| Profile::Jpeg { sampling })
     } else {
         None
     }
-}
-
-fn png_profile(bytes: &[u8]) -> Option<Profile> {
-    let mut at = 8usize;
-    let mut color_chunks = false;
-    let mut icc = false;
-    while let Some(header) = bytes.get(at..at.checked_add(8)?) {
-        if &header[4..] == b"tRNS" {
-            return None;
-        }
-        color_chunks |= matches!(&header[4..], b"gAMA" | b"cHRM" | b"sRGB");
-        icc |= &header[4..] == b"iCCP";
-        if &header[4..] == b"IEND" {
-            break;
-        }
-        let length = u32::from_be_bytes(header[..4].try_into().ok()?) as usize;
-        at = at.checked_add(length)?.checked_add(12)?;
-    }
-    // Normalize descriptions unsupported by the encoder, so generated
-    // levels and neighboring converted tiles use the same color model.
-    if color_chunks && !icc {
-        return None;
-    }
-    (bytes.get(24) == Some(&8) && bytes.get(25) == Some(&2)).then_some(Profile::PngRgb)
 }
 
 pub(crate) fn can_reuse(bytes: &[u8]) -> bool {
@@ -135,14 +72,17 @@ pub(crate) struct ZifWriter {
 }
 
 impl ZifWriter {
+    pub(crate) fn input_budget(&self) -> u64 {
+        self.budget.saturating_sub(self.retained_bytes())
+    }
+
     pub(crate) fn hold_queued_bytes(&mut self, bytes: u64) -> Result<(), Error> {
-        memory_check(self.retained_bytes().saturating_add(bytes), self.budget)?;
-        self.budget -= bytes;
-        Ok(())
+        let retained = self.retained_bytes();
+        crate::tile_budget::reserve_queued(&mut self.budget, retained, bytes)
     }
 
     pub(crate) fn release_probe_bytes(&mut self, bytes: u64) {
-        self.budget = self.budget.saturating_add(bytes);
+        crate::tile_budget::release_reserved(&mut self.budget, bytes);
     }
 
     pub(crate) fn peak_retained(&self) -> u64 {
@@ -364,8 +304,8 @@ impl ZifWriter {
         }
         result?;
         let format = match self.profile.expect("initialized ZIF profile") {
-            Profile::Jpeg { .. } => InputFormat::Jpeg,
-            Profile::PngRgb => InputFormat::Png,
+            Profile::Jpeg { .. } => NativeFormat::Image(image::ImageFormat::Jpeg),
+            Profile::PngRgb => NativeFormat::Image(image::ImageFormat::Png),
         };
         Ok(StoredTile {
             rect,
@@ -436,7 +376,7 @@ impl ZifWriter {
         } else {
             self.require_pixel_encoder()?;
             let budget = self.budget.saturating_sub(self.retained_bytes());
-            let (icc, exif) = crate::tile_output::tile_metadata(
+            let (icc, exif) = tile_metadata(
                 &tile.bytes,
                 tile.format,
                 budget.saturating_sub(tile.bytes.len() as u64),
@@ -481,13 +421,7 @@ impl ZifWriter {
         {
             return self.place_source_level(tile, cancelled);
         }
-        let extent = tile.placement.expected_size.as_ref().unwrap_or(&tile.size);
-        let mut rect = Rect {
-            x: tile.placement.position.x,
-            y: tile.placement.position.y,
-            w: extent.width.min(tile.size.width),
-            h: extent.height.min(tile.size.height),
-        };
+        let mut rect = Rect::placed(&tile.placement, &tile.size, None);
         let mut inferred_size = self.base.size.clone();
         let index_growth = if self.infer_canvas {
             inferred_size.width = inferred_size.width.max(rect.x.saturating_add(rect.w));
@@ -507,8 +441,7 @@ impl ZifWriter {
             memory_check(growth + self.retained_bytes(), self.budget)?;
             growth
         } else {
-            rect.w = rect.w.min(self.base.size.width.saturating_sub(rect.x));
-            rect.h = rect.h.min(self.base.size.height.saturating_sub(rect.y));
+            rect = rect.clipped(&self.base.size);
             0
         };
         if rect.w == 0 || rect.h == 0 {
@@ -527,8 +460,7 @@ impl ZifWriter {
         let metadata_cap = self
             .budget
             .saturating_sub(self.retained_bytes() + index_growth + tile.bytes.len() as u64);
-        let (icc, exif) =
-            crate::tile_output::tile_metadata(&tile.bytes, tile.format, metadata_cap)?;
+        let (icc, exif) = tile_metadata(&tile.bytes, tile.format, metadata_cap)?;
         let mut metadata = Some((tile.placement.position.clone(), icc, exif));
         let metadata_bytes = metadata.as_ref().map_or(0, |(_, icc, exif)| {
             icc.as_ref().map_or(0, Vec::len) as u64 + exif.as_ref().map_or(0, Vec::len) as u64
@@ -694,28 +626,16 @@ impl ZifWriter {
         cancelled: &AtomicBool,
     ) -> Result<crate::output::PreparedOutput, Error> {
         if !self.base.regular {
+            let order = crate::tile_geometry::TileOrder::new(reused);
             let mut tiles = BTreeMap::new();
             for (index, tile) in std::mem::take(&mut self.base.tiles) {
-                let index = reused
-                    .iter()
-                    .find(|reuse| {
-                        reuse.position.x == tile.rect.x && reuse.position.y == tile.rect.y
-                    })
-                    .map_or(index, |reuse| reuse.index);
+                let index = order.index(index, tile.rect.x, tile.rect.y);
                 tiles.insert(index, tile);
             }
             self.base.tiles = tiles;
             self.metadata = std::mem::take(&mut self.metadata)
                 .into_iter()
-                .map(|(index, meta)| {
-                    (
-                        reused
-                            .iter()
-                            .find(|reuse| reuse.position == meta.0)
-                            .map_or(index, |reuse| reuse.index),
-                        meta,
-                    )
-                })
+                .map(|(index, meta)| (order.index(index, meta.0.x, meta.0.y), meta))
                 .collect();
         }
         if self.writer.is_none() {
@@ -904,11 +824,12 @@ mod tests {
         let error = writer
             .place(
                 EncodedTile {
+                    probe_pixels: None,
                     request: None,
                     id: 0,
                     size: size.clone(),
                     bytes,
-                    format: InputFormat::Png,
+                    format: NativeFormat::Image(image::ImageFormat::Png),
                     placement: TilePlacement {
                         position: Point { x: 0, y: 0 },
                         expected_size: None,

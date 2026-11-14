@@ -16,8 +16,9 @@ export function BatchResults({
 }) {
   const titleId = useId();
   const count = (kind: DesktopBatchItem["state"]["kind"]) =>
-    batch.items.filter((item) => item.state.kind === kind).length;
+    batch.items.filter((item) => displayedState(item, batch) === kind).length;
   const saved = count("saved");
+  const prepared = count("prepared");
   const failed = count("failed");
   const cancelled = count("cancelled");
   const remaining = count("pending") + count("running");
@@ -44,7 +45,9 @@ export function BatchResults({
       </header>
       <div className="dz-batch-totals" role="status" aria-live="polite">
         <p className="dz-batch-saved-total">
-          {t("desktop.batch.savedSummary", { saved, total: batch.items.length })}
+          {prepared > 0
+            ? t("desktop.batch.preparedSummary", { prepared, total: batch.items.length })
+            : t("desktop.batch.savedSummary", { saved, total: batch.items.length })}
         </p>
         {running && failed === 0 && cancelled === 0 && (
           <p className="dz-batch-status-total">
@@ -57,6 +60,17 @@ export function BatchResults({
           </p>
         )}
       </div>
+      {batch.saved_output && (
+        <div className="dz-batch-document">
+          <p className="dz-batch-filename">{batch.saved_output.filename}</p>
+          <SavedOutputActions saved={batch.saved_output} onOpen={onOpen} />
+        </div>
+      )}
+      {batch.error && (
+        <p className="dz-batch-error" role="alert">
+          {plainMessageFor(batch.error, "", "desktop")}
+        </p>
+      )}
       {running && (
         <progress
           className="dz-batch-progress"
@@ -68,26 +82,81 @@ export function BatchResults({
       {/* biome-ignore lint/a11y/noNoninteractiveTabindex: keyboard users must be able to scroll waiting items in the native webview. */}
       <ol className="dz-batch-list" tabIndex={0} aria-labelledby={titleId}>
         {batch.items.map((item, index) => (
-          <BatchItem key={item.id} item={item} number={index + 1} onOpen={onOpen} />
+          <BatchItem
+            key={item.id}
+            item={item}
+            number={index + 1}
+            state={displayedState(item, batch)}
+            onOpen={onOpen}
+          />
         ))}
       </ol>
     </section>
   );
 }
 
+function displayedState(
+  item: DesktopBatchItem,
+  batch: DesktopBatch,
+): DesktopBatchItem["state"]["kind"] {
+  if (item.state.kind !== "prepared") return item.state.kind;
+  if (batch.saved_output) return "saved";
+  return batch.error ? "failed" : "prepared";
+}
+
 function BatchItem({
   item,
   number,
+  state,
   onOpen,
 }: {
   item: DesktopBatchItem;
   number: number;
+  state: DesktopBatchItem["state"]["kind"];
+  onOpen(saved: SavedOutput, reveal: boolean): Promise<void>;
+}) {
+  const title = item.title?.trim() || t("view.images.untitled", { number });
+  const saved = item.state.kind === "saved" ? item.state.result.saved_output : undefined;
+  return (
+    <li className="dz-batch-item" data-batch-item={item.id} data-state={state}>
+      <span className="dz-batch-icon" aria-hidden="true">
+        <BatchIcon state={state} />
+      </span>
+      <div className="dz-batch-description">
+        <h3 title={title}>{title}</h3>
+        {saved && (
+          <p className="dz-batch-filename" title={saved.filename}>
+            {saved.filename}
+          </p>
+        )}
+        {item.source_url && (
+          <p className="dz-batch-source" title={item.source_url}>
+            {item.source_url}
+          </p>
+        )}
+      </div>
+      <p className="dz-batch-status">{t(`desktop.batch.${state}`)}</p>
+      {item.state.kind === "failed" && (
+        <p className="dz-batch-error">
+          {plainMessageFor(item.state.error, hostFromUrl(item.source_url ?? ""), "desktop")}
+        </p>
+      )}
+      {saved && <SavedOutputActions saved={saved} named={{ title, number }} onOpen={onOpen} />}
+    </li>
+  );
+}
+
+function SavedOutputActions({
+  saved,
+  named,
+  onOpen,
+}: {
+  saved: SavedOutput;
+  named?: { title: string; number: number };
   onOpen(saved: SavedOutput, reveal: boolean): Promise<void>;
 }) {
   const [opening, setOpening] = useState(false);
   const [openError, setOpenError] = useState<"open" | "folder" | "missing" | null>(null);
-  const title = item.title?.trim() || t("view.images.untitled", { number });
-  const saved = item.state.kind === "saved" ? item.state.result.saved_output : undefined;
   async function open(reveal: boolean) {
     if (!saved || opening) return;
     setOpening(true);
@@ -107,51 +176,27 @@ function BatchItem({
     }
   }
   return (
-    <li className="dz-batch-item" data-batch-item={item.id} data-state={item.state.kind}>
-      <span className="dz-batch-icon" aria-hidden="true">
-        <BatchIcon state={item.state.kind} />
-      </span>
-      <div className="dz-batch-description">
-        <h3 title={title}>{title}</h3>
-        {saved && (
-          <p className="dz-batch-filename" title={saved.filename}>
-            {saved.filename}
-          </p>
-        )}
-        {item.source_url && (
-          <p className="dz-batch-source" title={item.source_url}>
-            {item.source_url}
-          </p>
-        )}
+    <>
+      <div className="dz-batch-actions">
+        <button
+          type="button"
+          className="dz-btn-secondary"
+          disabled={opening}
+          aria-label={named ? t("desktop.batch.openNamed", named) : t("desktop.batch.openDocument")}
+          onClick={() => void open(false)}
+        >
+          {named ? t("desktop.done.open") : t("desktop.batch.openDocument")}
+        </button>
+        <button
+          type="button"
+          className="dz-btn-secondary"
+          disabled={opening}
+          aria-label={named ? t("desktop.batch.revealNamed", named) : t("desktop.done.reveal")}
+          onClick={() => void open(true)}
+        >
+          {t("desktop.done.reveal")}
+        </button>
       </div>
-      <p className="dz-batch-status">{t(`desktop.batch.${item.state.kind}`)}</p>
-      {item.state.kind === "failed" && (
-        <p className="dz-batch-error">
-          {plainMessageFor(item.state.error, hostFromUrl(item.source_url ?? ""), "desktop")}
-        </p>
-      )}
-      {saved && (
-        <div className="dz-batch-actions">
-          <button
-            type="button"
-            className="dz-btn-secondary"
-            disabled={opening}
-            aria-label={t("desktop.batch.openNamed", { title, number })}
-            onClick={() => void open(false)}
-          >
-            {t("desktop.done.open")}
-          </button>
-          <button
-            type="button"
-            className="dz-btn-secondary"
-            disabled={opening}
-            aria-label={t("desktop.batch.revealNamed", { title, number })}
-            onClick={() => void open(true)}
-          >
-            {t("desktop.done.reveal")}
-          </button>
-        </div>
-      )}
       {openError && (
         <p className="dz-batch-error" role="alert">
           {t(
@@ -163,14 +208,14 @@ function BatchItem({
           )}
         </p>
       )}
-    </li>
+    </>
   );
 }
 
 function BatchIcon({ state }: { state: DesktopBatchItem["state"]["kind"] }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
-      {state === "saved" ? (
+      {state === "saved" || state === "prepared" ? (
         <path d="m5 12 4 4L19 6" />
       ) : state === "failed" || state === "cancelled" ? (
         <path d="m7 7 10 10M17 7 7 17" />

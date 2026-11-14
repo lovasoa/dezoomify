@@ -192,6 +192,7 @@ pub enum OutputLayout {
     Buffered,
     Pyramid,
     Directory,
+    Document,
 }
 
 /// The meaning of the existing compression setting for a codec.
@@ -221,7 +222,6 @@ pub struct OutputCodec {
     pub format: OutputFormat,
     pub name: &'static str,
     pub extensions: &'static [&'static str],
-    pub input_extensions: &'static [&'static str],
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_side: Option<u32>,
     pub control: OutputControl,
@@ -310,30 +310,9 @@ pub fn output_options() -> Vec<OutputOption> {
         .collect()
 }
 
-// One declaration owns native input/output identities, extensions and controls.
-macro_rules! image_codecs {
-    (input { $($input:ident => ($aliases:expr, $($settings:tt)*)),* $(,)? }
-     output { $($output:ident => ($($out_settings:tt)*)),* $(,)? }) => {
-        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-        pub enum InputFormat { $($input),* }
-        impl InputFormat {
-            pub fn from_extension(extension: &str) -> Option<Self> {
-                $(if ($aliases as &[&str]).contains(&extension) { return Some(Self::$input); })*
-                None
-            }
-            pub fn extension(self) -> &'static str {
-                match self { $(Self::$input => OutputFormat::$input.extension()),* }
-            }
-        }
-        output_codecs! {
-            $($input => ($aliases, $($settings)*),)*
-            $($output => (&[], $($out_settings)*),)*
-        }
-    };
-}
-
+// One declaration owns output identities, extensions and controls.
 macro_rules! output_codecs {
-    ($($variant:ident => ($input_extensions:expr, $id:literal, $name:literal, $extensions:expr, $limit:expr,
+    ($($variant:ident => ($id:literal, $name:literal, $extensions:expr, $limit:expr,
         $control:expr, $layout:ident, $hint:literal, $sizes:expr)),* $(,)?) => {
         #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
         #[serde(rename_all = "kebab-case")]
@@ -361,7 +340,6 @@ macro_rules! output_codecs {
 
         pub const OUTPUT_CODECS: &[OutputCodec] = &[$(OutputCodec {
             format: OutputFormat::$variant, name: $name, extensions: $extensions,
-            input_extensions: $input_extensions,
             max_side: $limit, control: $control, layout: OutputLayout::$layout,
             hint: $hint, size_coefficients: $sizes,
         }),*];
@@ -377,6 +355,14 @@ macro_rules! output_codecs {
             pub fn extension(self) -> &'static str { self.codec().extensions[0] }
             pub fn is_directory(self) -> bool {
                 matches!(self.codec().layout, OutputLayout::Directory)
+            }
+            /// Encoded tiles can join this output without a full raster canvas.
+            pub fn uses_encoded_tiles(self) -> bool {
+                matches!(self.codec().layout, OutputLayout::Pyramid | OutputLayout::Directory | OutputLayout::Document)
+            }
+            /// Several independently acquired images can share one output file.
+            pub fn supports_pages(self) -> bool {
+                matches!(self.codec().layout, OutputLayout::Document)
             }
             pub fn from_extension(extension: &str) -> Option<Self> {
                 OUTPUT_CODECS.iter().find(|codec| codec.extensions.contains(&extension))
@@ -435,19 +421,16 @@ const JPEG2000_SIZES: &[(u8, f64)] = &[
 // https://github.com/libjpeg-turbo/libjpeg-turbo/blob/main/doc/usage.txt
 // ravif's scale is only roughly comparable; warn well below its normal range:
 // https://github.com/kornelski/cavif-rs#advanced-usage
-image_codecs! {
-  input {
-    Png => (&["png"], "png", "PNG", &["png"], None, OutputControl::Effort, Streaming, "lossless", &[(100, 1.6)]),
-    Jpeg => (&["jpg", "jpeg"], "jpeg", "JPEG", &["jpg", "jpeg"], Some(65_535), OutputControl::Quality { minimum: 0, warning_below: 25 }, Streaming, "compressed", JPEG_SIZES),
-    Tiff => (&["tif", "tiff"], "tiff", "TIFF", &["tif", "tiff"], None, OutputControl::Effort, Streaming, "archival", &[(100, 3.0)]),
-    Webp => (&["webp"], "webp", "WebP", &["webp"], Some(16_383), OutputControl::None, Buffered, "lossless", &[(100, 1.3)]),
-    Jpeg2000 => (&["jp2", "j2k", "j2c", "jpc"], "jpeg2000", "JPEG 2000", &["jp2"], Some(i32::MAX as u32), OutputControl::Quality { minimum: 0, warning_below: 25 }, Tiled, "tiled", JPEG2000_SIZES),
-  }
-  output {
+output_codecs! {
+    Png => ("png", "PNG", &["png"], None, OutputControl::Effort, Streaming, "lossless", &[(100, 1.6)]),
+    Jpeg => ("jpeg", "JPEG", &["jpg", "jpeg"], Some(65_535), OutputControl::Quality { minimum: 0, warning_below: 25 }, Streaming, "compressed", JPEG_SIZES),
+    Tiff => ("tiff", "TIFF", &["tif", "tiff"], None, OutputControl::Effort, Streaming, "archival", &[(100, 3.0)]),
+    Webp => ("webp", "WebP", &["webp"], Some(16_383), OutputControl::None, Buffered, "lossless", &[(100, 1.3)]),
+    Jpeg2000 => ("jpeg2000", "JPEG 2000", &["jp2"], Some(i32::MAX as u32), OutputControl::Quality { minimum: 0, warning_below: 25 }, Tiled, "tiled", JPEG2000_SIZES),
     Avif => ("avif", "AVIF", &["avif"], Some(65_535), OutputControl::Quality { minimum: 1, warning_below: 30 }, Buffered, "advancedCompression", AVIF_SIZES),
     Zif => ("zif", "ZIF", &["zif"], None, OutputControl::Effort, Pyramid, "zoomable", &[(100, 3.0)]),
     IiifDir => ("iiif-dir", "IIIF folder", &["iiif", ""], None, OutputControl::Quality { minimum: 0, warning_below: 25 }, Directory, "tiled", JPEG_SIZES),
-  }
+    Pdf => ("pdf", "PDF", &["pdf"], None, OutputControl::Effort, Document, "document", &[(100, 1.6)]),
 }
 
 /// File suffixes accepted by native output, for command help and diagnostics.
@@ -1322,6 +1305,8 @@ impl Default for Progress {
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub enum OutputDisposition {
     NativePublication,
+    /// The image is complete inside an unpublished native document.
+    NativePrepared,
     BrowserSaveInitiated,
     BrowserSaveReady,
     DisplayOnly,
@@ -1386,8 +1371,17 @@ pub enum DesktopImageChoice {
 pub enum DesktopBatchItemState {
     Pending,
     Running,
-    Saved { result: DesktopOutput },
-    Failed { error: Error },
+    /// Completed document page. Remains prepared after publication; the batch owns
+    /// its saved reference or publication error, and callers derive display status.
+    Prepared {
+        output: Output,
+    },
+    Saved {
+        result: DesktopOutput,
+    },
+    Failed {
+        error: Error,
+    },
     Cancelled,
 }
 
@@ -1407,6 +1401,14 @@ pub struct DesktopBatchItem {
 pub struct DesktopBatch {
     pub items: Vec<DesktopBatchItem>,
     pub cancelled: bool,
+    /// One shared document, registered only after its completed pages are published.
+    /// When present, prepared pages are saved even if `error` reports an interruption.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub saved_output: Option<SavedOutput>,
+    /// A document may preserve complete pages while reporting why the batch stopped.
+    /// Without `saved_output`, this error also means prepared pages were not published.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<Error>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

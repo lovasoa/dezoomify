@@ -56,10 +56,10 @@ export const de = {
   "desktop.done.open": "Bild öffnen",
   "desktop.done.reveal": "Im Ordner anzeigen",
   "desktop.done.openError":
-    "Das Bild konnte nicht geöffnet werden. Prüfen Sie, ob ein Standard-Bildbetrachter installiert ist.",
+    "Die gespeicherte Datei konnte nicht geöffnet werden. Prüfen Sie, ob eine Standardanwendung installiert ist.",
   "desktop.done.folderError":
     "Der Ordner konnte nicht geöffnet werden. Prüfen Sie, ob ein Dateimanager installiert ist.",
-  "desktop.done.missingError": "Das gespeicherte Bild oder der Ordner ist nicht mehr vorhanden.",
+  "desktop.done.missingError": "Die gespeicherte Datei oder der Ordner ist nicht mehr vorhanden.",
   "desktop.batch.title": "Downloadergebnisse",
   "desktop.batch.runningTitle": "Bilder werden heruntergeladen",
   "desktop.batch.cancelledTitle": "Downloads angehalten",
@@ -68,6 +68,9 @@ export const de = {
   "desktop.batch.statusSummary":
     "{failed} fehlgeschlagen · {cancelled} abgebrochen · {remaining} verbleibend",
   "desktop.batch.pending": "Wartet",
+  "desktop.batch.prepared": "Bereit zum Speichern",
+  "desktop.batch.preparedSummary": "{prepared} von {total} Seiten bereit",
+  "desktop.batch.openDocument": "Dokument öffnen",
   "desktop.batch.running": "Wird heruntergeladen",
   "desktop.batch.saved": "Gespeichert",
   "desktop.batch.failed": "Fehlgeschlagen",
@@ -365,6 +368,9 @@ export const de = {
   "desktop.quick.hint.archival": "Archivierung",
   "desktop.quick.hint.zoomable": "zoombar",
   "desktop.quick.hint.tiled": "gekachelt",
+  "desktop.quick.hint.document": "Dokument",
+  "desktop.quick.format.pdf":
+    "Behält kompatible Quellkacheln bei. Alle herunterladen speichert die Bilder als Seiten einer PDF-Datei.",
   "desktop.quick.format.auto":
     "JPEG für undurchsichtige Bilder bis {maxSide} Pixel pro Seite; PNG bei Transparenz oder größeren Bildern. Die Kompression gilt auch für Automatisch.",
   "desktop.quick.format.png":

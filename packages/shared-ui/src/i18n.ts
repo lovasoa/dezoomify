@@ -145,10 +145,10 @@ const en = {
   "desktop.done.open": "Open image",
   "desktop.done.reveal": "Show in folder",
   "desktop.done.openError":
-    "Could not open the image. Check that a default image viewer is installed.",
+    "Could not open the saved file. Check that a default application is installed.",
   "desktop.done.folderError":
     "Could not open the containing folder. Check that a file manager is installed.",
-  "desktop.done.missingError": "The saved image or folder no longer exists.",
+  "desktop.done.missingError": "The saved file or folder no longer exists.",
   "desktop.batch.title": "Download results",
   "desktop.batch.runningTitle": "Downloading images",
   "desktop.batch.cancelledTitle": "Downloads stopped",
@@ -156,6 +156,9 @@ const en = {
   "desktop.batch.remainingSummary": "{remaining} remaining",
   "desktop.batch.statusSummary": "{failed} failed · {cancelled} cancelled · {remaining} remaining",
   "desktop.batch.pending": "Waiting",
+  "desktop.batch.prepared": "Ready to save",
+  "desktop.batch.preparedSummary": "{prepared} of {total} pages ready",
+  "desktop.batch.openDocument": "Open document",
   "desktop.batch.running": "Downloading",
   "desktop.batch.saved": "Saved",
   "desktop.batch.failed": "Failed",
@@ -447,6 +450,9 @@ const en = {
   "desktop.quick.hint.archival": "archival",
   "desktop.quick.hint.zoomable": "zoomable",
   "desktop.quick.hint.tiled": "tiled",
+  "desktop.quick.hint.document": "document",
+  "desktop.quick.format.pdf":
+    "Preserves compatible source tiles. Download all saves images as pages in one PDF.",
   "desktop.quick.format.auto":
     "JPEG for opaque images up to {maxSide} pixels per side; PNG for transparency or larger images. Compression also applies to Auto.",
   "desktop.quick.format.png":

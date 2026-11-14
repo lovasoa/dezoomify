@@ -268,7 +268,7 @@ export interface FinishRequest {
 /**
  * Honest output disposition reported by the host that performed the save.
  */
-export type OutputDisposition = "native-publication" | "browser-save-initiated" | "browser-save-ready" | "display-only";
+export type OutputDisposition = "native-publication" | "native-prepared" | "browser-save-initiated" | "browser-save-ready" | "display-only";
 
 /**
  * Host-neutral placement of one tile, projected from the core tile plan:
@@ -303,7 +303,7 @@ export interface TileRole {
 /**
  * How an output owns its encoded image or pyramid.
  */
-export type OutputLayout = "streaming" | "tiled" | "buffered" | "pyramid" | "directory";
+export type OutputLayout = "streaming" | "tiled" | "buffered" | "pyramid" | "directory" | "document";
 
 /**
  * Native output capabilities, also exported as generated data for presentation.
@@ -312,7 +312,6 @@ export interface OutputCodec {
     format: OutputFormat;
     name: string;
     extensions: string[];
-    input_extensions: string[];
     max_side?: number;
     control: OutputControl;
     layout: OutputLayout;
@@ -594,6 +593,16 @@ export type HtmlDocument = Record<string, HtmlElement[]>;
 export interface DesktopBatch {
     items: DesktopBatchItem[];
     cancelled: boolean;
+    /**
+     * One shared document, registered only after its completed pages are published.
+     * When present, prepared pages are saved even if `error` reports an interruption.
+     */
+    saved_output?: SavedOutput;
+    /**
+     * A document may preserve complete pages while reporting why the batch stopped.
+     * Without `saved_output`, this error also means prepared pages were not published.
+     */
+    error?: Error;
 }
 
 /**
@@ -757,7 +766,7 @@ export interface OutputPreparation {
 
 export type BlockedReason = "access-required" | "blocked-ipv4" | "blocked-ipv6" | "cancelled" | "content-type" | "dns-rebinding" | "dns-rebinding-v6" | "forbidden" | "invalid-url" | "limit-exceeded" | "loopback-host" | "malformed" | "malformed-body" | "method" | "network" | "non-standard-port" | "origin" | "private-host" | "protocol-version" | "redirect-limit" | "redirect-target" | "scheme" | "signed-query" | "source-document-lost" | "throttled" | "userinfo";
 
-export type DesktopBatchItemState = { kind: "pending" } | { kind: "running" } | { kind: "saved"; result: DesktopOutput } | { kind: "failed"; error: Error } | { kind: "cancelled" };
+export type DesktopBatchItemState = { kind: "pending" } | { kind: "running" } | { kind: "prepared"; output: Output } | { kind: "saved"; result: DesktopOutput } | { kind: "failed"; error: Error } | { kind: "cancelled" };
 
 export type DesktopResult = { kind: "image"; result: DesktopOutput } | { kind: "batch"; batch: DesktopBatch };
 
@@ -767,9 +776,9 @@ export type DiagnosticValue = string | number | boolean;
 
 export type ErrorTransport = "direct" | "metadata-proxy" | "browser-session" | "native" | "display-only";
 
-export type OutputFormat = "png" | "jpeg" | "tiff" | "webp" | "jpeg2000" | "avif" | "zif" | "iiif-dir";
+export type OutputFormat = "png" | "jpeg" | "tiff" | "webp" | "jpeg2000" | "avif" | "zif" | "iiif-dir" | "pdf";
 
-export type OutputPreference = "auto" | "png" | "jpeg" | "tiff" | "webp" | "jpeg2000" | "avif" | "zif" | "iiif-dir";
+export type OutputPreference = "auto" | "png" | "jpeg" | "tiff" | "webp" | "jpeg2000" | "avif" | "zif" | "iiif-dir" | "pdf";
 
 export type ProgressPhase = "discovery" | "planning" | "acquisition" | "output";
 

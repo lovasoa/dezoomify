@@ -23,7 +23,7 @@ const BLOCK_COLUMNS: u32 = 256;
 type TileMetadata = (Option<Vec<u8>>, Option<Vec<u8>>);
 
 pub(crate) struct PixelRegion {
-    pub(crate) rect: crate::tile_output::Rect,
+    pub(crate) rect: crate::tile_geometry::Rect,
     pub(crate) rgba: Vec<u8>,
 }
 
@@ -310,7 +310,7 @@ impl PixelPipe {
         &self,
         placement: &TilePlacement,
         image: &image::RgbaImage,
-    ) -> crate::tile_output::Rect {
+    ) -> crate::tile_geometry::Rect {
         let width = image
             .width()
             .min(
@@ -341,7 +341,7 @@ impl PixelPipe {
             self.region.height,
             self.overlap.height,
         );
-        crate::tile_output::Rect {
+        crate::tile_geometry::Rect {
             x,
             y,
             w: width,
@@ -408,10 +408,10 @@ impl PixelPipe {
         self.queue.lock().expect("strip queue lock").consumed +=
             u64::from(region.rect.w) * u64::from(region.rect.h);
     }
-    fn rect(&self, index: u32) -> crate::tile_output::Rect {
+    fn rect(&self, index: u32) -> crate::tile_geometry::Rect {
         let x = index % self.region_columns * self.region.width;
         let y = index / self.region_columns * self.region.height;
-        crate::tile_output::Rect {
+        crate::tile_geometry::Rect {
             x,
             y,
             w: self.region.width.min(self.size.width - x),

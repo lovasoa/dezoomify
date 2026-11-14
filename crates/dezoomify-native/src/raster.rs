@@ -87,7 +87,7 @@ impl EncoderTask {
         crate::imaging::check_dimensions(format, &size)?;
         let encoder = encoder(format, compression);
         let grid = encoder.grid(&size, grid)?;
-        crate::tile_output::memory_check(encoder.workspace(&size, grid.as_ref()), memory_hint)?;
+        crate::tile_budget::memory_check(encoder.workspace(&size, grid.as_ref()), memory_hint)?;
         let directory = destination
             .parent()
             .filter(|p| !p.as_os_str().is_empty())

@@ -1,34 +1,32 @@
 //! Native image-codec facade. Detection, limits and metadata are shared by
 //! raster composition and compressed-tile outputs. Inspecting headers never
 //! decodes pixels; callers run decoding on their blocking worker.
-use crate::tile_output::memory_check;
-use dezoomify::model::{Error, InputFormat, Size};
-use image::{ImageDecoder, ImageError, ImageResult};
+use crate::tile_budget::memory_check;
+use dezoomify::model::{Error, Size};
+use image::{ImageDecoder, ImageResult};
 use std::io::Cursor;
 
-pub(crate) fn detect(bytes: &[u8]) -> ImageResult<InputFormat> {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum NativeFormat {
+    Image(image::ImageFormat),
+    Jpeg2000,
+}
+
+pub(crate) fn detect(bytes: &[u8]) -> ImageResult<NativeFormat> {
     if openjp2::detect_format(bytes).is_ok() {
-        return Ok(InputFormat::Jpeg2000);
+        return Ok(NativeFormat::Jpeg2000);
     }
-    let format = image::guess_format(bytes)?;
-    InputFormat::from_extension(format.extensions_str()[0]).ok_or_else(|| {
-        ImageError::Unsupported(image::error::UnsupportedError::from_format_and_kind(
-            format.into(),
-            image::error::UnsupportedErrorKind::Format(format.into()),
-        ))
-    })
+    image::guess_format(bytes).map(NativeFormat::Image)
 }
 
 pub(crate) fn decoder(
     bytes: &[u8],
-    format: InputFormat,
+    format: NativeFormat,
     max_alloc: Option<u64>,
 ) -> ImageResult<Box<dyn ImageDecoder + '_>> {
-    if format == InputFormat::Jpeg2000 {
+    let NativeFormat::Image(format) = format else {
         return Ok(Box::new(crate::jpeg2000::Decoder::new(bytes, max_alloc)?));
-    }
-    let format =
-        image::ImageFormat::from_extension(format.extension()).expect("registered image codec");
+    };
     let mut reader = image::ImageReader::with_format(Cursor::new(bytes), format);
     let mut limits = image::Limits::default();
     limits.max_alloc = max_alloc;
@@ -38,14 +36,14 @@ pub(crate) fn decoder(
 
 pub(crate) fn decode(
     bytes: &[u8],
-    format: InputFormat,
+    format: NativeFormat,
     max_alloc: Option<u64>,
 ) -> ImageResult<image::RgbaImage> {
     image::DynamicImage::from_decoder(decoder(bytes, format, max_alloc)?)
         .map(image::DynamicImage::into_rgba8)
 }
 
-pub(crate) fn inspect(bytes: &[u8], budget: u64) -> Result<(Size, InputFormat), Error> {
+pub(crate) fn inspect(bytes: &[u8], budget: u64) -> Result<(Size, NativeFormat), Error> {
     let format = detect(bytes).map_err(decode_error)?;
     check_structure(bytes, format)?;
     let (width, height) = decoder(bytes, format, Some(budget))
@@ -58,14 +56,14 @@ type Metadata = (Option<Vec<u8>>, Option<Vec<u8>>);
 
 pub(crate) fn tile_metadata(
     bytes: &[u8],
-    format: InputFormat,
+    format: NativeFormat,
     budget: u64,
 ) -> Result<Metadata, Error> {
     let mut decoder = decoder(bytes, format, Some(budget / 3)).map_err(decode_error)?;
     let mut icc = decoder.icc_profile().map_err(decode_error)?;
     let exif = decoder.exif_metadata().map_err(decode_error)?;
     drop(decoder);
-    if icc.is_none() && format == InputFormat::Png {
+    if icc.is_none() && format == NativeFormat::Image(image::ImageFormat::Png) {
         icc = png_icc(bytes, budget / 3)?;
     }
     memory_check(
@@ -125,10 +123,10 @@ pub(crate) fn decode_error(error: image::ImageError) -> Error {
 }
 
 // Bounded structural checks do not decompress pixels or validate entropy/zlib.
-fn check_structure(bytes: &[u8], format: InputFormat) -> Result<(), Error> {
+fn check_structure(bytes: &[u8], format: NativeFormat) -> Result<(), Error> {
     let invalid = || Error::DecodeFailed("truncated or invalid encoded tile structure".into());
     match format {
-        InputFormat::Png => {
+        NativeFormat::Image(image::ImageFormat::Png) => {
             let mut pos = 8usize;
             let mut data = false;
             while let Some(header) = bytes.get(pos..pos + 8) {
@@ -157,7 +155,7 @@ fn check_structure(bytes: &[u8], format: InputFormat) -> Result<(), Error> {
             }
             Err(invalid())
         }
-        InputFormat::Jpeg => {
+        NativeFormat::Image(image::ImageFormat::Jpeg) => {
             let mut pos = 2;
             let mut scan = false;
             while bytes.get(pos) == Some(&0xff) {

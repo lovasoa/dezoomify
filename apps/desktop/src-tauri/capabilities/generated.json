@@ -53,7 +53,8 @@
       "webp",
       "jpeg2000",
       "avif",
-      "zif"
+      "zif",
+      "pdf"
     ],
     "outputFormats": [
       "png",
@@ -63,7 +64,8 @@
       "jpeg2000",
       "avif",
       "zif",
-      "iiif-dir"
+      "iiif-dir",
+      "pdf"
     ],
     "eventChannels": [
       "dezoomify://batch",
