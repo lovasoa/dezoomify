@@ -114,7 +114,11 @@ export async function startWindowApp(home) {
   const capture = (chunk) => {
     chunks.push(chunk.toString());
     if (chunks.length > 500) chunks.shift();
-    appendFileSync(logPath, chunk);
+    try {
+      appendFileSync(logPath, chunk);
+    } catch {
+      // Teardown may already have removed the run directory.
+    }
   };
   const env = {
     ...process.env,
@@ -161,28 +165,40 @@ export async function startWindowApp(home) {
   }
 }
 
-// Stop the app and wait for it to exit. `run_node_with_deadline` owns the
-// process tree, so a leaked app is still killed on a lane deadline; this makes
-// normal teardown deterministic instead of relying on that backstop.
+// Stop the app and wait for exit and stdio close: `exit` can arrive while the
+// pipes still hold buffered output. `run_node_with_deadline` owns the process
+// tree, so a leaked app is still killed on a lane deadline; this makes normal
+// teardown deterministic instead of relying on that backstop.
 export async function stopWindowApp(app) {
   if (!app?.proc) return;
   const { proc } = app;
-  if (proc.exitCode !== null || proc.signalCode !== null) return;
-  const exited = new Promise((resolve) => proc.once("exit", resolve));
-  try {
-    proc.kill("SIGTERM");
-  } catch {
-    // Already gone.
-  }
-  const timeout = new Promise((resolve) => setTimeout(() => resolve("timeout"), 5000));
-  if ((await Promise.race([exited, timeout])) === "timeout") {
+  const closed = Promise.all(
+    [proc.stdout, proc.stderr].filter(Boolean).map(
+      (stream) =>
+        new Promise((resolve) => {
+          if (stream.closed) resolve();
+          else stream.once("close", resolve);
+        }),
+    ),
+  );
+  if (proc.exitCode === null && proc.signalCode === null) {
+    const exited = new Promise((resolve) => proc.once("exit", resolve));
     try {
-      proc.kill("SIGKILL");
+      proc.kill("SIGTERM");
     } catch {
       // Already gone.
     }
-    await exited;
+    const timeout = new Promise((resolve) => setTimeout(() => resolve("timeout"), 5000));
+    if ((await Promise.race([exited, timeout])) === "timeout") {
+      try {
+        proc.kill("SIGKILL");
+      } catch {
+        // Already gone.
+      }
+      await exited;
+    }
   }
+  await Promise.race([closed, sleep(5000)]);
 }
 
 // Same Node server and flags the `cargo xtask fixtures serve --port 0` path spawns:
