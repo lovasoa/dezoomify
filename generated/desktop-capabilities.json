@@ -29,6 +29,7 @@
     "jpeg",
     "tiff",
     "webp",
+    "jpeg2000",
     "avif",
     "zif"
   ],
@@ -37,6 +38,7 @@
     "jpeg",
     "tiff",
     "webp",
+    "jpeg2000",
     "avif",
     "zif",
     "iiif-dir"

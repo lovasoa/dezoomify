@@ -188,6 +188,7 @@ pub enum ProcessingRecipe {
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub enum OutputLayout {
     Streaming,
+    Tiled,
     Buffered,
     Pyramid,
     Directory,
@@ -220,6 +221,7 @@ pub struct OutputCodec {
     pub format: OutputFormat,
     pub name: &'static str,
     pub extensions: &'static [&'static str],
+    pub input_extensions: &'static [&'static str],
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_side: Option<u32>,
     pub control: OutputControl,
@@ -308,11 +310,30 @@ pub fn output_options() -> Vec<OutputOption> {
         .collect()
 }
 
-// One declaration owns the format/preference wire variants and their metadata.
-// A buffered image-crate codec needs one row here and its Cargo feature. Only
-// encoders with configurable construction need an override in native imaging.
+// One declaration owns native input/output identities, extensions and controls.
+macro_rules! image_codecs {
+    (input { $($input:ident => ($aliases:expr, $($settings:tt)*)),* $(,)? }
+     output { $($output:ident => ($($out_settings:tt)*)),* $(,)? }) => {
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        pub enum InputFormat { $($input),* }
+        impl InputFormat {
+            pub fn from_extension(extension: &str) -> Option<Self> {
+                $(if ($aliases as &[&str]).contains(&extension) { return Some(Self::$input); })*
+                None
+            }
+            pub fn extension(self) -> &'static str {
+                match self { $(Self::$input => OutputFormat::$input.extension()),* }
+            }
+        }
+        output_codecs! {
+            $($input => ($aliases, $($settings)*),)*
+            $($output => (&[], $($out_settings)*),)*
+        }
+    };
+}
+
 macro_rules! output_codecs {
-    ($($variant:ident => ($id:literal, $name:literal, $extensions:expr, $limit:expr,
+    ($($variant:ident => ($input_extensions:expr, $id:literal, $name:literal, $extensions:expr, $limit:expr,
         $control:expr, $layout:ident, $hint:literal, $sizes:expr)),* $(,)?) => {
         #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
         #[serde(rename_all = "kebab-case")]
@@ -340,6 +361,7 @@ macro_rules! output_codecs {
 
         pub const OUTPUT_CODECS: &[OutputCodec] = &[$(OutputCodec {
             format: OutputFormat::$variant, name: $name, extensions: $extensions,
+            input_extensions: $input_extensions,
             max_side: $limit, control: $control, layout: OutputLayout::$layout,
             hint: $hint, size_coefficients: $sizes,
         }),*];
@@ -395,19 +417,37 @@ const AVIF_SIZES: &[(u8, f64)] = &[
     (100, 1.15),
 ];
 
+// RGB8 target rates (3 bytes/pixel divided by 1 + compression), followed
+// by a heuristic for reversible coding at compression zero.
+const JPEG2000_SIZES: &[(u8, f64)] = &[
+    (0, 3.0 / 101.0),
+    (50, 3.0 / 51.0),
+    (75, 3.0 / 26.0),
+    (90, 3.0 / 11.0),
+    (95, 0.5),
+    (98, 1.0),
+    (99, 1.5),
+    (100, 1.6),
+];
+
 // Warning thresholds are conservative UI heuristics, not universal usability
 // cutoffs. JPEG guidance describes <50 as low quality and 5-10 as index-only:
 // https://github.com/libjpeg-turbo/libjpeg-turbo/blob/main/doc/usage.txt
 // ravif's scale is only roughly comparable; warn well below its normal range:
 // https://github.com/kornelski/cavif-rs#advanced-usage
-output_codecs! {
-    Png => ("png", "PNG", &["png"], None, OutputControl::Effort, Streaming, "lossless", &[(100, 1.6)]),
-    Jpeg => ("jpeg", "JPEG", &["jpg", "jpeg"], Some(65_535), OutputControl::Quality { minimum: 0, warning_below: 25 }, Streaming, "compressed", JPEG_SIZES),
-    Tiff => ("tiff", "TIFF", &["tif", "tiff"], None, OutputControl::Effort, Streaming, "archival", &[(100, 3.0)]),
-    Webp => ("webp", "WebP", &["webp"], Some(16_383), OutputControl::None, Buffered, "lossless", &[(100, 1.3)]),
+image_codecs! {
+  input {
+    Png => (&["png"], "png", "PNG", &["png"], None, OutputControl::Effort, Streaming, "lossless", &[(100, 1.6)]),
+    Jpeg => (&["jpg", "jpeg"], "jpeg", "JPEG", &["jpg", "jpeg"], Some(65_535), OutputControl::Quality { minimum: 0, warning_below: 25 }, Streaming, "compressed", JPEG_SIZES),
+    Tiff => (&["tif", "tiff"], "tiff", "TIFF", &["tif", "tiff"], None, OutputControl::Effort, Streaming, "archival", &[(100, 3.0)]),
+    Webp => (&["webp"], "webp", "WebP", &["webp"], Some(16_383), OutputControl::None, Buffered, "lossless", &[(100, 1.3)]),
+    Jpeg2000 => (&["jp2", "j2k", "j2c", "jpc"], "jpeg2000", "JPEG 2000", &["jp2"], Some(i32::MAX as u32), OutputControl::Quality { minimum: 0, warning_below: 25 }, Tiled, "tiled", JPEG2000_SIZES),
+  }
+  output {
     Avif => ("avif", "AVIF", &["avif"], Some(65_535), OutputControl::Quality { minimum: 1, warning_below: 30 }, Buffered, "advancedCompression", AVIF_SIZES),
     Zif => ("zif", "ZIF", &["zif"], None, OutputControl::Effort, Pyramid, "zoomable", &[(100, 3.0)]),
     IiifDir => ("iiif-dir", "IIIF folder", &["iiif", ""], None, OutputControl::Quality { minimum: 0, warning_below: 25 }, Directory, "tiled", JPEG_SIZES),
+  }
 }
 
 /// File suffixes accepted by native output, for command help and diagnostics.

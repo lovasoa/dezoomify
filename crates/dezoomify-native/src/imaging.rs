@@ -98,13 +98,8 @@ pub(crate) fn load_image_with_limit(
     max_alloc: Option<u64>,
 ) -> Result<DecodedTile, image::ImageError> {
     use image::ImageDecoder as _;
-    let mut reader = image::ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format()?;
-    if let Some(max_alloc) = max_alloc {
-        let mut limits = image::Limits::default();
-        limits.max_alloc = Some(max_alloc);
-        reader.limits(limits);
-    }
-    let mut decoder = reader.into_decoder()?;
+    let format = crate::codecs::detect(bytes)?;
+    let mut decoder = crate::codecs::decoder(bytes, format, max_alloc)?;
     let icc_profile = decoder.icc_profile().unwrap_or(None);
     let exif_metadata = decoder.exif_metadata().unwrap_or(None);
     let image = image::DynamicImage::from_decoder(decoder)?.into_rgba8();

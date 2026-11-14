@@ -391,6 +391,8 @@ export const fr = {
     "Cette image ({dims}) est trop grande pour {format}, qui accepte au maximum {maxSide} pixels par côté. Enregistrez-la en PNG. Source : {host}.",
   "desktop.quick.format.avif":
     "Compression avancée avec transparence. Sortie avec perte, limitée à {maxSide} pixels par côté. Réglez la compression dans le menu Taille. Nécessite l’image complète en mémoire et ne conserve pas les profils colorimétriques intégrés. Même la compression minimale est avec perte.",
+  "desktop.quick.format.jpeg2000":
+    "Sortie RGB avec ou sans perte, sans transparence. La compression 0 est sans perte. Nécessite une grille source régulière d’au plus 65 535 tuiles.",
   "desktop.quick.format.generic": "Enregistrer l’image au format {format}.",
   "desktop.advanced.dimensions": "Dimensions personnalisées",
   "desktop.advanced.dimensionsDesc":

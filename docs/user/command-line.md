@@ -46,7 +46,7 @@ ignores caps. Error records include a stable `kind`; use it for scripts and
 bug reports rather than matching the human sentence.
 
 Output names choose the format: `.png`, `.jpg`/`.jpeg`, `.tif`/`.tiff`, `.zif`,
-`.webp`, `.avif`, or `.iiif`. An extensionless destination also creates an IIIF tile
+`.webp`, `.avif`, `.jp2`, or `.iiif`. An extensionless destination also creates an IIIF tile
 folder. Other extensions are rejected. See
 [choosing a format](../../apps/desktop/desktop-app.md#choosing-the-file-format).
 
@@ -92,6 +92,12 @@ encoding speed and does not preserve embedded color profiles. If saving reaches
 a resource limit, try a smaller level or an IIIF tile folder. JPEG, WebP and AVIF
 have additional dimension limits; see
 [rejected output names](./troubleshooting.md#the-output-name-is-rejected).
+
+JPEG 2000 (`.jp2`) writes the source tile grid incrementally, using disk for
+out-of-order tiles. It requires a regular grid with at most 65,535 tiles.
+Compression zero is lossless; higher settings use lossy coding with target
+compression ratio `1 + --compression`. Output is RGB without alpha and retains
+the origin tile's color profile when present.
 
 If a required tile still fails after automatic retries, the job stops without
 publishing an image. The error retains its address, attempt count, and original

@@ -303,7 +303,7 @@ export interface TileRole {
 /**
  * How an output owns its encoded image or pyramid.
  */
-export type OutputLayout = "streaming" | "buffered" | "pyramid" | "directory";
+export type OutputLayout = "streaming" | "tiled" | "buffered" | "pyramid" | "directory";
 
 /**
  * Native output capabilities, also exported as generated data for presentation.
@@ -312,6 +312,7 @@ export interface OutputCodec {
     format: OutputFormat;
     name: string;
     extensions: string[];
+    input_extensions: string[];
     max_side?: number;
     control: OutputControl;
     layout: OutputLayout;
@@ -766,9 +767,9 @@ export type DiagnosticValue = string | number | boolean;
 
 export type ErrorTransport = "direct" | "metadata-proxy" | "browser-session" | "native" | "display-only";
 
-export type OutputFormat = "png" | "jpeg" | "tiff" | "webp" | "avif" | "zif" | "iiif-dir";
+export type OutputFormat = "png" | "jpeg" | "tiff" | "webp" | "jpeg2000" | "avif" | "zif" | "iiif-dir";
 
-export type OutputPreference = "auto" | "png" | "jpeg" | "tiff" | "webp" | "avif" | "zif" | "iiif-dir";
+export type OutputPreference = "auto" | "png" | "jpeg" | "tiff" | "webp" | "jpeg2000" | "avif" | "zif" | "iiif-dir";
 
 export type ProgressPhase = "discovery" | "planning" | "acquisition" | "output";
 
@@ -805,8 +806,8 @@ export interface InitOutput {
     readonly hasSecretParams: (a: number, b: number) => number;
     readonly isRetryable: (a: any) => [number, number, number];
     readonly isSecretKey: (a: number, b: number) => number;
-    readonly wasm_bindgen_c47c495b6df6d1b4___convert__closures_____invoke___js_sys_93c91ed50cb258c7___Function_fn_wasm_bindgen_c47c495b6df6d1b4___JsValue_____wasm_bindgen_c47c495b6df6d1b4___sys__Undefined___js_sys_93c91ed50cb258c7___Function_fn_wasm_bindgen_c47c495b6df6d1b4___JsValue_____wasm_bindgen_c47c495b6df6d1b4___sys__Undefined_______true_: (a: number, b: number, c: any, d: any) => void;
-    readonly wasm_bindgen_c47c495b6df6d1b4___convert__closures_____invoke___wasm_bindgen_c47c495b6df6d1b4___JsValue__core_37ee0ce0c4cd57d5___result__Result_____wasm_bindgen_c47c495b6df6d1b4___JsError___true_: (a: number, b: number, c: any) => [number, number];
+    readonly wasm_bindgen_620bae4c4ca883d3___convert__closures_____invoke___js_sys_c6d6ead578b59c8c___Function_fn_wasm_bindgen_620bae4c4ca883d3___JsValue_____wasm_bindgen_620bae4c4ca883d3___sys__Undefined___js_sys_c6d6ead578b59c8c___Function_fn_wasm_bindgen_620bae4c4ca883d3___JsValue_____wasm_bindgen_620bae4c4ca883d3___sys__Undefined_______true_: (a: number, b: number, c: any, d: any) => void;
+    readonly wasm_bindgen_620bae4c4ca883d3___convert__closures_____invoke___wasm_bindgen_620bae4c4ca883d3___JsValue__core_37ee0ce0c4cd57d5___result__Result_____wasm_bindgen_620bae4c4ca883d3___JsError___true_: (a: number, b: number, c: any) => [number, number];
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_free: (a: number, b: number, c: number) => void;

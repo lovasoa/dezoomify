@@ -390,6 +390,8 @@ export const it = {
     "Questa immagine ({dims}) è troppo grande per {format}, che consente al massimo {maxSide} pixel per lato. Salvala in PNG. Origine: {host}.",
   "desktop.quick.format.avif":
     "Compressione avanzata con trasparenza. Formato con perdita, massimo {maxSide} pixel per lato. Regola la compressione nel menu Dimensione. Richiede l’immagine completa in memoria e non conserva i profili colore incorporati. Anche la compressione minima è con perdita.",
+  "desktop.quick.format.jpeg2000":
+    "Output RGB con o senza perdita, senza trasparenza. La compressione 0 è senza perdita. Richiede una griglia sorgente regolare con al massimo 65.535 tessere.",
   "desktop.quick.format.generic": "Salva l’immagine in formato {format}.",
   "desktop.advanced.dimensions": "Dimensioni personalizzate",
   "desktop.advanced.dimensionsDesc":

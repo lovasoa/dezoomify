@@ -5,11 +5,13 @@
 
 pub mod cache;
 pub mod client;
+mod codecs;
 pub mod diagnostics;
 pub mod host;
 pub mod html;
 pub mod http;
 pub mod imaging;
+mod jpeg2000;
 pub mod options;
 pub mod output;
 mod pixel_pipe;

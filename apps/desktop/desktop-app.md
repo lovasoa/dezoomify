@@ -108,6 +108,9 @@ This does not sign you in or transfer your browser session.
 - **Auto** chooses JPEG for an opaque image within JPEG's dimensions, otherwise PNG.
 - **PNG or TIFF** are lossless choices for archiving and editing.
 - **JPEG** suits smaller on-screen copies; it is limited to 65,535 pixels per side.
+- **JPEG 2000** writes the original tile grid incrementally. It supports lossless
+  and lossy RGB output, without alpha, and requires a regular source grid with
+  at most 65,535 tiles. Compression zero is lossless.
 - **WebP** is lossless here, but needs a complete pixel buffer and is limited to
   16,383 pixels per side.
 - **AVIF** saves lossy images with transparency, up to 65,535 pixels per side.

@@ -455,6 +455,8 @@ const en = {
     "Smaller lossy files. No transparency; limited to {maxSide} pixels per side. Adjust compression in the Size menu.",
   "desktop.quick.format.tiff": "Lossless output for archiving and editing.",
   "desktop.quick.format.webp": "Lossless compressed output, limited to {maxSide} pixels per side.",
+  "desktop.quick.format.jpeg2000":
+    "Lossless or lossy RGB output without transparency. Compression 0 is lossless. Requires a regular source grid with at most 65,535 tiles.",
   "desktop.quick.format.avif":
     "Advanced compression with transparency. Lossy output, limited to {maxSide} pixels per side. Adjust compression in the Size menu. Needs the complete image in memory and does not preserve embedded color profiles. Even the lowest compression is lossy.",
   "desktop.quick.format.zif": "A lossless tiled TIFF pyramid for zooming at several resolutions.",

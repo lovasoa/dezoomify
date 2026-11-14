@@ -1199,6 +1199,7 @@ dependencies = [
  "fdeflate",
  "flate2",
  "image",
+ "openjp2",
  "png",
  "reqwest",
  "rustix",
@@ -3570,6 +3571,26 @@ dependencies = [
  "is-wsl",
  "libc",
 ]
+
+[[package]]
+name = "openjp2"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c41f2738518a4f8a8c6a9816b1b70b37511bc6f9f04d4f72230326f6abf3d489"
+dependencies = [
+ "bitflags 1.3.2",
+ "byteorder",
+ "image",
+ "log",
+ "openjp2-ctypes",
+ "smallvec",
+]
+
+[[package]]
+name = "openjp2-ctypes"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fc7650425b4f7e4c514e4a6ccaa2c26612f935d0826d2ee5426635d3844a8361"
 
 [[package]]
 name = "openssl-probe"

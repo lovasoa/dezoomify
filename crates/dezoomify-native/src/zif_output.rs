@@ -3,6 +3,7 @@ use crate::{
     output::StagedFile,
     tile_output::{downsample, memory_check, EncodedTile, Rect, StoredTile, TileBytes, TileLevel},
 };
+use dezoomify::model::InputFormat;
 use dezoomify::model::{Error, OutputPlan, Point, ReusedTile, Size};
 use std::{
     collections::BTreeMap,
@@ -363,8 +364,8 @@ impl ZifWriter {
         }
         result?;
         let format = match self.profile.expect("initialized ZIF profile") {
-            Profile::Jpeg { .. } => image::ImageFormat::Jpeg,
-            Profile::PngRgb => image::ImageFormat::Png,
+            Profile::Jpeg { .. } => InputFormat::Jpeg,
+            Profile::PngRgb => InputFormat::Png,
         };
         Ok(StoredTile {
             rect,
@@ -907,7 +908,7 @@ mod tests {
                     id: 0,
                     size: size.clone(),
                     bytes,
-                    format: image::ImageFormat::Png,
+                    format: InputFormat::Png,
                     placement: TilePlacement {
                         position: Point { x: 0, y: 0 },
                         expected_size: None,
