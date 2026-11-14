@@ -49,7 +49,9 @@ const ROUTES: &[DiscoveryRoute] = &[
         .non_canonical(),
     paris::ARK_ROUTE,
     paris::MANIFEST_ROUTE.then_decode(decode_catalog),
-    viewer(js_matches(&SEADRAGON_EMBED)).decode(follow_seadragon_embed),
+    viewer(js_matches(&SEADRAGON_EMBED))
+        .regex_link(&SEADRAGON_EMBED, "$metadata")
+        .then_decode(decode_catalog),
     viewer(js_matches(&WDL_MARKER_RE)).decode(follow_wdl_template),
     DiscoveryRoute::regex_link(&DZI_LINK_RE, "$url"),
     DiscoveryRoute::regex_link(&OPEN_DZI_XML_RE, "$url"),
@@ -250,23 +252,6 @@ fn follow_polona_dzi(resource: DiscoveryResource<'_>) -> Result<ParsedResource, 
         Request::new(dzi.to_owned()),
         decode_catalog,
     ))
-}
-
-fn follow_seadragon_embed(
-    resource: DiscoveryResource<'_>,
-) -> Result<ParsedResource, DiscoveryError> {
-    let metadata = SEADRAGON_EMBED
-        .captures(resource.bytes())
-        .and_then(|captures| captures.name("metadata"))
-        .map(|capture| std::str::from_utf8(capture.as_bytes()))
-        .transpose()
-        .map_err(|_| DiscoveryError::InvalidMetadata("Seadragon metadata URL is not UTF-8".into()))?
-        .ok_or_else(|| {
-            DiscoveryError::InvalidMetadata("Seadragon embed lacks a metadata URL".into())
-        })?;
-    Ok(resource
-        .follow_relative(metadata)
-        .decode_with(decode_catalog))
 }
 
 mod paris;

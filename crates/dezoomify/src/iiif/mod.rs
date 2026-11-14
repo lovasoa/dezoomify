@@ -81,10 +81,18 @@ const ROUTES: &[DiscoveryRoute] = &[
     metadata(file_name("manifest.json").specificity(Medium)).decode(decode),
     json_metadata::<Document>(),
     metadata(any()).try_decode(embedded_metadata),
-    viewer(html_matches(&ABS_INFO_JSON_RE).specificity(Medium)).decode(follow_info_json_url),
-    viewer(html_matches(&REL_INFO_JSON_RE).specificity(Medium)).decode(follow_info_json_url),
-    viewer(js_matches(&ABS_INFO_JSON_RE).specificity(Medium)).decode(follow_info_json_url),
-    viewer(js_matches(&REL_INFO_JSON_RE).specificity(Medium)).decode(follow_info_json_url),
+    viewer(html_matches(&ABS_INFO_JSON_RE).specificity(Medium))
+        .regex_link(&ABS_INFO_JSON_RE, "$0")
+        .then_decode(decode),
+    viewer(html_matches(&REL_INFO_JSON_RE).specificity(Medium))
+        .regex_link(&REL_INFO_JSON_RE, "$url")
+        .then_decode(decode),
+    viewer(js_matches(&ABS_INFO_JSON_RE).specificity(Medium))
+        .regex_link(&ABS_INFO_JSON_RE, "$0")
+        .then_decode(decode),
+    viewer(js_matches(&REL_INFO_JSON_RE).specificity(Medium))
+        .regex_link(&REL_INFO_JSON_RE, "$url")
+        .then_decode(decode),
 ];
 
 /// IIIF format. See <https://iiif.io/>.
@@ -267,45 +275,6 @@ fn direct_image_request_url_maps_to_info_json() {
         "https://img.example/iiif/item.tif/info.json?v=1"
     );
     assert!(image_request_info("https://img.example/photo.jpg").is_none());
-}
-
-/// At most this many harvested references are ranked; only the best is followed.
-const MAX_HARVESTED_INFO_JSON_URLS: usize = 8;
-/// Upper bound scanned before ranking, so ranking prefers `iiif` URLs even
-/// on pages that mention many `info.json` references.
-const MAX_SCANNED_INFO_JSON_URLS: usize = 32;
-
-fn harvest_info_json_urls(bytes: &[u8]) -> Vec<String> {
-    let mut urls: Vec<String> = Vec::new();
-    let references = ABS_INFO_JSON_RE.find_iter(bytes).chain(
-        REL_INFO_JSON_RE
-            .captures_iter(bytes)
-            .filter_map(|captures| captures.name("url")),
-    );
-    for reference in references {
-        let text = String::from_utf8_lossy(reference.as_bytes()).into_owned();
-        if !urls.contains(&text) {
-            urls.push(text);
-        }
-        if urls.len() >= MAX_SCANNED_INFO_JSON_URLS {
-            break;
-        }
-    }
-    urls.sort_by_key(|url| !url.to_lowercase().contains("iiif"));
-    urls.truncate(MAX_HARVESTED_INFO_JSON_URLS);
-    urls
-}
-
-fn follow_info_json_url(resource: DiscoveryResource<'_>) -> Result<ParsedResource, DiscoveryError> {
-    let base = crate::web_page::page_base(resource);
-    let target = harvest_info_json_urls(resource.bytes())
-        .into_iter()
-        .map(|url| resolve_relative(&base, url.trim()))
-        .find(|url| *url != resource.final_uri())
-        .ok_or_else(|| {
-            DiscoveryError::InvalidMetadata("page declares no IIIF info.json URL".into())
-        })?;
-    Ok(ParsedResource::FollowWith(Request::new(target), decode))
 }
 
 fn catalog(uri: &str, contents: &[u8]) -> Result<DiscoveryCatalog, DiscoveryError> {
@@ -988,17 +957,32 @@ fn page_with_embedded_info_json_url_is_followed() {
 }
 
 #[test]
-fn harvest_prefers_iiif_candidates_and_resolves_relative_urls() {
-    let urls = harvest_info_json_urls(
-        br"see /docs/info.json and //cdn.example/iiif/item/info.json and ./local/info.json",
+fn absolute_and_relative_iiif_links_are_all_offered() {
+    let (catalog, _) = crate::test_support::discover(
+        SPEC,
+        "https://museum.example/exhibit/page",
+        &[(
+            br#"<a href="//cdn.example/iiif/item/info.json">A</a>
+            <a href="./local/info.json">B</a>
+            <script>const duplicate = '//cdn.example/iiif/item/info.json';</script>"#,
+            None,
+        )],
     );
+    let urls: Vec<_> = catalog
+        .unwrap()
+        .into_entries()
+        .into_iter()
+        .map(|entry| match entry {
+            DiscoveredEntry::Deferred(image) => image.uri,
+            _ => panic!("expected image choices"),
+        })
+        .collect();
     assert_eq!(
-        urls.join(","),
-        "//cdn.example/iiif/item/info.json,/docs/info.json,./local/info.json"
-    );
-    assert_eq!(
-        resolve_relative("https://museum.example/exhibit/page", "./local/info.json"),
-        "https://museum.example/exhibit/local/info.json"
+        urls,
+        [
+            "https://cdn.example/iiif/item/info.json",
+            "https://museum.example/exhibit/local/info.json"
+        ]
     );
 }
 

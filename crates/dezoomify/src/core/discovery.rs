@@ -493,15 +493,24 @@ impl RoutePattern {
     pub const fn resolve_metadata(self, mapper: UrlMapper) -> DiscoveryRoute {
         self.route(RouteAction::MapUrl(mapper))
     }
-    /// Follow a decoded attribute against the document's base URI.
+    /// Follow each matching element's decoded attribute against the document base.
     pub const fn follow_attribute(self, attribute: &'static str) -> DiscoveryRoute {
         self.attribute_url(attribute, "", "")
     }
-    /// Follow a metadata file beneath the selected element's text URL.
+    /// Follow metadata files beneath matching elements' text URLs.
     pub const fn text_file(self, filename: &'static str) -> DiscoveryRoute {
         self.route(RouteAction::TextFile(filename))
     }
-    /// Follow a metadata file beneath the first regex capture's URL.
+    /// Expand every regex match into independently openable resource references.
+    pub const fn regex_link(
+        self,
+        regex: &'static LazyLock<BytesRegex>,
+        template: &'static str,
+    ) -> DiscoveryRoute {
+        self.route(RouteAction::RegexLink(regex, template, None))
+    }
+
+    /// Follow a metadata file beneath every captured URL.
     pub const fn regex_file(
         self,
         regex: &'static LazyLock<BytesRegex>,
@@ -545,6 +554,44 @@ pub struct DiscoveryRoute {
 }
 
 impl DiscoveryRoute {
+    fn is_reference(self) -> bool {
+        matches!(
+            self.handler,
+            RouteAction::FollowAttribute { .. }
+                | RouteAction::RegexLink(..)
+                | RouteAction::TextFile(_)
+        )
+    }
+
+    fn select_resource(self, resource: DiscoveryResource<'_>) -> Option<DiscoveryResource<'_>> {
+        let selected = match self.matcher.pattern {
+            MatchPattern::Css(selector, accept) => {
+                resource.select(selector).find(|tag| accept(tag))
+            }
+            _ => None,
+        };
+        let matched = match self.matcher.pattern {
+            MatchPattern::Css(..) => selected.is_some(),
+            MatchPattern::ResourcePredicate(predicate) => predicate(resource),
+            MatchPattern::ContentRegex(regex) => regex.is_match(resource.bytes()),
+            MatchPattern::MarkupRegex(regex) => {
+                resource.is_html() && regex.is_match(resource.bytes())
+            }
+            MatchPattern::ScriptRegex(regex) => {
+                crate::web_page::script_bodies(resource).any(|bytes| regex.is_match(bytes))
+            }
+            _ => {
+                self.matcher.matches_url(resource.final_uri())
+                    || (resource.uri() != resource.final_uri()
+                        && self.matcher.matches_url(resource.uri()))
+            }
+        };
+        matched.then_some(DiscoveryResource {
+            selected,
+            ..resource
+        })
+    }
+
     fn evidence(self) -> Option<Specificity> {
         self.matcher.specificity.or(match self.matcher.pattern {
             MatchPattern::Any => None,
@@ -559,16 +606,10 @@ impl DiscoveryRoute {
         })
     }
 
-    /// Expand named regex captures into a metadata reference (`$name`).
+    /// Expand every match into an independently openable resource (`$name`).
+    /// Multiple distinct references become deferred image choices.
     pub const fn regex_link(regex: &'static LazyLock<BytesRegex>, template: &'static str) -> Self {
-        Self {
-            matcher: DiscoveryMatch::new(MatchPattern::ContentRegex(regex)),
-            kind: RouteKind::Viewer,
-            handler: RouteAction::RegexLink(regex, template, None),
-            followed_decoder: None,
-            followed_intermediate: false,
-            canonical: true,
-        }
+        viewer(DiscoveryMatch::new(MatchPattern::ContentRegex(regex))).regex_link(regex, template)
     }
 
     /// Override the evidence strength of this route's matcher.
@@ -578,7 +619,8 @@ impl DiscoveryRoute {
         self
     }
 
-    /// Decode references produced by this route without running discovery again.
+    /// Decode a sole followed reference directly. Multiple independent references
+    /// remain deferred catalog choices until selected.
     #[must_use]
     pub const fn then_decode(mut self, decoder: Decoder) -> Self {
         self.followed_decoder = Some(decoder);
@@ -645,69 +687,23 @@ fn parse_resource(
     routes: &[DiscoveryRoute],
     resource: DiscoveryResource<'_>,
 ) -> Result<(ParsedResource, Option<Specificity>), DiscoveryError> {
-    for route in routes {
-        let selected = match route.matcher.pattern {
-            MatchPattern::Css(selector, accept) => {
-                resource.select(selector).find(|tag| accept(tag))
-            }
-            _ => None,
-        };
-        let matched = match route.matcher.pattern {
-            MatchPattern::Css(..) => selected.is_some(),
-            MatchPattern::ResourcePredicate(predicate) => predicate(resource),
-            MatchPattern::ContentRegex(regex) => regex.is_match(resource.bytes()),
-            MatchPattern::MarkupRegex(regex) => {
-                resource.is_html() && regex.is_match(resource.bytes())
-            }
-            MatchPattern::ScriptRegex(regex) => {
-                crate::web_page::script_bodies(resource).any(|bytes| regex.is_match(bytes))
-            }
-            _ => {
-                route.matcher.matches_url(resource.final_uri())
-                    || (resource.uri() != resource.final_uri()
-                        && route.matcher.matches_url(resource.uri()))
-            }
-        };
-        if !matched {
+    for (index, route) in routes.iter().enumerate() {
+        let Some(selected) = route.select_resource(resource) else {
             continue;
-        }
-        let resource = DiscoveryResource {
-            selected,
-            ..resource
         };
-        return match route.handler {
-            RouteAction::Decode(decoder) => decoder(resource),
-            RouteAction::TryDecode(decoder) => match decoder(resource) {
-                Some(result) => result,
-                None => continue,
-            },
-            RouteAction::FollowAttribute {
-                attribute,
-                prefix,
-                suffix,
-            } => {
-                let reference = resource.element()?.required(attribute)?;
-                Ok(resource.follow_relative(&format!("{prefix}{}{suffix}", reference.trim())))
+        let parsed = if route.is_reference() {
+            references::collect(&routes[index..], resource, route.evidence())
+        } else {
+            match route.handler {
+                RouteAction::Decode(decoder) => decoder(selected),
+                RouteAction::TryDecode(decoder) => match decoder(selected) {
+                    Some(result) => result,
+                    None => continue,
+                },
+                _ => continue,
             }
-            RouteAction::TextFile(filename) => {
-                Ok(resource.follow_file(resource.element()?.text.trim(), filename))
-            }
-            RouteAction::RegexLink(regex, template, filename) => {
-                let captures = regex.captures(resource.bytes()).ok_or_else(|| {
-                    DiscoveryError::InvalidMetadata("metadata path missing".into())
-                })?;
-                let mut link = Vec::new();
-                captures.expand(template.as_bytes(), &mut link);
-                let text = String::from_utf8_lossy(&link);
-                let reference = html_escape::decode_html_entities(text.trim());
-                Ok(match filename {
-                    Some(filename) => resource.follow_file(&reference, filename),
-                    None => resource.follow_relative(&reference),
-                })
-            }
-            RouteAction::MapUrl(_) | RouteAction::Plan(_) => continue,
-        }
-        .map(|parsed| {
+        };
+        return parsed.map(|parsed| {
             (
                 route.followed(parsed, resource.final_uri()),
                 route.evidence(),
@@ -720,8 +716,9 @@ fn parse_resource(
     ))
 }
 
-/// Routes are tried in declaration order. Specificity schedules discovery work;
-/// it does not reorder parser fallback within a format. A `try_decode` miss
+/// Decoders are tried in declaration order. A matching reference route collects
+/// all equally specific reference routes into distinct, independently openable
+/// image choices. Specificity does not reorder decoder fallback. A `try_decode` miss
 /// continues to the next route; matched decoder errors retain their cause.
 #[derive(Clone, Copy, Debug)]
 pub struct FormatSpec {
@@ -1143,6 +1140,7 @@ struct ParsedResponse {
     snapshot: bool,
 }
 
+mod references;
 mod search;
 pub use search::discover;
 
