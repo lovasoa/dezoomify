@@ -1,11 +1,11 @@
 //! Encoded tile output and bounded, local pyramid conversion. No PixelPipe.
 use crate::output::StagedDirectory;
 use dezoomify::model::{
-    Error, LimitContext, LimitReason, OutputPlan, ReusedTile, Size, TilePlacement,
+    Error, InputFormat, LimitContext, LimitReason, OutputPlan, ReusedTile, Size, TilePlacement,
 };
 use std::{
     collections::BTreeMap,
-    io::{Cursor, Read, Seek},
+    io::{Read, Seek},
     path::{Path, PathBuf},
     sync::atomic::{AtomicBool, Ordering},
 };
@@ -16,7 +16,7 @@ pub(crate) struct EncodedTile {
     pub placement: TilePlacement,
     pub bytes: Vec<u8>,
     pub size: Size,
-    pub format: image::ImageFormat,
+    pub format: InputFormat,
 }
 
 #[cfg(test)]
@@ -89,7 +89,7 @@ mod tests {
                 StoredTile {
                     rect,
                     size,
-                    format: image::ImageFormat::Png,
+                    format: InputFormat::Png,
                     bytes: TileBytes::Memory(bytes),
                 },
             )]),
@@ -138,31 +138,7 @@ mod tests {
     }
 }
 
-type Metadata = (Option<Vec<u8>>, Option<Vec<u8>>);
-
-pub(crate) fn tile_metadata(
-    bytes: &[u8],
-    format: image::ImageFormat,
-    budget: u64,
-) -> Result<Metadata, Error> {
-    use image::ImageDecoder as _;
-    let mut reader = image::ImageReader::with_format(Cursor::new(bytes), format);
-    let mut limits = image::Limits::default();
-    limits.max_alloc = Some(budget / 3);
-    reader.limits(limits);
-    let mut decoder = reader.into_decoder().map_err(decode_error)?;
-    let mut icc = decoder.icc_profile().map_err(decode_error)?;
-    let exif = decoder.exif_metadata().map_err(decode_error)?;
-    drop(decoder);
-    if icc.is_none() && format == image::ImageFormat::Png {
-        icc = png_icc(bytes, budget / 3)?;
-    }
-    memory_check(
-        (icc.as_ref().map_or(0, Vec::len) as u64 + exif.as_ref().map_or(0, Vec::len) as u64) * 3,
-        budget,
-    )?;
-    Ok((icc, exif))
-}
+pub(crate) use crate::codecs::{inspect, tile_metadata};
 
 impl EncodedTile {
     /// Conversion required by the output geometry/codec happens during acquisition.
@@ -190,7 +166,7 @@ impl EncodedTile {
             icc.as_deref(),
             exif.as_deref(),
         )?;
-        self.format = image::ImageFormat::Png;
+        self.format = InputFormat::Png;
         self.size = size;
         Ok(())
     }
@@ -202,57 +178,18 @@ impl EncodedTile {
     ) -> Result<image::RgbaImage, Error> {
         let pixels = u64::from(self.size.width) * u64::from(self.size.height);
         memory_check(self.bytes.len() as u64 + pixels * 16, budget)?;
-        let mut reader = image::ImageReader::with_format(Cursor::new(&self.bytes), self.format);
-        let mut limits = image::Limits::default();
-        limits.max_alloc = Some(budget.saturating_sub(self.bytes.len() as u64) / 2);
-        reader.limits(limits);
-        let image = reader.decode().map_err(decode_error)?.into_rgba8();
+        let image = crate::codecs::decode(
+            &self.bytes,
+            self.format,
+            Some(budget.saturating_sub(self.bytes.len() as u64) / 2),
+        )
+        .map_err(crate::codecs::decode_error)?;
         Ok(if *size == self.size {
             image
         } else {
             image::imageops::crop_imm(&image, 0, 0, size.width, size.height).to_image()
         })
     }
-}
-
-// Extract PNG ICC data with bounded inflation, without decoding pixels.
-pub(crate) fn png_icc(bytes: &[u8], cap: u64) -> Result<Option<Vec<u8>>, Error> {
-    if !bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
-        return Ok(None);
-    }
-    let mut at = 8;
-    while let Some(header) = bytes.get(at..at + 8) {
-        let len = u32::from_be_bytes(header[..4].try_into().expect("chunk length")) as usize;
-        let data = bytes
-            .get(at + 8..at + 8 + len)
-            .ok_or_else(|| Error::DecodeFailed("truncated PNG metadata".into()))?;
-        if &header[4..] == b"iCCP" {
-            let start = data
-                .iter()
-                .position(|&byte| byte == 0)
-                .filter(|&name| name > 0 && name <= 79)
-                .ok_or_else(|| Error::DecodeFailed("invalid PNG ICC name".into()))?
-                + 1;
-            if data.get(start) != Some(&0) {
-                return Err(Error::DecodeFailed("invalid PNG ICC compression".into()));
-            }
-            return fdeflate::decompress_to_vec_bounded(
-                &data[start + 1..],
-                usize::try_from(cap).unwrap_or(usize::MAX),
-            )
-            .map(Some)
-            .map_err(|error| match error {
-                fdeflate::BoundedDecompressionError::OutputTooLarge { .. } => {
-                    Error::ResourceLimit("PNG ICC metadata exceeds memory limit".into())
-                }
-                fdeflate::BoundedDecompressionError::DecompressionError { inner } => {
-                    Error::DecodeFailed(format!("PNG ICC inflation failed: {inner:?}").into())
-                }
-            });
-        }
-        at += len + 12;
-    }
-    Ok(None)
 }
 
 /// Tile positions refer to the stored raster. Remove JPEG display transforms
@@ -294,114 +231,6 @@ pub(crate) fn normalize_orientation(bytes: &mut [u8]) {
 }
 
 /// Header inspection does not decode pixel data.
-pub(crate) fn inspect(bytes: &[u8], budget: u64) -> Result<(Size, image::ImageFormat), Error> {
-    let mut reader = image::ImageReader::new(Cursor::new(bytes))
-        .with_guessed_format()
-        .map_err(|e| Error::DecodeFailed(e.to_string().into()))?;
-    let format = reader
-        .format()
-        .ok_or_else(|| Error::DecodeFailed("unknown tile format".into()))?;
-    check_structure(bytes, format)?;
-    let mut limits = image::Limits::default();
-    limits.max_alloc = Some(budget);
-    reader.limits(limits);
-    let (width, height) = reader.into_dimensions().map_err(decode_error)?;
-    Ok((Size { width, height }, format))
-}
-
-pub(crate) fn decode_error(error: image::ImageError) -> Error {
-    match error {
-        image::ImageError::Limits(_) => {
-            Error::ResourceLimit("tile decoder memory limit exceeded".into())
-        }
-        error => Error::DecodeFailed(error.to_string().into()),
-    }
-}
-
-// Bounded structural checks do not decompress pixels or validate entropy/zlib.
-fn check_structure(bytes: &[u8], format: image::ImageFormat) -> Result<(), Error> {
-    let invalid = || Error::DecodeFailed("truncated or invalid encoded tile structure".into());
-    match format {
-        image::ImageFormat::Png => {
-            let mut pos = 8usize;
-            let mut data = false;
-            while let Some(header) = bytes.get(pos..pos + 8) {
-                let len =
-                    u32::from_be_bytes(header[..4].try_into().expect("chunk length")) as usize;
-                let end = pos
-                    .checked_add(len)
-                    .and_then(|v| v.checked_add(12))
-                    .ok_or_else(invalid)?;
-                if end > bytes.len() {
-                    return Err(invalid());
-                }
-                match &header[4..] {
-                    b"IHDR" if pos == 8 && len != 13 => return Err(invalid()),
-                    b"IDAT" => data = true,
-                    b"IEND" => {
-                        return if len == 0 && data {
-                            Ok(())
-                        } else {
-                            Err(invalid())
-                        }
-                    }
-                    _ => {}
-                }
-                pos = end;
-            }
-            Err(invalid())
-        }
-        image::ImageFormat::Jpeg => {
-            let mut pos = 2;
-            let mut scan = false;
-            while bytes.get(pos) == Some(&0xff) {
-                while bytes.get(pos) == Some(&0xff) {
-                    pos += 1;
-                }
-                let marker = *bytes.get(pos).ok_or_else(invalid)?;
-                pos += 1;
-                if marker == 0xd9 {
-                    return if scan { Ok(()) } else { Err(invalid()) };
-                }
-                if marker == 0 || marker == 0xd8 {
-                    return Err(invalid());
-                }
-                if marker == 1 || (0xd0..=0xd7).contains(&marker) {
-                    continue;
-                }
-                let length = bytes.get(pos..pos + 2).ok_or_else(invalid)?;
-                let len = u16::from_be_bytes(length.try_into().expect("segment length")) as usize;
-                if len < 2 || len > bytes.len().saturating_sub(pos) {
-                    return Err(invalid());
-                }
-                pos += len;
-                if marker == 0xda {
-                    scan = true;
-                    while pos < bytes.len() {
-                        if bytes[pos] != 0xff {
-                            pos += 1;
-                            continue;
-                        }
-                        let start = pos;
-                        while bytes.get(pos) == Some(&0xff) {
-                            pos += 1;
-                        }
-                        let next = *bytes.get(pos).ok_or_else(invalid)?;
-                        if next == 0 || (0xd0..=0xd7).contains(&next) {
-                            pos += 1;
-                        } else {
-                            pos = start;
-                            break;
-                        }
-                    }
-                }
-            }
-            Err(invalid())
-        }
-        _ => Ok(()),
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Rect {
     pub x: u32,
@@ -430,7 +259,7 @@ pub(crate) enum TileBytes {
 pub(crate) struct StoredTile {
     pub rect: Rect,
     pub size: Size,
-    pub format: image::ImageFormat,
+    pub format: InputFormat,
     pub bytes: TileBytes,
 }
 pub(crate) struct TileLevel {
@@ -556,11 +385,12 @@ impl TileLevel {
             };
             // Decode plus RGBA conversion may temporarily own two pixel buffers.
             *decoded += 1;
-            let mut reader = image::ImageReader::with_format(Cursor::new(bytes), tile.format);
-            let mut limits = image::Limits::default();
-            limits.max_alloc = Some(budget.saturating_sub(region_bytes + encoded_len) / 2);
-            reader.limits(limits);
-            let image = reader.decode().map_err(decode_error)?.into_rgba8();
+            let image = crate::codecs::decode(
+                bytes,
+                tile.format,
+                Some(budget.saturating_sub(region_bytes + encoded_len) / 2),
+            )
+            .map_err(crate::codecs::decode_error)?;
             let left = rect.x.max(tile.rect.x);
             let top = rect.y.max(tile.rect.y);
             let right = (rect.x + rect.w).min(tile.rect.x + tile.rect.w);
@@ -662,13 +492,7 @@ pub(crate) fn downsample(
     }))
 }
 
-fn tile_path(
-    rect: Rect,
-    scale: u32,
-    format: image::ImageFormat,
-    canvas: &Size,
-    explicit: bool,
-) -> String {
+fn tile_path(rect: Rect, scale: u32, format: InputFormat, canvas: &Size, explicit: bool) -> String {
     let x = rect.x * scale;
     let y = rect.y * scale;
     let w = rect.w.saturating_mul(scale).min(canvas.width - x);
@@ -680,7 +504,7 @@ fn tile_path(
         } else {
             format!("{},", rect.w)
         },
-        if format == image::ImageFormat::Jpeg {
+        if format == InputFormat::Jpeg {
             "jpg"
         } else {
             "png"
@@ -874,10 +698,8 @@ impl IiifWriter {
         } else {
             tile.id
         };
-        let mut compatible = matches!(
-            tile.format,
-            image::ImageFormat::Jpeg | image::ImageFormat::Png
-        ) && tile.size.width == rect.w
+        let mut compatible = matches!(tile.format, InputFormat::Jpeg | InputFormat::Png)
+            && tile.size.width == rect.w
             && tile.size.height == rect.h
             && self.base.regular
             && rect == self.base.rect(index);
@@ -928,7 +750,7 @@ impl IiifWriter {
         &self,
         rect: Rect,
         scale: u32,
-        format: image::ImageFormat,
+        format: InputFormat,
         canvas: &Size,
         bytes: &[u8],
         cancelled: &AtomicBool,
@@ -962,7 +784,7 @@ impl IiifWriter {
         scale: u32,
         canvas: &Size,
         pixels: &image::RgbaImage,
-        format: image::ImageFormat,
+        format: InputFormat,
         cancelled: &AtomicBool,
     ) -> Result<PathBuf, Error> {
         memory_check(
@@ -983,7 +805,7 @@ impl IiifWriter {
         };
         let mut file = crate::output::StagedFile::new(&path)?;
         // Stream compressed bytes instead of retaining a second tile buffer.
-        let result = if format == image::ImageFormat::Jpeg {
+        let result = if format == InputFormat::Jpeg {
             crate::imaging::encode_jpeg_to(
                 file.writer(cancelled),
                 pixels,
@@ -1077,11 +899,11 @@ impl IiifWriter {
             .base
             .tiles
             .values()
-            .all(|tile| tile.format == image::ImageFormat::Jpeg)
+            .all(|tile| tile.format == InputFormat::Jpeg)
         {
-            image::ImageFormat::Jpeg
+            InputFormat::Jpeg
         } else {
-            image::ImageFormat::Png
+            InputFormat::Png
         };
         let mut normalized = TileLevel {
             size: self.base.size.clone(),
@@ -1228,7 +1050,7 @@ impl IiifWriter {
         let TileBytes::File(path) = &tile.bytes else {
             unreachable!()
         };
-        let ext = if format == image::ImageFormat::Jpeg {
+        let ext = if format == InputFormat::Jpeg {
             "jpg"
         } else {
             "png"
@@ -1253,7 +1075,7 @@ impl IiifWriter {
                 .map_err(|e| crate::output::write_failed("pyramid cleanup failed", &e))?;
         }
         let capabilities = serde_json::json!({"formats": [ext], "qualities": ["default"], "supports": ["sizeByWhListed"]});
-        let profile = if format == image::ImageFormat::Jpeg {
+        let profile = if format == InputFormat::Jpeg {
             serde_json::json!(["http://iiif.io/api/image/2/level0.json", capabilities])
         } else {
             serde_json::json!([capabilities])

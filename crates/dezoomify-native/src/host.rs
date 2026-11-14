@@ -589,7 +589,7 @@ impl<'a> NativeHost<'a> {
     async fn inspect_encoded(
         &self,
         mut bytes: Vec<u8>,
-    ) -> Result<(Vec<u8>, Size, image::ImageFormat), Error> {
+    ) -> Result<(Vec<u8>, Size, dezoomify::model::InputFormat), Error> {
         self.check_encoded_inflight(bytes.len())?;
         let budget = self
             .options
@@ -813,6 +813,7 @@ impl<'a> NativeHost<'a> {
         dimensions: Size,
         title: Option<&str>,
         format: OutputFormat,
+        grid: Option<dezoomify::model::OutputGrid>,
     ) -> Result<(), Error> {
         let destination = match &self.options.output {
             OutputTarget::File(path) => path.clone(),
@@ -822,6 +823,7 @@ impl<'a> NativeHost<'a> {
         let task = EncoderTask::start(
             &destination,
             dimensions,
+            grid.as_ref(),
             format,
             self.options.compression,
             self.options.output_retain_cap,
@@ -903,7 +905,12 @@ impl<'a> NativeHost<'a> {
                     || pending.iter().any(|tile| tile.pixels.transparent);
                 format = automatic_image_format(size(&dimensions), transparent);
             }
-            self.start_raster(dimensions, request.title.as_deref(), format)
+            let grid = self
+                .output_plan
+                .borrow()
+                .as_ref()
+                .and_then(|plan| plan.grid.clone());
+            self.start_raster(dimensions, request.title.as_deref(), format, grid)
                 .await?;
         }
         let pipe = Arc::clone(&self.raster.borrow().as_ref().expect("raster task").pipe);
@@ -1023,8 +1030,13 @@ impl Host for NativeHost<'_> {
             *self.tiled.borrow_mut() = Some(Arc::new(std::sync::Mutex::new(writer)));
         } else if let Some(dimensions) = &plan.canvas {
             if !matches!(self.options.output, OutputTarget::AutoImageDir { .. }) {
-                self.start_raster(dimensions.clone(), plan.title.as_deref(), self.format)
-                    .await?;
+                self.start_raster(
+                    dimensions.clone(),
+                    plan.title.as_deref(),
+                    self.format,
+                    plan.grid.clone(),
+                )
+                .await?;
             }
         }
         *self.output_plan.borrow_mut() = Some(plan);
@@ -1066,7 +1078,8 @@ impl Host for NativeHost<'_> {
                             && !crate::zif_output::can_reuse(&encoded.bytes))
                         || !matches!(
                             encoded.format,
-                            image::ImageFormat::Png | image::ImageFormat::Jpeg
+                            dezoomify::model::InputFormat::Png
+                                | dezoomify::model::InputFormat::Jpeg
                         )
                     {
                         self.check_encoded_inflight(encoded.bytes.len())?;
