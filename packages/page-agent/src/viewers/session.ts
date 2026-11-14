@@ -29,7 +29,13 @@ interface Session {
  * object. A host-attached channel in the same injection is the only way back
  * in; callers must wire one per scan to keep its loaders reachable. */
 const loaders = new Map<string, Session>();
-export type ViewerTile = { image: unknown; owned?: boolean } | { url: string };
+export interface ViewerDrawable {
+  image: unknown;
+  /** Borrowed drawables belong to the viewer's cache. Transferred bitmaps are
+   * closed after encoding, including failed or cancelled reads. */
+  ownership: "borrowed" | "transferred";
+}
+export type ViewerTile = ViewerDrawable | { url: string };
 export type ViewerLoader = (
   level: number,
   column: number,
@@ -66,7 +72,7 @@ export function registerViewer(
         return { ok: true, url: result.url };
       }
       operation = "encoding";
-      const blob = await imageBlob(result.image, extent, result.owned);
+      const blob = await imageBlob(result, extent);
       lifetime.signal.throwIfAborted();
       if (blob.size > SOURCE_FETCH_BYTE_LIMIT) throw new SizeLimitError(SOURCE_FETCH_BYTE_LIMIT);
       return { ok: true, buffer: await blob.arrayBuffer() };

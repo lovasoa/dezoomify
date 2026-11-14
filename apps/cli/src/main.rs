@@ -493,12 +493,9 @@ async fn run_native_with_page(
     let host = NativeHost::with_runtime(
         job_options_for(parsed, input, output),
         report::job_diagnostics(&parsed.logging, &display),
+        controls.unwrap_or_default(),
         runtime,
     )?;
-    let host = match controls {
-        Some(controls) => host.with_controls(controls),
-        None => host,
-    };
     let host = match page {
         Some(page) => host.with_document_page(page)?,
         None => host,

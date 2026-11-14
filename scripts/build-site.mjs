@@ -4,8 +4,7 @@
 // (vendored under legacy/, copied verbatim) serves /legacy/, and the Vite+React
 // app serves /. The website-deploy workflow runs this on GitHub Actions and
 // uploads dist/ to Cloudflare Pages with wrangler; `cargo xtask build web`
-// runs the same script locally. Nothing under dist/ is committed. See
-// docs/development.md for the deployment contract.
+// runs the same script locally. Nothing under dist/ is committed.
 //
 // Usage:
 //   node scripts/build-site.mjs            # full build (help, wasm glue,

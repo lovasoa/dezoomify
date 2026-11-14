@@ -49,5 +49,4 @@ app. Reports can still contain sensitive addresses; see
 
 ## Where to learn more
 
-[User guides](user/README.md) explain each app. [Security](security.md) describes
-the technical trust boundaries for contributors.
+[User guides](user/README.md) explain each app.

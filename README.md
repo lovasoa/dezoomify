@@ -1,88 +1,42 @@
 # Dezoomify
 
-[Dezoomify](https://dezoomify.ophir.dev/) finds the full image behind a
-zoomable viewer and assembles its tiles into a picture you can save. It works
-with image viewers used by museums, libraries, archives, and map collections.
+[Dezoomify](https://dezoomify.ophir.dev/) finds the full image behind a zoomable
+viewer and assembles its tiles into a picture you can save.
 
-## Runs in your browser and on your desktop
-
-The same Dezoomify codebase runs on different platforms, with different
-capabilities.
-
-- **[Website](https://dezoomify.ophir.dev/):** The easiest to run, but
-  least powerful. Nothing to install: paste the address of the image's page.
-  Some websites block it, and it cannot use your browser login. The browser
-  limits the maximum image size, so it may save a smaller resolution than
-  the source offers. Saves PNG files. [Guide](docs/user/website.md).
-- **Browser extension [for Chrome](https://chromewebstore.google.com/detail/dezoomify/iapjjopjejpelnfdonefbffahmcndfbm)
-  and [for Firefox](https://addons.mozilla.org/en-US/firefox/addon/dezoomify/):**
-  Works with websites where you are signed in and works around some
-  restrictions that prevent the website from saving images. It also finds
-  image addresses that are hidden behind the viewer: open the image's page
-  and click the Dezoomify button in your browser toolbar. Has the same final
-  image size limits as the website. [Guide](docs/user/browser-extension.md).
+- **[Website](https://dezoomify.ophir.dev/):** paste the viewing page address,
+  then save a PNG. No installation; browser image-size limits apply.
+  [Guide](docs/user/website.md).
+- **Browser extension for [Chrome](https://chromewebstore.google.com/detail/dezoomify/iapjjopjejpelnfdonefbffahmcndfbm)
+  and [Firefox](https://addons.mozilla.org/en-US/firefox/addon/dezoomify/):**
+  finds hidden image addresses and uses your source-page login.
+  [Guide](docs/user/browser-extension.md).
 - **[Desktop app](https://github.com/lovasoa/dezoomify/releases/latest):**
-  For Windows, macOS, and Linux. Saves larger images, opens local files, and
-  supports PNG, JPEG, TIFF, ZIF, WebP, and IIIF tile folders. Interrupted saves
-  can resume using cached tiles. Image size is limited by your available
-  memory. It can work with some sites that refuse the website's requests,
-  but cannot reuse your browser login; use the extension for signed-in pages.
-  [Guide](apps/desktop/desktop-app.md).
-- **[Command-line tool](docs/user/command-line.md):** The same saving
-  capabilities as the desktop app, for scripts. Choose a particular image or
-  zoom level, limit the resolution, or save a list of addresses with `--bulk`.
-  The [releases page](https://github.com/lovasoa/dezoomify/releases/latest)
-  provides a Linux x86_64 executable in the `dezoomify-cli` archive. To build
-  it from source, see below.
+  Windows, macOS, and Linux; larger images, local files, more output formats,
+  and cached tiles for interrupted saves. [Installation and use](apps/desktop/desktop-app.md).
+- **[Command-line tool](docs/user/command-line.md):** native saving for scripts,
+  image/level selection, and lists of addresses.
 
-Desktop installers are available as `.exe` (NSIS) for Windows x86_64, `.dmg` for
-Apple silicon Macs, and `.deb` for Linux x86_64. They are unsigned, so your
-operating system may ask you to confirm that you trust the installer. Use
-**Help → Check for updates…** to install a signed update after confirmation;
-see the [desktop guide](apps/desktop/desktop-app.md#install).
-
-The [legacy website](https://dezoomify.ophir.dev/legacy/) remains available.
-
-## Save your first image
-
-1. Open the page that shows the zoomable image and copy its address.
-2. Paste it into the [Dezoomify website](https://dezoomify.ophir.dev/)
-   and press **Dezoomify**.
-3. When the image is ready, press **Save** to keep the PNG file.
-
-Dezoomify supports IIIF, Deep Zoom, Zoomify, Google Arts & Culture, krpano,
-and [other image formats](docs/user/supported-formats.md). No app works with
-every website. If you already have the address of the image's description
-file, such as `info.json`, `ImageProperties.xml`, or a `.dzi` file, you can
-paste that directly instead of the viewer page.
+The apps recognize IIIF, Deep Zoom, Zoomify, Google Arts & Culture, krpano,
+and [other formats](docs/user/supported-formats.md). The
+[legacy website](https://dezoomify.ophir.dev/legacy/) remains available.
 
 ## If it doesn't work
 
-- **No image found:** Try the browser extension on the page showing the
-  image. If it still finds nothing, follow
-  [finding the image address](docs/user/finding-the-image-address.md) to
-  locate the description file yourself.
-- **Login required or access refused:** Use the extension while signed in.
-  If the site only serves images to its own viewer, the desktop app or CLI
-  can identify the viewing page in their requests; see
-  [forbidden or unauthorized errors](docs/user/troubleshooting.md#forbidden-or-unauthorized-errors).
-- **Image too large, blank, or impossible to save:** Use the desktop app.
-  Installing the extension does not remove the browser's size limits.
-- **Too many requests (429):** Wait a few minutes before trying again.
+Use the extension for signed-in pages and desktop for images beyond browser
+limits. For missing images, access refusals, and interrupted saves, see
+[troubleshooting](docs/user/troubleshooting.md) or
+[find the image address manually](docs/user/finding-the-image-address.md).
 
-See [troubleshooting](docs/user/troubleshooting.md) for interrupted saves
-and other problems. Search [existing issues](https://github.com/lovasoa/dezoomify/issues)
-for the site's name before
-[requesting support for a site](https://github.com/lovasoa/dezoomify/issues/new?template=0_new-site-support.md)
-or [reporting an app bug](https://github.com/lovasoa/dezoomify/issues/new?template=1_bug_report.md).
-Include the exact viewing page address, the address you gave Dezoomify,
-which app you used, and the error message or diagnostic report from
-**Technical details & logs**.
+Before [reporting a problem](https://github.com/lovasoa/dezoomify/issues),
+search existing issues for the site. Include the viewing page, the address you
+gave Dezoomify, the app, and its error or diagnostic report. Review reports for
+sensitive addresses before sharing.
 
 ## Build and contribute
 
-Install Rust and the Node.js version pinned in [`.node-version`](.node-version), then run these commands from the
-repository root:
+Install Rust and the Node.js version in [`.node-version`](.node-version).
+Native x86-64 builds need NASM 2.15 or newer for AVIF SIMD
+(`apt install nasm`, `brew install nasm`, or `choco install nasm`).
 
 ```sh
 cargo xtask setup
@@ -91,13 +45,19 @@ cargo xtask test
 cargo xtask dev web
 ```
 
-To build the command-line tool, run `cargo xtask build cli`. The executable
-is `target/debug/dezoomify-cli`:
+Setup installs frozen JavaScript dependencies and checks WASM tools; install
+Rust toolchains and browser binaries separately. Native builds bundle the
+offline viewer using Node, so run setup before building them.
+Use `cargo xtask --help` for build, development, and test targets.
+[Desktop prerequisites](apps/desktop/README.md#bundles) are platform-specific.
+
+To build the CLI, run `cargo xtask build cli`, then:
 
 ```sh
 target/debug/dezoomify-cli "https://museum.example/collection/painting" painting.png
 ```
 
-See the [development guide](docs/development.md) for build and test commands,
-and [Contributing a format](docs/CONTRIBUTING-format.md) to add support for a
-site format.
+Contribution rules are scoped in `AGENTS.md`. Start format support in
+[`crates/dezoomify/`](crates/dezoomify/AGENTS.md) with a
+[shared product fixture](fixtures/AGENTS.md). [Release recovery](release/README.md)
+and [licensing provenance](docs/licensing.md) have separate records.

@@ -1,4 +1,6 @@
-//! Generated asynchronous bindings for the shared algorithm and injected Host.
+//! Host declarations come from the core's member macro, including their contracts.
+//! Reject host promises with the tagged `model::Error` value: a string or JavaScript
+//! Error cannot preserve the structured cause used by Rust retry decisions.
 #![forbid(unsafe_code)]
 #![deny(clippy::unwrap_used)]
 
@@ -112,24 +114,20 @@ mod bindings {
     }
     dezoomify::host_members!(bind_host);
 
-    /// The retry policy of `Error::retryable()`, exposed at the boundary:
-    /// one policy in Rust; the shared UI reads the boundary-stamped
-    /// `retryable` hint as plain data.
+    /// UI retry hints must use this verdict to agree with acquisition policy.
     #[wasm_bindgen(js_name = isRetryable)]
     pub fn is_retryable(error: JsValue) -> Result<bool, JsValue> {
         let error: Error = decode(error).map_err(js_error)?;
         Ok(error.retryable())
     }
 
-    /// The secret/credential query-key policy of `SENSITIVE_QUERY_KEYS`,
-    /// exposed at the boundary: one vocabulary in Rust. The TypeScript list
-    /// exists only for pure callers that load no runtime.
+    /// Prefer this vocabulary when WASM is loaded; the TypeScript copy serves
+    /// pure callers that cannot load a runtime.
     #[wasm_bindgen(js_name = isSecretKey)]
     pub fn is_secret_key(key: &str) -> bool {
         dezoomify::model::is_secret_key(key)
     }
 
-    /// Whether a source URL carries secret-bearing query or fragment keys.
     #[wasm_bindgen(js_name = hasSecretParams)]
     pub fn has_secret_params(url: &str) -> bool {
         dezoomify::model::has_secret_params(url)

@@ -10,7 +10,7 @@ pub fn run_options_observed(
     mut observe: impl FnMut(&Controls, &Progress),
 ) -> Result<Publication, dezoomify::model::Error> {
     let host = NativeHost::new(options)?;
-    let controls = host.controls.clone();
+    let controls = host.controls().clone();
     host.on_progress(move |progress| observe(&controls, &progress));
     run_host(&host)
 }

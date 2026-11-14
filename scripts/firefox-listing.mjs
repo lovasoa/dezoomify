@@ -1,4 +1,5 @@
 // Listing updates are independent of package acceptance and safe to repeat.
+// AMO displays escaped HTML literally; description values use plain text or Markdown.
 import { readFile } from "node:fs/promises";
 import { updateFirefoxListing } from "./store-release.mjs";
 

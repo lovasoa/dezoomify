@@ -11,12 +11,17 @@ export interface TileDecodeHost {
   blobCtor?: new (parts: Array<unknown>, opts?: { type?: string }) => unknown;
 }
 export interface TileDecoder {
+  /** Success transfers the bitmap to the caller, which must close it. Aborting
+   * rejects the wait immediately; the native decoder may still be running. */
   decode(bytes: ArrayBuffer, signal?: AbortSignal): Promise<TileBitmap>;
+  /** Reject pending waits and close their eventual results. Already returned
+   * bitmaps remain the caller's responsibility. */
   dispose(): void;
+  /** Await native callbacks before reusing invocation resources. Call dispose
+   * first and stop submitting work; settlement alone does not prevent new decodes. */
   settle(): Promise<void>;
 }
 
-/** Browser image decoding owns its pixels until painting or cancellation closes them. */
 export function createTileDecoder(
   host: TileDecodeHost = {},
   diagnostics?: DiagnosticRecorder,

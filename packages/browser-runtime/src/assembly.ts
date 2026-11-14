@@ -1,4 +1,3 @@
-// Canvas decoding, painting, and PNG output for browser capabilities.
 import type { OutputDisposition, TilePlacement } from "@dezoomify/wasm-bindings";
 import { outputError, tileError } from "./failure.ts";
 import { BROWSER_LIMITS, type BrowserLimits, probeLimits } from "./limits.ts";
@@ -13,7 +12,6 @@ export type BrowserSaveDisposition = Extract<
 >;
 export type BrowserOutputDisposition = BrowserSaveDisposition | "display-only";
 
-/** Allocated output surface: geometry plus a 2D drawing context. */
 export interface AssemblyCanvas {
   width: number;
   height: number;
@@ -23,16 +21,13 @@ export interface AssemblyCanvas {
 export interface CanvasAssemblyDeps<C extends AssemblyCanvas = AssemblyCanvas> {
   diagnostics?: import("../../shared-ui/src/diagnostics.ts").DiagnosticRecorder;
   signal?: AbortSignal;
-  /** Decode acquired tile bytes into a bitmap (tile-decode's decoder). */
+  /** Transfer each returned bitmap to assembly, which closes it after painting
+   * or release. Rejecting cancellation must not abandon late decoded pixels. */
   decode(bytes: ArrayBuffer): Promise<TileBitmap>;
-  /**
-   * Apply one core processing recipe (e.g. `google-arts-decrypt`) to raw
-   * tile bytes before decoding with the pure WASM `applyProcessing` function.
-   */
   processTile(recipe: TilePlacement["processing"], bytes: ArrayBuffer): ArrayBuffer;
   /** Allocate the output surface; called only after limit validation. */
   createCanvas(width: number, height: number): C;
-  /** Encode the assembled surface (canvas-to-blob on the job tab). */
+  /** Settle only after encoding releases the surface, including cancellation. */
   encode(canvas: C, signal: AbortSignal): Promise<Blob>;
   /** Perform the product's save operation and return its actual disposition. */
   save(
@@ -41,9 +36,7 @@ export interface CanvasAssemblyDeps<C extends AssemblyCanvas = AssemblyCanvas> {
     height: number,
     signal: AbortSignal,
   ): BrowserSaveDisposition | Promise<BrowserSaveDisposition>;
-  /** Job source URL, named in limit-failure diagnostics. */
   sourceUrl?: string;
-  /** Limits override for tests; defaults to the browser canvas limits. */
   limits?: BrowserLimits;
   /**
    * Called once when the output becomes display-only (an ordinary image was
@@ -55,10 +48,12 @@ export interface CanvasAssemblyDeps<C extends AssemblyCanvas = AssemblyCanvas> {
   isTaintError?(error: unknown): boolean;
 }
 
+/** One output only. Probe tiles may arrive before dimensions are known; assembly
+ * retains them until prepare/finalize allocates the surface. Await acquisitions
+ * before finalizing, and release on every exit. Release permanently invalidates
+ * the assembly but keeps an already displayed canvas visible. */
 export interface CanvasAssembly {
-  /** Validate and reveal the declared output surface before acquisition. */
   prepare(canvas?: { width: number; height: number } | null): void;
-  /** Decode and paint immediately, or hold when the plan has no declared size. */
   acquireTile(tile: number, placement: TilePlacement, bytes: ArrayBuffer): Promise<void>;
   /**
    * Display-only acquisition: hold an ordinary image element for assembly.
@@ -66,13 +61,9 @@ export interface CanvasAssembly {
    * display-only (no pixel reads, no programmatic save).
    */
   acquireDisplayTile(tile: number, placement: TilePlacement, image: TileImageLike): void;
-  /** Output dimensions from the declared canvas or accumulated placements. */
   dimensions(): { width: number; height: number } | null;
-  /**
-   * The one awaited output operation: flush any retained tiles, encode and
-   * save, or keep a tainted canvas display-only.
-   * Throws a typed failure when the output cannot be produced.
-   */
+  /** A second call fails even if encoding failed. Display-only output skips
+   * encoding and saving; otherwise save's disposition is authoritative. */
   finalizeOutput(
     canvas?: { width: number; height: number } | null,
   ): Promise<BrowserOutputDisposition>;
@@ -194,7 +185,6 @@ export function createCanvasAssembly<C extends AssemblyCanvas>(
     deps.onDisplayOnly?.();
   }
 
-  /** Paint probe tiles that arrived before the declared output surface. */
   function flushHeld(): void {
     if (!canvas) return;
     for (const [tile, bitmap] of bitmaps) {
@@ -233,7 +223,6 @@ export function createCanvasAssembly<C extends AssemblyCanvas>(
     return null;
   }
 
-  /** Output size from accumulated placements (declared canvas unknown). */
   function derivedSize(): { width: number; height: number } {
     let width = 0;
     let height = 0;
@@ -248,7 +237,6 @@ export function createCanvasAssembly<C extends AssemblyCanvas>(
     return { width, height };
   }
 
-  /** Output size: the declared canvas, else the union of placements. */
   function outputSize(declared?: { width: number; height: number } | null): {
     width: number;
     height: number;

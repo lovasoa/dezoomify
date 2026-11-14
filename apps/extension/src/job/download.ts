@@ -4,7 +4,8 @@ import type { browser } from "wxt/browser";
 type Downloads = Pick<typeof browser.downloads, "download" | "search" | "cancel" | "onChanged">;
 type DownloadDelta = Parameters<Parameters<Downloads["onChanged"]["addListener"]>[0]>[0];
 
-/** Wait for the browser's saved-file result before the Rust algorithm can complete. */
+/** Retain the Blob URL until the download manager reports a terminal state or
+ * finishes cancellation. Resolving earlier can revoke bytes still being read. */
 export function saveExtensionBlob(
   downloads: Downloads,
   blob: Blob,

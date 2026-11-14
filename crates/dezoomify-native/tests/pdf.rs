@@ -163,7 +163,7 @@ fn interrupted_documents_publish_only_complete_pages() {
             .with_document_page(document.page().unwrap())
             .unwrap();
         if cancel {
-            host.controls.cancel();
+            host.controls().cancel();
         }
         let result = host.transport.block_on(dezoomify::dezoomify(
             host.inputs(),

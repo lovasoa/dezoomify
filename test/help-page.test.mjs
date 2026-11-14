@@ -11,7 +11,7 @@ const webDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const srcDir = path.join(webDir, "docs", "user");
 const helpDir = path.join(webDir, "help");
 const PAGES = readdirSync(srcDir)
-  .filter((f) => f.endsWith(".md") && f !== "README.md")
+  .filter((f) => f.endsWith(".md") && f !== "README.md" && f !== "AGENTS.md")
   .map((f) => f.replace(/\.md$/, ""))
   .concat("desktop-app");
 

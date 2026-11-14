@@ -1,4 +1,6 @@
-//! Encoder worker: read immutable strips from disk staging and compress them.
+//! Encoders read completed regions from disk while acquisition continues.
+//! Buffered codecs still allocate the complete RGBA image; disk staging only
+//! removes the need to retain out-of-order tiles in memory.
 use crate::{
     host::Controls,
     output::StagedFile,
@@ -12,6 +14,9 @@ use std::{
     sync::Arc,
 };
 
+/// Dropping requests cancellation but cannot join the blocking encoder. The host
+/// must consume this through `wait` or `abort` before releasing job resources.
+#[must_use]
 pub(crate) struct EncoderTask {
     pub(crate) pipe: Arc<PixelPipe>,
     task: Option<tokio::task::JoinHandle<Result<StagedFile, Error>>>,
@@ -21,6 +26,8 @@ pub(crate) struct EncoderTask {
 /// acquisition starts. Encoding consumes regions in order; metadata settlement
 /// and cancellation must complete before returning publishable staging.
 pub(crate) trait RasterEncoder: Send {
+    /// Choose delivery regions before creating the pipe. Returning a grid uses
+    /// raster-order cells with overlap cropped; `None` uses full-width strips.
     fn grid(
         &self,
         _size: &Size,
@@ -28,6 +35,8 @@ pub(crate) trait RasterEncoder: Send {
     ) -> Result<Option<OutputGrid>, Error> {
         Ok(None)
     }
+    /// Conservative preflight estimate, excluding disk staging and OS page cache.
+    /// `grid` must be the result of this encoder's negotiation above.
     fn workspace(&self, _size: &Size, _grid: Option<&OutputGrid>) -> u64 {
         0
     }

@@ -68,7 +68,8 @@ export interface BrowserHostDependencies {
   transport?(): ErrorTransport | null;
 }
 
-/** Concrete browser capabilities for one cancellable invocation. */
+/** One invocation owns its decoder, assembly and pending operations. Stop
+ * submitting Host calls and await settle before reusing product resources. */
 export class BrowserHost implements Host {
   private readonly deps: BrowserHostDependencies;
   private readonly resources = new AbortController();
@@ -334,8 +335,9 @@ export class BrowserHost implements Host {
     return this.loadResourceTile(source, tile.placement.processing === "none");
   }
 
-  /** Rust owns retries and concurrency; remember only successful display fallback.
-   * If fallback fails, retain the readable cause for the core's recovery policy. */
+  /** Ordinary images can bypass unreadable network responses only for unprocessed,
+   * complete tiles. A successful fallback makes that origin display-only for this
+   * invocation; HTTP refusals and decode failures must retain their typed cause. */
   private async loadResourceTile(
     request: ResourceRequest,
     unprocessed: boolean,
@@ -501,6 +503,8 @@ export class BrowserHost implements Host {
     }
   }
 
+  /** Abort access and release retained pixels, then await owned operations and
+   * native decode callbacks. Safe to repeat; the host cannot be reused afterward. */
   settle(): Promise<void> {
     this.settling ??= (async () => {
       this.resources.abort();

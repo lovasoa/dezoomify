@@ -1,9 +1,11 @@
 import { canvasToPngBlob, SizeLimitError } from "@dezoomify/browser-runtime";
 import type { Size } from "@dezoomify/wasm-bindings";
+import type { ViewerDrawable } from "./session.ts";
 
-/** Encode a loaded tile, clipping padding to the core's expected extent without
- * scaling. Cached viewer drawables are borrowed; close only owned bitmaps. */
-export async function imageBlob(value: unknown, extent: Size, owned = false): Promise<Blob> {
+/** The core's grid extent can be smaller than the viewer's padded drawable.
+ * Scaling to that extent would shift tile boundaries. */
+export async function imageBlob(tile: ViewerDrawable, extent: Size): Promise<Blob> {
+  const value = tile.image;
   if (Object.prototype.toString.call(value) === "[object Blob]") return value as Blob;
   const image = ((value as { canvas?: HTMLCanvasElement })?.canvas ??
     value) as CanvasImageSource & {
@@ -32,7 +34,10 @@ export async function imageBlob(value: unknown, extent: Size, owned = false): Pr
     context.drawImage(image, 0, 0);
     return await canvasToPngBlob(canvas);
   } finally {
-    if (owned && Object.prototype.toString.call(value) === "[object ImageBitmap]")
+    if (
+      tile.ownership === "transferred" &&
+      Object.prototype.toString.call(value) === "[object ImageBitmap]"
+    )
       (value as ImageBitmap).close();
   }
 }

@@ -1,15 +1,7 @@
-// Pure proxy security helpers (no server framework) so node:test can import them.
-
 import { hasSignedQuery } from "../../packages/shared-ui/src/source-url.ts";
 
 export const PROXY_MAX_REDIRECTS = 5;
 export const PROXY_MAX_BYTES = 2 * 1024 * 1024;
-
-// Signed/credential query keys deny proxying: URLs whose signature would
-// break, or that carry credentials, must never be proxied. The policy lives
-// once in `packages/shared-ui/src/source-url.ts` (`hasSignedQuery`) and is
-// shared with the browser's proxy-fallback gate in
-// `packages/browser-runtime/src/web-fetch.ts`.
 
 const HOP_BY_HOP = new Set([
   "connection",
@@ -31,16 +23,10 @@ const STRIPPED_INBOUND = new Set([
   ...HOP_BY_HOP,
 ]);
 
-// Discovery reads both structured metadata (JSON/XML/YAML manifests,
-// JSON-LD IIIF manifests, viewer JS, vendor metadata) and viewer HTML pages
-// (a Google Arts & Culture asset page, a krpano embed, an OpenSeadragon
-// page). Public images and binary image containers use the same bounded relay.
+// Viewer HTML and scripts can contain metadata absent from a separate manifest.
 const METADATA_TYPE =
   /^(?:application\/(?:ld\+)?json|(?:application|text)\/(?:xml|(?:x-)?(?:java|ecma)script)|text\/(?:plain|html|jscript|livescript|javascript1\.[0-5]))$/;
 
-// The client headers the relay forwards upstream. Everything else the
-// client sends (cookies, authorization, referer, origin, hop-by-hop) is
-// dropped by stripUpstreamHeaders below.
 const FORWARDED_CLIENT_HEADERS = ["user-agent", "accept-language", "accept", "range"] as const;
 
 export function forwardedClientHeaders(
@@ -90,14 +76,10 @@ function parseNumericPart(part: string): number | null {
     base = 16;
     digits = part.slice(2);
   } else if (/^0[0-7]*$/.test(part) && part.length > 1) {
-    // Leading-zero octal (pure 0-7 digits).
     base = 8;
   } else if (/^[0-9]+$/.test(part)) {
-    // Could still be octal-looking but contains 8/9 -> treat as decimal
-    // only if it does not look like hex; decimal parse will validate.
     base = 10;
   } else if (/^[0-9a-fA-F]+$/.test(part)) {
-    // Bare hex without 0x is ambiguous; treat as decimal only if all decimal.
     return null;
   } else {
     return null;
@@ -107,11 +89,11 @@ function parseNumericPart(part: string): number | null {
   return n;
 }
 
-/** Parse IPv4 literal (1-4 dot parts, decimal/octal/hex) to uint32, or null. */
+/** Include abbreviated, octal, and hex literals so alternative spellings of
+ * loopback/private addresses cannot escape the destination policy. */
 export function parseIPv4(host: string): number | null {
   const h = host.trim();
   if (h === "") return null;
-  // Reject anything with colons, letters beyond hex, etc. early except valid forms.
   if (h.includes(":")) return null;
   const parts = h.split(".");
   if (parts.length < 1 || parts.length > 4) return null;
@@ -312,6 +294,9 @@ export interface TargetValidation {
   reason?: string;
 }
 
+/** Checks URL spelling and, when supplied, a snapshot of DNS answers. Success
+ * does not pin resolution or validate the connected peer; the network adapter
+ * must provide that protection. Redirect targets need this check independently. */
 export function validateProxyTarget(
   targetUrl: string,
   opts?: {
@@ -385,7 +370,6 @@ function resolvedHostReason(
   lower: string,
   resolveHost?: (host: string) => string[] | null,
 ): string | undefined {
-  // Optional DNS double-check (rebinding test doubles).
   if (resolveHost) {
     let addrs: string[] | null = null;
     try {

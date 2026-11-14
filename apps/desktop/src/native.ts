@@ -48,10 +48,7 @@ export async function onOpenSource(
   return typeof stop === "function" ? (stop as () => void) : () => {};
 }
 
-/** Stamp the shell's retry verdict (`is_retryable`, the one policy in Rust)
- * onto a typed error in place as a plain `retryable` hint for the shared UI;
- * the payload itself stays untouched. A value the shell cannot classify keeps
- * no hint and so fails closed. */
+/** Keep retry policy in Rust. If IPC classification fails, the UI must not offer retry. */
 async function withVerdict<T>(error: T, api: DesktopIpc): Promise<T> {
   try {
     (error as JobError & { retryable?: boolean }).retryable =
@@ -71,6 +68,8 @@ export interface NativeInvocation {
   answer(question: number, choice: RetryChoice): Promise<void>;
   answerImage(question: number, choice: DesktopImageChoice): Promise<void>;
   openOutput(reveal: boolean): Promise<void>;
+  /** Detach listeners and retire native resources; published files survive.
+   * This does not await `finished`, so callers must still observe its rejection. */
   dispose(): Promise<void>;
 }
 
@@ -126,6 +125,9 @@ function deliverNativeEvent(
   }
 }
 
+/** Callbacks may run before this resolves. The returned controls are safe to use
+ * immediately: startup waits for native registration, avoiding a cancel/start race.
+ * Keep the invocation until its result is dismissed, then dispose it. */
 export async function invokeNative(
   request: { source: DesktopSource; settings: DesktopSettings },
   callbacks: NativeCallbacks,
@@ -247,7 +249,6 @@ export async function validateSettings(
   });
 }
 
-/** Open explicitly requested HTTPS links outside the app window. */
 export async function openExternalLink(url: string): Promise<void> {
   const address = new URL(url);
   if (address.protocol !== "https:" || address.username || address.password) return;

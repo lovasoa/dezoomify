@@ -102,7 +102,7 @@ export async function loadOpenSeadragonTile(
       callback,
     });
   });
-  return { image: data, owned: true };
+  return { image: data, ownership: "transferred" };
 }
 
 /** Find the library's base TileSource through its geometry API, even when its
@@ -138,7 +138,7 @@ async function resolveImage(
   // revoking page-owned URLs or downloading their original resource again.
   try {
     const response = await fetch(url, { signal });
-    return { image: await response.blob() };
+    return { image: await response.blob(), ownership: "transferred" };
   } catch (error) {
     throw loadFailure(error, undefined, src);
   }

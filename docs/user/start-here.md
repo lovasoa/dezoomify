@@ -2,50 +2,28 @@
 
 # Start here
 
-Dezoomify saves a full-resolution zoomable image as a single picture file you
-can keep. Museums, libraries, and archives often show their artworks in a
-viewer that displays only small pieces at a time; Dezoomify gathers those
-pieces and assembles them into the complete image.
+Dezoomify assembles a full image from the pieces loaded by a zoomable viewer.
 
 ## Which app should I use?
 
-Dezoomify comes in four apps. They all understand the same websites; they
-differ in what they can reach and how large an image they can save.
+Try the [website](./website.md) first: paste the viewing page address and save
+the result. Choose another app when:
 
-**The website is the right choice for most images.** Go to the
-[Dezoomify website](./index.html), paste the address of the page that shows
-your image, and press the Dezoomify button. Nothing to install.
-
-Choose a different app when:
-
-- **The page asks you to sign in or subscribe.** The website runs without
-  signing in anywhere, so it cannot see pages that are only visible to
-  members. The [browser extension](./browser-extension.md) works inside your
-  own browser with your own session, so it can.
-- **The image is enormous** (a gigapixel panorama, a whole digitized
-  manuscript). A browser tab can run out of room for very large pictures.
-  The [desktop app](../../apps/desktop/desktop-app.md) runs on your computer subject to
-  available memory instead of a browser tab limit, and saves one
-  job to one file or IIIF tile folder ([file formats](../../apps/desktop/desktop-app.md#choosing-the-file-format)).
-- **You want to save from scripts.** The
-  [command-line tool](./command-line.md) saves one image per run.
-
-Not sure which one applies? Try the website first: it tells you clearly when
-it cannot finish a job, and suggests the app that can.
+- **The page requires a login:** use the [extension](./browser-extension.md)
+  while signed in.
+- **The image exceeds browser size limits:** use
+  [desktop](../../apps/desktop/desktop-app.md), which can also open local files
+  and save more formats.
+- **You want scripts or a list of addresses:** use the
+  [command-line tool](./command-line.md).
 
 ## What Dezoomify is not
 
-- Dezoomify never breaks passwords or paywalls. If you can see the image in
-  your browser after signing in, the extension can usually
-  save it; Dezoomify cannot grant access to an image you are not allowed to see.
-- Dezoomify works on the images it recognizes. If a site uses an unusual
-  viewer, see [finding the image address](./finding-the-image-address.md) for
-  a way to help it, and [troubleshooting](./troubleshooting.md) when
-  something fails.
+Dezoomify cannot grant access to restricted images. If it cannot recognize a
+viewer, try [finding the image address](./finding-the-image-address.md) or
+[troubleshooting](./troubleshooting.md).
 
 ## Next steps
 
-- [Save your first image from the website](./website.md)
-- [Install the browser extension](./browser-extension.md)
-- [Install the desktop app](../../apps/desktop/desktop-app.md)
+- [Save your first image](./website.md)
 - [Supported websites and image formats](./supported-formats.md)

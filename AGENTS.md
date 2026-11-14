@@ -1,60 +1,40 @@
-One Rust algorithm powers the website, extension, desktop and CLI via injected
-`Host` capabilities.
-See [Architecture](docs/architecture.md), [Development](docs/development.md),
-[Testing](docs/testing.md), [guides](docs/README.md) and
-[shared UI rules](packages/shared-ui/AGENTS.md).
+Use a shared Rust algorithm through injected `Host` capabilities. Keep product
+features in their product when that is simpler; products never import each other.
 
-Use experienced engineering judgment. Keep product-specific features in their
-product when that is simpler; share code when it improves the design.
+## Boundaries
 
-## Invariants
-
-- Keep the app at `/legacy/` stable. Product changes belong to `/` and the
-  other products; website assembly copies `legacy/` byte for byte.
-- Keep parsers/geometry pure. Hosts own I/O, clocks, codecs, resources and tasks.
-  Products never import each other; shared UI never accesses host globals.
-  Browser transport/image modules receive callbacks.
-- Define cross-language types in `crates/dezoomify/src/model.rs`; import generated
-  bindings, never hand-edit. Run `cargo xtask bindings generate` after boundary
-  changes. Branch on error `kind` and structured facts, not prose.
-- Proxy only public image-download resources without credentials. Extension scans
-  need explicit action; session access needs granted permissions. Declare only used
-  permissions; see [Security](docs/security.md).
+- Preserve `legacy/` byte for byte when assembling the website.
+- Define cross-language values in `crates/dezoomify/src/model.rs`; import generated
+  bindings and run `cargo xtask bindings generate` after boundary changes.
+  Branch on error `kind` and structured facts.
+- Keep exact URLs, settings, and error causes in bounded local diagnostics.
+  Never record cookies or authentication headers. Reports are shared only by
+  explicit user action; do not promise automatic sanitization.
 - Do not commit website output. Track generated files only in
   `packages/wasm-bindings` and `generated/*.json`.
 - Use Node for authored HTTP servers, including Rust fixtures. Live tests are opt-in.
-- Read before editing, use `apply_patch`, and preserve unrelated work. Keep exact
-  URLs, settings, and error causes in bounded local diagnostics.
+- Read before editing, use `apply_patch`, and preserve unrelated work.
 
-## Documentation
+## Source contracts and instructions
 
-Explain caller obligations beyond the types at module/API declarations, including
-internal APIs with nontrivial ordering, ownership, or failure rules. Read affected
-callers and tests before documenting behavior; resolve discrepancies and update
-contracts with behavior changes. Prefer a simpler interface over a complex comment.
-See [Caller contracts](docs/code-quality.md).
+Prefer types and interfaces that enforce correct use. Comment only on obligations
+or rationale the declarations cannot express: ownership, ordering, units, partial
+effects, cancellation, and failure recovery. Read implementations, callers, and
+behavior tests before claiming a guarantee; update the owning declaration when
+behavior changes. Do not narrate code or repeat a contract at its callers.
 
-Keep docs short and durable. Link to source/help for variable names,
-values, schedules, schemas and API details; do not copy them into prose.
-Explain rationale or pitfalls when useful; omit walkthroughs and speculative
-references. Guide updates are optional unless the change affects their advice;
-source contracts must stay accurate. Guides: `docs/user/`;
-desktop: `apps/desktop/desktop-app.md`; setup: its README.
-Apply this to nested instructions too.
+Keep development instructions short in `AGENTS.md` at the deepest directory
+containing their scope. Put explanations of code beside that code. Preserve
+user-facing help in `docs/user/` and `apps/desktop/desktop-app.md`; link to source
+or command help for changing inventories, values, and schemas.
 
-## Tests and reviews
+## Validation
 
-Tests must exercise useful user-observable behavior. Never read or assert
-source files, and never encode architecture, wiring, or call shapes in a test.
-Use judgment: not every change needs a test. Prefer short, readable scenarios
-covering real production behavior with little setup: one shared image fixture
-over four product tests; retry yielding a download over assertions about helper
-calls. Avoid copied constants, tautologies, tests of tests and redundant coverage.
+Test user-observable behavior at its owning layer. Never assert source contents,
+architecture, wiring, or helper call shapes. Prefer a minimal shared product
+fixture over repeated successful saves. Use controlled clocks and barriers for
+pending work; register cleanup before assertions. Not every change needs a test.
 
-Keep modules focused and code concise. A third copy of logic calls for a shared
-abstraction; avoid speculative frameworks. Prioritize easy reviews: focused PRs,
-brief descriptions of the problem, behavior and relevant validation; no file
-inventories or implementation tours.
-
-Choose validation by risk; see `cargo xtask --help` and Testing. Use focused checks;
-`cargo xtask test all` and `cargo xtask ci local` cover shared product behavior.
+Choose checks by risk using `cargo xtask --help`. `cargo xtask test all` covers
+shared product behavior; `cargo xtask ci local` adds static checks and audit.
+Keep modules focused; a third copy of logic calls for a shared abstraction.

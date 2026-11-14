@@ -9,7 +9,8 @@ type BrowserApi = {
 
 type BrowserTab = { id?: number; url?: string };
 
-/** The background only opens and focuses the job page for a toolbar click. */
+/** Jobs outlive service-worker restarts: only tab associations live here.
+ * Scanning, permission prompts and downloads belong to the job page. */
 export function createBackgroundLauncher({
   browserApi,
   testing = false,

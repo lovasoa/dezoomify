@@ -64,7 +64,6 @@ struct ControlState {
     retry_waiting: AtomicBool,
     reader: std::sync::Mutex<Option<std::sync::Weak<PixelPipe>>>,
 }
-/// Honest execution accounting, reported with every result.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize)]
 pub struct Instrumentation {
     /// Tile/probe/metadata operations attempted.
@@ -99,7 +98,8 @@ pub struct Instrumentation {
     pub late_repaints: u64,
 }
 
-/// Honest native publication record: what was actually written.
+/// Set only after destination publication succeeds. A prepared document page has
+/// no publication of its own; its document owner publishes the complete file.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Publication {
     pub path: PathBuf,
@@ -257,10 +257,13 @@ struct PendingPixels {
     pixels: StoredPixels,
 }
 
-/// Concrete native resources and injected user interactions for one invocation.
+/// Use a fresh host for each image. The shared runner settles it on every exit;
+/// callers using staged `Job` operations must call `Host::settle` themselves before
+/// releasing the runtime or beginning another page in the same document.
 pub struct NativeHost<'a> {
     pub options: JobOptions,
-    pub controls: Controls,
+    // Workers retain a clone; replacing this scope would split cancellation.
+    controls: Controls,
     pub diagnostics: Diagnostics,
     pub transport: NativeTransport,
     fetch_limits: FetchLimits,
@@ -300,14 +303,20 @@ impl<'a> NativeHost<'a> {
     }
 
     pub fn with_diagnostics(options: JobOptions, diagnostics: Diagnostics) -> Result<Self, Error> {
-        Self::with_runtime(options, diagnostics, NativeTransport::create_runtime()?)
+        Self::with_runtime(
+            options,
+            diagnostics,
+            Controls::default(),
+            NativeTransport::create_runtime()?,
+        )
     }
 
-    /// Create a fresh job and HTTP client using a shared runtime. The caller must
-    /// retain a runtime owner outside async work until all hosts have settled.
+    /// Retain another runtime owner until all hosts settle, then release it outside
+    /// async work: dropping Tokio's last runtime owner within async work can panic.
     pub fn with_runtime(
         options: JobOptions,
         diagnostics: Diagnostics,
+        controls: Controls,
         runtime: Arc<tokio::runtime::Runtime>,
     ) -> Result<Self, Error> {
         let mut options = options.normalized();
@@ -347,7 +356,6 @@ impl<'a> NativeHost<'a> {
                 .ok()
                 .and_then(|url| url.host_str().map(str::to_string)),
         );
-        let controls = Controls::default();
         let workers = BlockingTasks::new(controls.clone());
         Ok(Self {
             options,
@@ -394,12 +402,8 @@ impl<'a> NativeHost<'a> {
         Ok(self)
     }
 
-    /// Install invocation controls before using any Host capability. Blocking
-    /// workers and acquisitions then share cancellation and settlement ownership.
-    pub fn with_controls(mut self, controls: Controls) -> Self {
-        self.workers = BlockingTasks::new(controls.clone());
-        self.controls = controls;
-        self
+    pub fn controls(&self) -> &Controls {
+        &self.controls
     }
 
     pub fn on_progress(&self, callback: impl FnMut(Progress) + 'a) {
