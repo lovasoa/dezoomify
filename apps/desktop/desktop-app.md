@@ -39,6 +39,9 @@ Pause stops new tile downloads; Cancel remains available while output finishes.
 When a source offers several images, choose **Download all** above the image
 picker or choose one image individually. Batch results show each saved file and
 any failures. Cancelling stops the remaining work and keeps completed saves.
+With PDF selected, the batch saves one file with one page per image, in picker
+order. If an image fails or you cancel, completed pages are saved and the
+unfinished image is omitted. Use **Open document** in the batch results.
 
 Open local source files through **File → Open…**,
 **⌘O** on macOS, **Ctrl+O** on Windows/Linux, or by dropping a file onto the window.
@@ -108,12 +111,18 @@ This does not sign you in or transfer your browser session.
 - **Auto** chooses JPEG for an opaque image within JPEG's dimensions, otherwise PNG.
 - **PNG or TIFF** are lossless choices for archiving and editing.
 - **JPEG** suits smaller on-screen copies; it is limited to 65,535 pixels per side.
+- **JPEG 2000** writes the original tile grid incrementally. It supports lossless
+  and lossy RGB output, without alpha, and requires a regular source grid with
+  at most 65,535 tiles. Compression zero is lossless.
 - **WebP** is lossless here, but needs a complete pixel buffer and is limited to
   16,383 pixels per side.
 - **AVIF** saves lossy images with transparency, up to 65,535 pixels per side.
   It needs the complete image in memory and does not preserve embedded color
   profiles. Quality 100 is not a lossless mode.
 - **ZIF** is a tiled multi-resolution image and omits transparency.
+- **PDF** preserves selected image resolution on a marginless page. Compatible
+  source tiles stay compressed; other tiles use lossless conversion with alpha.
+  **Download all** puts the images in a single multi-page document.
 - **IIIF** saves a folder with an offline viewer. Press Open or open `viewer.html`
   in your browser. Keep the whole folder together, including `full/` overview images.
 
@@ -123,7 +132,7 @@ for smaller files, and each format decides the tradeoff in detail and encoding
 time. The slider is disabled when the format cannot adjust compression.
 An amber warning marks very low lossy quality, where text and fine details may
 become unreadable. The cutoff is a guideline; the effect depends on the image.
-Compatible IIIF/ZIF tiles keep their original compressed bytes.
+Compatible IIIF/ZIF/PDF tiles keep their original compressed bytes.
 
 Size estimates assume an image filling the selected maximum dimensions; smaller
 sources or different aspect ratios can produce much smaller files. They use the

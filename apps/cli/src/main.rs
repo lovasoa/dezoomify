@@ -5,11 +5,14 @@
 #![deny(clippy::unwrap_used)]
 
 mod arguments;
+mod batch_output;
 mod interactive;
+mod interrupt;
 mod report;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use arguments::Args;
@@ -29,19 +32,20 @@ impl Throttler {
         }
     }
 
-    fn wait(&mut self) {
-        if self.min_interval.is_zero() {
-            self.last = Some(Instant::now());
-            return;
+    async fn wait_interruptible(&mut self, controls: &dezoomify_native::Controls) -> bool {
+        let remaining = self.last.map_or(Duration::ZERO, |last| {
+            self.min_interval.saturating_sub(last.elapsed())
+        });
+        tokio::select! {
+            biased;
+            _ = controls.wait_cancelled() => return false,
+            _ = tokio::time::sleep(remaining) => {},
         }
-        if let Some(last) = self.last {
-            let next = last + self.min_interval;
-            let now = Instant::now();
-            if next > now {
-                std::thread::sleep(next - now);
-            }
+        if controls.is_cancelled() {
+            return false;
         }
         self.last = Some(Instant::now());
+        true
     }
 }
 
@@ -291,7 +295,6 @@ fn progress_view(
 }
 
 fn run_bulk(parsed: Args) {
-    let level = parsed.logging.clone();
     let bulk_arg = parsed.bulk.clone().unwrap_or_default();
     let entries = match load_bulk_entries(&bulk_arg, &parsed.headers, parsed.accept_invalid_certs) {
         Ok(entries) => entries,
@@ -304,58 +307,84 @@ fn run_bulk(parsed: Args) {
         eprintln!("error: no urls found in bulk file {bulk_arg}");
         std::process::exit(1);
     }
-    let base = parsed.bulk_output_file();
-    let mut throttler = Throttler::new(parsed.min_interval);
-    let mut items: Vec<report::BulkItem> = Vec::new();
-    let mut first = true;
-    for (index, (url, title)) in entries.iter().enumerate() {
-        if !first {
-            throttler.wait();
-        }
-        first = false;
-        let output = bulk_output_for(base.as_deref(), title.as_deref(), index);
-        let output_str = output.to_string_lossy().into_owned();
-        let outcome = run_one_bulk_image(&parsed, url, &output_str);
-        match outcome {
-            Ok((_tiles, actual_output)) => {
-                let item = report::BulkItem::ok(index, url, &actual_output);
-                if parsed.json {
-                    println!("{}", report::machine_bulk_item(&item));
-                } else if report::show_success(&level) {
-                    eprintln!("saved {actual_output} from {url}");
-                }
-                items.push(item);
+    let result = dezoomify_native::transport::NativeTransport::create_runtime()
+        .and_then(|runtime| runtime.block_on(run_batch(&parsed, &entries, &runtime)));
+    let failed = match result {
+        Ok(failed) => failed,
+        Err(error) => {
+            if parsed.json {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "kind": "bulk-completed", "total": entries.len(),
+                        "succeeded": 0, "failed": 0, "skipped": entries.len(), "error": error
+                    })
+                );
             }
-            Err(error) => {
-                let item = report::BulkItem::failed(index, url, &output_str, &error);
-                if parsed.json {
-                    println!("{}", report::machine_bulk_item(&item));
-                } else {
-                    eprintln!(
-                        "failed {url} -> {output_str}: {error} ({})",
-                        error.cause().kind()
-                    );
-                }
-                items.push(item);
-            }
+            eprintln!("error: {error} ({})", error.cause().kind());
+            true
         }
-    }
-    let succeeded = items.iter().filter(|i| i.status == "ok").count();
-    let failed = items.len().saturating_sub(succeeded);
-    if parsed.json {
-        println!(
-            "{}",
-            report::machine_bulk_summary(items.len(), succeeded, failed)
-        );
-    } else if report::show_success(&level) {
-        eprintln!(
-            "{}",
-            report::human_bulk_summary(items.len(), succeeded, failed)
-        );
-    }
-    if failed > 0 {
+    };
+    if failed {
         std::process::exit(1);
     }
+}
+
+/// Hosts settle sequentially. Document successes are buffered until publication;
+/// a failed page stops that document, while independent files continue.
+async fn run_batch(
+    parsed: &Args,
+    entries: &[(String, Option<String>)],
+    runtime: &Arc<tokio::runtime::Runtime>,
+) -> Result<bool, dezoomify::model::Error> {
+    use batch_output::BatchOutput;
+    use dezoomify::model::Error;
+    let mut output = BatchOutput::new(parsed, &entries[0].0)?;
+    let document = matches!(output, BatchOutput::Document { .. });
+    let controls = dezoomify_native::Controls::default();
+    let _interrupt = interrupt::Interrupt::watch(controls.clone());
+    let mut throttler = Throttler::new(parsed.min_interval);
+    let mut items: Vec<report::BulkItem> = Vec::new();
+    let mut failure = None;
+    for (index, (url, title)) in entries.iter().enumerate() {
+        let path = output.path(title.as_deref(), index);
+        let outcome = if !throttler.wait_interruptible(&controls).await {
+            Err(Error::Cancelled)
+        } else {
+            match output.page() {
+                Ok(page) => {
+                    run_native_with_page(
+                        parsed,
+                        url,
+                        &path,
+                        None,
+                        page,
+                        Some(controls.clone()),
+                        runtime.clone(),
+                    )
+                    .await
+                }
+                Err(error) => Err(error),
+            }
+        };
+        let item = match outcome {
+            Ok(result) => output.completed_item(index, url, result.publication)?,
+            Err(error) => {
+                let item = report::BulkItem::failed(index, url, &path.to_string_lossy(), &error);
+                failure = Some(error);
+                item
+            }
+        };
+        let stop = item.status == "failed" && (document || controls.is_cancelled());
+        if !document {
+            report::print_bulk_item(parsed, &item);
+        }
+        items.push(item);
+        if stop {
+            break;
+        }
+    }
+    output.finish(parsed, entries.len(), items, failure)
 }
 
 fn bulk_output_for(base: Option<&Path>, title: Option<&str>, index: usize) -> PathBuf {
@@ -415,19 +444,6 @@ fn sanitize_title(title: &str) -> String {
     clean.trim().to_string()
 }
 
-fn run_one_bulk_image(
-    parsed: &Args,
-    url: &str,
-    output: &str,
-) -> Result<(usize, String), dezoomify::model::Error> {
-    run_native(parsed, url, Path::new(output), None).map(|(publication, _)| {
-        (
-            publication.tile_count,
-            publication.path.to_string_lossy().into_owned(),
-        )
-    })
-}
-
 #[allow(clippy::result_large_err)] // Preserve the shared error until CLI presentation.
 fn run_native(
     parsed: &Args,
@@ -435,6 +451,36 @@ fn run_native(
     output: &Path,
     interaction: Option<&interactive::Interaction>,
 ) -> Result<(dezoomify_native::Publication, u64), dezoomify::model::Error> {
+    let runtime = dezoomify_native::transport::NativeTransport::create_runtime()?;
+    let result = runtime.block_on(run_native_with_page(
+        parsed,
+        input,
+        output,
+        interaction,
+        None,
+        None,
+        runtime.clone(),
+    ))?;
+    let publication = result
+        .publication
+        .ok_or_else(|| dezoomify::model::Error::Internal("output was not published".into()))?;
+    Ok((publication, result.sequence))
+}
+
+struct NativeRun {
+    publication: Option<dezoomify_native::Publication>,
+    sequence: u64,
+}
+
+async fn run_native_with_page(
+    parsed: &Args,
+    input: &str,
+    output: &Path,
+    interaction: Option<&interactive::Interaction>,
+    page: Option<dezoomify_native::DocumentPage>,
+    controls: Option<dezoomify_native::Controls>,
+    runtime: Arc<tokio::runtime::Runtime>,
+) -> Result<NativeRun, dezoomify::model::Error> {
     use dezoomify::model::Error;
     let started = Instant::now();
     let mut progress_gate = report::ProgressGate::default();
@@ -444,10 +490,19 @@ fn run_native(
     let interactive = interaction.is_some_and(|interaction| interaction.enabled);
     let display =
         report::InteractiveProgress::new(interactive && report::show_progress(&parsed.logging));
-    let host = NativeHost::with_diagnostics(
+    let host = NativeHost::with_runtime(
         job_options_for(parsed, input, output),
         report::job_diagnostics(&parsed.logging, &display),
+        runtime,
     )?;
+    let host = match controls {
+        Some(controls) => host.with_controls(controls),
+        None => host,
+    };
+    let host = match page {
+        Some(page) => host.with_document_page(page)?,
+        None => host,
+    };
     if let Some(interaction) = interaction {
         interaction.register(&host, &display);
     }
@@ -476,12 +531,8 @@ fn run_native(
             }
         }
     });
-    host.transport
-        .block_on(dezoomify::dezoomify(
-            host.inputs(),
-            host.algorithm_options(),
-            &host,
-        ))
+    dezoomify::dezoomify(host.inputs(), host.algorithm_options(), &host)
+        .await
         .inspect_err(|error| {
             host.diagnostics.finish(
                 if matches!(error.cause(), Error::Cancelled) {
@@ -492,10 +543,10 @@ fn run_native(
                 serde_json::json!({ "error": error }),
             );
         })?;
-    let publication = host
-        .publication()
-        .ok_or_else(|| Error::Internal("output was not published".to_string().into()))?;
-    Ok((publication, sequence.get() + 1))
+    Ok(NativeRun {
+        publication: host.publication(),
+        sequence: sequence.get() + 1,
+    })
 }
 
 fn parse_text_list(content: &str) -> Vec<(String, Option<String>)> {

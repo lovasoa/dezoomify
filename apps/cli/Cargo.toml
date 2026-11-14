@@ -15,10 +15,10 @@ dezoomify = { path = "../../crates/dezoomify" }
 dezoomify-native = { path = "../../crates/dezoomify-native" }
 indicatif = "0.18"
 serde_json.workspace = true
+tokio = { workspace = true, features = ["signal", "sync"] }
 
 [dev-dependencies]
 image.workspace = true
-tokio.workspace = true
 dezoomify-fixture-server = { path = "../../crates/fixture-server" }
 
 [lints]

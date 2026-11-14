@@ -535,13 +535,28 @@ export function createDesktopApplication(
       return;
     }
     attempt.batch = result.batch;
+    recordBatchResult(attempt, result.batch);
+  }
+
+  function recordBatchResult(attempt: DesktopAttempt, batch: DesktopBatch): void {
+    if (attempt.source?.kind === "file") attempt.localSavedOutput = batch.saved_output ?? null;
+    const output = batch.items.find(
+      (item) => item.state.kind === "saved" || item.state.kind === "prepared",
+    )?.state;
     desktopHistory.update(attempt.historyEntry, {
-      status: result.batch.cancelled
+      status: batch.cancelled
         ? "cancelled"
-        : result.batch.items.some((item) => item.state.kind === "failed")
+        : batch.error || batch.items.some((item) => item.state.kind === "failed")
           ? "failed"
           : "completed",
       title: t("desktop.batch.title"),
+      savedOutput: batch.saved_output,
+      format:
+        output?.kind === "saved"
+          ? output.result.output.format
+          : output?.kind === "prepared"
+            ? output.output.format
+            : undefined,
     });
   }
 
@@ -644,6 +659,8 @@ export function createDesktopApplication(
     if (answer.kind === "all") {
       attempt.batch = {
         cancelled: false,
+        saved_output: undefined,
+        error: undefined,
         items: choice.catalog.entries.map((entry, id) => ({
           id,
           title: entry.title,

@@ -381,11 +381,12 @@ test("label information opens the existing modal with every format explanation",
   assert.equal(dialog.querySelector("h2").textContent, "Format");
   assert.deepEqual(
     [...dialog.querySelectorAll("dt")].map((item) => item.textContent),
-    ["Auto", "PNG", "JPEG", "TIFF", "WebP", "AVIF", "ZIF", "IIIF folder"],
+    ["Auto", "PNG", "JPEG", "TIFF", "WebP", "JPEG 2000", "AVIF", "ZIF", "IIIF folder", "PDF"],
   );
   assert.match(dialog.textContent, /65,535/);
   assert.match(dialog.textContent, /16,383/);
   assert.match(dialog.textContent, /Advanced compression with transparency/);
+  assert.match(dialog.textContent, /Compression 0 is lossless/);
   click(dialog.querySelector(".dz-settings-close"));
   assert.equal(dialog.hasAttribute("open"), false);
   click(container.querySelector(".dz-settings-more"));

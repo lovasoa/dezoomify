@@ -1,4 +1,4 @@
-//! Desktop schedules discovered images; each save owns a fresh output Host.
+//! Desktop catalog scheduling. Fresh image Hosts may share a document owner.
 use crate::{jobs::Registration, saved_outputs::SavedOutputs};
 use dezoomify::{
     core::{DiscoveredEntry, DiscoveryCatalog, ResolvedImage},
@@ -8,7 +8,7 @@ use dezoomify::{
     },
     Host, Job,
 };
-use dezoomify_native::{JobOptions, NativeHost};
+use dezoomify_native::{DocumentPage, JobOptions, NativeHost, OutputDocument};
 use std::{collections::VecDeque, sync::Arc};
 
 /// Events are synchronous notifications; image/retry answers arrive through Registration.
@@ -20,6 +20,7 @@ pub trait SessionEvents {
 }
 
 struct Session<'a> {
+    runtime: Arc<tokio::runtime::Runtime>,
     options: JobOptions,
     registration: &'a Registration,
     outputs: Arc<SavedOutputs>,
@@ -29,11 +30,12 @@ struct Session<'a> {
 
 impl Session<'_> {
     fn host(&self) -> Result<NativeHost<'_>, Error> {
-        let mut host = NativeHost::with_diagnostics(
+        let host = NativeHost::with_runtime(
             self.options.clone(),
             self.registration.diagnostics.child(),
-        )?;
-        host.controls = self.registration.controls.clone();
+            self.runtime.clone(),
+        )?
+        .with_controls(self.registration.controls.clone());
         host.on_progress(|progress| self.events.progress(progress));
         host.on_retry(|request| {
             let (question, answer) = self.registration.request_retry();
@@ -78,20 +80,22 @@ impl Session<'_> {
         job: &Job<'_>,
         image: ResolvedImage,
         persist: bool,
-    ) -> Result<(DesktopOutput, std::path::PathBuf), Error> {
+        page: Option<DocumentPage>,
+    ) -> Result<(DesktopOutput, Option<std::path::PathBuf>), Error> {
         let host = self.host()?;
+        let host = match page {
+            Some(page) => host.with_document_page(page)?,
+            None => host,
+        };
         let output = host.transport.block_on(async {
             let result = job.download(image, &host).await;
             host.settle().await;
             result
         })?;
-        let path = host
-            .publication()
-            .ok_or_else(|| {
-                Error::Internal("a successful desktop save did not publish an output".into())
-            })?
-            .path;
-        let saved_output = self.outputs.register(path.clone(), self.job).ok();
+        let path = host.publication().map(|publication| publication.path);
+        let saved_output = path
+            .as_ref()
+            .and_then(|path| self.outputs.register(path.clone(), self.job).ok());
         if let Some(saved) = saved_output.as_ref().filter(|_| persist) {
             let outputs = Arc::clone(&self.outputs);
             let id = saved.id.clone();
@@ -120,7 +124,7 @@ impl Session<'_> {
                     DesktopImageChoice::All => {
                         return Ok((
                             DesktopResult::Batch {
-                                batch: self.run_all(&host, discovery, catalog),
+                                batch: self.run_all(&host, discovery, catalog)?,
                             },
                             None,
                         ));
@@ -141,8 +145,9 @@ impl Session<'_> {
                             DiscoveredEntry::Ready(image) => {
                                 let persist = self.options.input_url.starts_with("http://")
                                     || self.options.input_url.starts_with("https://");
-                                let (result, path) = self.download(&discovery, image, persist)?;
-                                return Ok((DesktopResult::Image { result }, Some(path)));
+                                let (result, path) =
+                                    self.download(&discovery, image, persist, None)?;
+                                return Ok((DesktopResult::Image { result }, path));
                             }
                         }
                     }
@@ -158,10 +163,24 @@ impl Session<'_> {
         host: &NativeHost<'_>,
         discovery: Job<'a>,
         catalog: DiscoveryCatalog,
-    ) -> DesktopBatch {
+    ) -> Result<DesktopBatch, Error> {
+        let mut document = host
+            .algorithm_options()
+            .output
+            .supports_pages()
+            .then(|| {
+                OutputDocument::new(
+                    self.options.output.clone(),
+                    self.options.overwrite,
+                    self.options.output_retain_cap,
+                )
+            })
+            .transpose()?;
         let mut batch = DesktopBatch {
             items: Vec::new(),
             cancelled: false,
+            saved_output: None,
+            error: None,
         };
         let mut next_id = 0;
         let mut queue = Self::expand(discovery, catalog, None, &mut next_id, &mut batch.items);
@@ -206,11 +225,23 @@ impl Session<'_> {
                         Err(error) => Err(error),
                     }
                 }
-                DiscoveredEntry::Ready(image) => self.download(&discovery, image, false),
+                DiscoveredEntry::Ready(image) => document
+                    .as_mut()
+                    .map(OutputDocument::page)
+                    .transpose()
+                    .and_then(|page| self.download(&discovery, image, false, page)),
             };
             match result {
                 Ok((result, _)) => {
-                    batch.items[position].state = DesktopBatchItemState::Saved { result }
+                    batch.items[position].state = if result.output.disposition
+                        == dezoomify::model::OutputDisposition::NativePrepared
+                    {
+                        DesktopBatchItemState::Prepared {
+                            output: result.output,
+                        }
+                    } else {
+                        DesktopBatchItemState::Saved { result }
+                    }
                 }
                 Err(error) if matches!(error.cause(), Error::Cancelled) => {
                     batch.items[position].state = DesktopBatchItemState::Cancelled;
@@ -223,23 +254,68 @@ impl Session<'_> {
                         "batch-item-failed",
                         serde_json::json!({"id": id, "source": batch.items[position].source_url, "error": error}),
                     );
-                    batch.items[position].state = DesktopBatchItemState::Failed { error };
+                    batch.items[position].state = DesktopBatchItemState::Failed {
+                        error: error.clone(),
+                    };
+                    if document.is_some() {
+                        batch.error = Some(error);
+                        break;
+                    }
                 }
             }
             self.events.batch(&batch);
         }
-        if batch.cancelled {
-            for item in &mut batch.items {
-                if matches!(
-                    item.state,
-                    DesktopBatchItemState::Pending | DesktopBatchItemState::Running
-                ) {
-                    item.state = DesktopBatchItemState::Cancelled;
-                }
-            }
+        Self::stop_pending(&mut batch);
+        if let Some(document) = document {
+            self.publish_document(document, &mut batch);
         }
         self.events.batch(&batch);
-        batch
+        Ok(batch)
+    }
+
+    fn stop_pending(batch: &mut DesktopBatch) {
+        if !batch.cancelled && batch.error.is_none() {
+            return;
+        }
+        for item in &mut batch.items {
+            if matches!(
+                item.state,
+                DesktopBatchItemState::Pending | DesktopBatchItemState::Running
+            ) {
+                item.state = DesktopBatchItemState::Cancelled;
+            }
+        }
+    }
+
+    fn publish_document(&self, document: OutputDocument, batch: &mut DesktopBatch) {
+        match document.finish().and_then(|publication| {
+            publication
+                .map(|publication| self.outputs.register(publication.path, self.job))
+                .transpose()
+        }) {
+            Ok(Some(saved)) => {
+                batch.saved_output = Some(saved);
+                if let Some(saved) = batch.saved_output.as_ref().filter(|_| {
+                    self.options.input_url.starts_with("http://")
+                        || self.options.input_url.starts_with("https://")
+                }) {
+                    let outputs = Arc::clone(&self.outputs);
+                    let id = saved.id.clone();
+                    std::thread::spawn(move || {
+                        let _ = outputs.persist(&id);
+                    });
+                }
+            }
+            Ok(None) => {}
+            Err(error) => {
+                self.registration.diagnostics.record(
+                    DiagnosticLevel::Error,
+                    "document-publication-failed",
+                    serde_json::json!({"error": error, "interrupted_by": batch.error}),
+                );
+                batch.error = Some(error);
+            }
+        }
     }
 
     fn expand<'a>(
@@ -294,14 +370,18 @@ pub fn run_session(
     job: &str,
     events: &dyn SessionEvents,
 ) -> Result<DesktopResult, Error> {
-    let result = Session {
-        options,
-        registration,
-        outputs,
-        job,
-        events,
-    }
-    .run();
+    let result =
+        dezoomify_native::transport::NativeTransport::create_runtime().and_then(|runtime| {
+            Session {
+                runtime,
+                options,
+                registration,
+                outputs,
+                job,
+                events,
+            }
+            .run()
+        });
     let path = result.as_ref().ok().and_then(|(_, path)| path.clone());
     registration.finish(path);
     let result = result.map(|(result, _)| result);
@@ -321,15 +401,25 @@ pub fn run_session(
             let saved = batch
                 .items
                 .iter()
-                .filter(|item| matches!(item.state, DesktopBatchItemState::Saved { .. }))
+                .filter(|item| match item.state {
+                    DesktopBatchItemState::Saved { .. } => true,
+                    DesktopBatchItemState::Prepared { .. } => batch.saved_output.is_some(),
+                    _ => false,
+                })
                 .count();
             let failed = batch
                 .items
                 .iter()
-                .filter(|item| matches!(item.state, DesktopBatchItemState::Failed { .. }))
+                .filter(|item| match item.state {
+                    DesktopBatchItemState::Failed { .. } => true,
+                    DesktopBatchItemState::Prepared { .. } => {
+                        batch.saved_output.is_none() && batch.error.is_some()
+                    }
+                    _ => false,
+                })
                 .count();
             registration.diagnostics.finish(
-                if batch.cancelled { "cancelled" } else if failed > 0 { "failed" } else { "completed" },
+                if batch.cancelled { "cancelled" } else if failed > 0 || batch.error.is_some() { "failed" } else { "completed" },
                 serde_json::json!({"images": batch.items.len(), "saved": saved, "failed": failed, "cancelled": batch.cancelled}),
             );
         }
@@ -521,6 +611,61 @@ mod tests {
             registration.diagnostics.report().outcome.unwrap().event,
             "completed"
         );
+    }
+
+    #[test]
+    fn document_batches_share_one_file_and_preserve_completed_pages_when_stopped() {
+        for (source, cancel, expected) in [
+            ("catalog", false, 2),
+            ("list.txt", false, 2),
+            ("cancel.txt", true, 1),
+        ] {
+            let (server, _) = fixture();
+            let directory = temp_dir("desktop-pdf-batch");
+            let registration = Registration::new();
+            let mut events = events(&registration, vec![DesktopImageChoice::All]);
+            events.cancel_second = cancel;
+            let outputs = Arc::new(SavedOutputs::new(directory.join("references")));
+            let mut options = options(format!("{}/{source}", server.origin), &directory);
+            options.output = OutputTarget::AutoDir {
+                dir: directory.clone(),
+                format: dezoomify::model::OutputFormat::Pdf,
+            };
+            let DesktopResult::Batch { batch } = run_session(
+                options,
+                &registration,
+                Arc::clone(&outputs),
+                "job:pdf",
+                &events,
+            )
+            .unwrap() else {
+                panic!("batch result");
+            };
+            assert_eq!(batch.cancelled, cancel);
+            assert_eq!(batch.error.is_some(), source == "list.txt");
+            let shared = batch.saved_output.as_ref().unwrap();
+            assert_eq!(shared.filename, "dezoomify.pdf");
+            assert!(outputs.resolve(&shared.id).unwrap().is_file());
+            assert!(saved(&batch).is_empty());
+            assert_eq!(
+                batch
+                    .items
+                    .iter()
+                    .filter(|item| matches!(item.state, DesktopBatchItemState::Prepared { .. }))
+                    .count(),
+                expected
+            );
+            assert!(events.snapshots.borrow().iter().any(|batch| batch
+                .items
+                .iter()
+                .any(|item| matches!(item.state, DesktopBatchItemState::Prepared { .. }))));
+            if source == "list.txt" {
+                assert!(matches!(
+                    batch.items.last().unwrap().state,
+                    DesktopBatchItemState::Cancelled
+                ));
+            }
+        }
     }
 
     #[test]

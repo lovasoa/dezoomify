@@ -188,9 +188,11 @@ pub enum ProcessingRecipe {
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub enum OutputLayout {
     Streaming,
+    Tiled,
     Buffered,
     Pyramid,
     Directory,
+    Document,
 }
 
 /// The meaning of the existing compression setting for a codec.
@@ -308,9 +310,7 @@ pub fn output_options() -> Vec<OutputOption> {
         .collect()
 }
 
-// One declaration owns the format/preference wire variants and their metadata.
-// A buffered image-crate codec needs one row here and its Cargo feature. Only
-// encoders with configurable construction need an override in native imaging.
+// One declaration owns output identities, extensions and controls.
 macro_rules! output_codecs {
     ($($variant:ident => ($id:literal, $name:literal, $extensions:expr, $limit:expr,
         $control:expr, $layout:ident, $hint:literal, $sizes:expr)),* $(,)?) => {
@@ -356,6 +356,14 @@ macro_rules! output_codecs {
             pub fn is_directory(self) -> bool {
                 matches!(self.codec().layout, OutputLayout::Directory)
             }
+            /// Encoded tiles can join this output without a full raster canvas.
+            pub fn uses_encoded_tiles(self) -> bool {
+                matches!(self.codec().layout, OutputLayout::Pyramid | OutputLayout::Directory | OutputLayout::Document)
+            }
+            /// Several independently acquired images can share one output file.
+            pub fn supports_pages(self) -> bool {
+                matches!(self.codec().layout, OutputLayout::Document)
+            }
             pub fn from_extension(extension: &str) -> Option<Self> {
                 OUTPUT_CODECS.iter().find(|codec| codec.extensions.contains(&extension))
                     .map(|codec| codec.format)
@@ -395,6 +403,19 @@ const AVIF_SIZES: &[(u8, f64)] = &[
     (100, 1.15),
 ];
 
+// RGB8 target rates (3 bytes/pixel divided by 1 + compression), followed
+// by a heuristic for reversible coding at compression zero.
+const JPEG2000_SIZES: &[(u8, f64)] = &[
+    (0, 3.0 / 101.0),
+    (50, 3.0 / 51.0),
+    (75, 3.0 / 26.0),
+    (90, 3.0 / 11.0),
+    (95, 0.5),
+    (98, 1.0),
+    (99, 1.5),
+    (100, 1.6),
+];
+
 // Warning thresholds are conservative UI heuristics, not universal usability
 // cutoffs. JPEG guidance describes <50 as low quality and 5-10 as index-only:
 // https://github.com/libjpeg-turbo/libjpeg-turbo/blob/main/doc/usage.txt
@@ -405,9 +426,11 @@ output_codecs! {
     Jpeg => ("jpeg", "JPEG", &["jpg", "jpeg"], Some(65_535), OutputControl::Quality { minimum: 0, warning_below: 25 }, Streaming, "compressed", JPEG_SIZES),
     Tiff => ("tiff", "TIFF", &["tif", "tiff"], None, OutputControl::Effort, Streaming, "archival", &[(100, 3.0)]),
     Webp => ("webp", "WebP", &["webp"], Some(16_383), OutputControl::None, Buffered, "lossless", &[(100, 1.3)]),
+    Jpeg2000 => ("jpeg2000", "JPEG 2000", &["jp2"], Some(i32::MAX as u32), OutputControl::Quality { minimum: 0, warning_below: 25 }, Tiled, "tiled", JPEG2000_SIZES),
     Avif => ("avif", "AVIF", &["avif"], Some(65_535), OutputControl::Quality { minimum: 1, warning_below: 30 }, Buffered, "advancedCompression", AVIF_SIZES),
     Zif => ("zif", "ZIF", &["zif"], None, OutputControl::Effort, Pyramid, "zoomable", &[(100, 3.0)]),
     IiifDir => ("iiif-dir", "IIIF folder", &["iiif", ""], None, OutputControl::Quality { minimum: 0, warning_below: 25 }, Directory, "tiled", JPEG_SIZES),
+    Pdf => ("pdf", "PDF", &["pdf"], None, OutputControl::Effort, Document, "document", &[(100, 1.6)]),
 }
 
 /// File suffixes accepted by native output, for command help and diagnostics.
@@ -1282,6 +1305,8 @@ impl Default for Progress {
 #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
 pub enum OutputDisposition {
     NativePublication,
+    /// The image is complete inside an unpublished native document.
+    NativePrepared,
     BrowserSaveInitiated,
     BrowserSaveReady,
     DisplayOnly,
@@ -1346,8 +1371,17 @@ pub enum DesktopImageChoice {
 pub enum DesktopBatchItemState {
     Pending,
     Running,
-    Saved { result: DesktopOutput },
-    Failed { error: Error },
+    /// Completed document page. Remains prepared after publication; the batch owns
+    /// its saved reference or publication error, and callers derive display status.
+    Prepared {
+        output: Output,
+    },
+    Saved {
+        result: DesktopOutput,
+    },
+    Failed {
+        error: Error,
+    },
     Cancelled,
 }
 
@@ -1367,6 +1401,14 @@ pub struct DesktopBatchItem {
 pub struct DesktopBatch {
     pub items: Vec<DesktopBatchItem>,
     pub cancelled: bool,
+    /// One shared document, registered only after its completed pages are published.
+    /// When present, prepared pages are saved even if `error` reports an interruption.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub saved_output: Option<SavedOutput>,
+    /// A document may preserve complete pages while reporting why the batch stopped.
+    /// Without `saved_output`, this error also means prepared pages were not published.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<Error>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

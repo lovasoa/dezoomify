@@ -4,7 +4,7 @@ use crate::{
     output::StagedFile,
     pixel_pipe::{PixelPipe, PixelStrip},
 };
-use dezoomify::model::{Error, OutputFormat, OutputLayout, Size};
+use dezoomify::model::{Error, OutputFormat, OutputGrid, OutputLayout, Size};
 use std::{
     cell::{Cell, RefCell},
     io::{Read, Seek, Write},
@@ -16,10 +16,66 @@ pub(crate) struct EncoderTask {
     pub(crate) pipe: Arc<PixelPipe>,
     task: Option<tokio::task::JoinHandle<Result<StagedFile, Error>>>,
 }
+
+/// A worker-owned encoder negotiates its pixel regions and workspace before
+/// acquisition starts. Encoding consumes regions in order; metadata settlement
+/// and cancellation must complete before returning publishable staging.
+pub(crate) trait RasterEncoder: Send {
+    fn grid(
+        &self,
+        _size: &Size,
+        _source: Option<&OutputGrid>,
+    ) -> Result<Option<OutputGrid>, Error> {
+        Ok(None)
+    }
+    fn workspace(&self, _size: &Size, _grid: Option<&OutputGrid>) -> u64 {
+        0
+    }
+    fn encode(
+        self: Box<Self>,
+        staging: StagedFile,
+        pipe: &Arc<PixelPipe>,
+        controls: &Controls,
+    ) -> Result<StagedFile, Error>;
+}
+
+struct ImageEncoder {
+    format: OutputFormat,
+    compression: u8,
+}
+impl RasterEncoder for ImageEncoder {
+    fn workspace(&self, size: &Size, _grid: Option<&OutputGrid>) -> u64 {
+        if self.format.codec().layout == OutputLayout::Buffered {
+            crate::imaging::buffered_workspace(self.format, size)
+        } else {
+            0
+        }
+    }
+    fn encode(
+        self: Box<Self>,
+        staging: StagedFile,
+        pipe: &Arc<PixelPipe>,
+        controls: &Controls,
+    ) -> Result<StagedFile, Error> {
+        encode(staging, pipe, self.format, self.compression, controls)
+    }
+}
+
+fn encoder(format: OutputFormat, compression: u8) -> Box<dyn RasterEncoder> {
+    match format {
+        OutputFormat::Jpeg2000 => Box::new(crate::jpeg2000::Encoder { compression }),
+        _ => Box::new(ImageEncoder {
+            format,
+            compression,
+        }),
+    }
+}
+
 impl EncoderTask {
     pub(crate) fn start(
         destination: &Path,
         size: Size,
+        grid: Option<&OutputGrid>,
         format: OutputFormat,
         compression: u8,
         memory_hint: u64,
@@ -29,22 +85,20 @@ impl EncoderTask {
             return Err(Error::InvalidState("empty raster dimensions".into()));
         }
         crate::imaging::check_dimensions(format, &size)?;
-        if format.codec().layout == OutputLayout::Buffered {
-            crate::tile_output::memory_check(
-                crate::imaging::buffered_workspace(format, &size),
-                memory_hint,
-            )?;
-        }
+        let encoder = encoder(format, compression);
+        let grid = encoder.grid(&size, grid)?;
+        crate::tile_budget::memory_check(encoder.workspace(&size, grid.as_ref()), memory_hint)?;
         let directory = destination
             .parent()
             .filter(|p| !p.as_os_str().is_empty())
             .unwrap_or_else(|| Path::new("."));
-        let pipe = PixelPipe::new(size, directory)?;
+        let pipe = PixelPipe::with_grid(size, directory, grid.as_ref())?;
         let staging = StagedFile::new(destination)?;
         controls.watch(&pipe);
         let reader = Arc::clone(&pipe);
         let task = tokio::task::spawn_blocking(move || {
-            let result = encode(staging, &reader, format, compression, &controls);
+            let result = encoder.encode(staging, &reader, &controls);
+            let result = reader.error().map_or(result, Err);
             if let Err(error) = &result {
                 reader.fail(error.clone());
             }
@@ -75,11 +129,11 @@ impl Drop for EncoderTask {
     }
 }
 
-struct PipeWriter<'a, W> {
-    inner: W,
-    pipe: &'a PixelPipe,
+pub(crate) struct PipeWriter<W> {
+    pub(crate) inner: W,
+    pub(crate) pipe: Arc<PixelPipe>,
 }
-impl<W> PipeWriter<'_, W> {
+impl<W> PipeWriter<W> {
     fn check(&self) -> std::io::Result<()> {
         if self.pipe.error().is_some() {
             Err(std::io::Error::other("pixel source failed"))
@@ -88,17 +142,27 @@ impl<W> PipeWriter<'_, W> {
         }
     }
 }
-impl<W: Write> Write for PipeWriter<'_, W> {
+impl<W: Write> Write for PipeWriter<W> {
     fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
         self.check()?;
-        self.inner.write(bytes)
+        self.inner.write(bytes).inspect_err(|error| {
+            self.pipe.fail(crate::output::write_failed(
+                "image output write failed",
+                error,
+            ))
+        })
     }
     fn flush(&mut self) -> std::io::Result<()> {
         self.check()?;
-        self.inner.flush()
+        self.inner.flush().inspect_err(|error| {
+            self.pipe.fail(crate::output::write_failed(
+                "image output flush failed",
+                error,
+            ))
+        })
     }
 }
-impl<W: Seek> Seek for PipeWriter<'_, W> {
+impl<W: Seek> Seek for PipeWriter<W> {
     fn seek(&mut self, pos: std::io::SeekFrom) -> std::io::Result<u64> {
         self.check()?;
         self.inner.seek(pos)
@@ -116,7 +180,7 @@ fn encode(
             64 << 10,
             PipeWriter {
                 inner: staging.writer(controls.cancel_flag()),
-                pipe,
+                pipe: Arc::clone(pipe),
             },
         );
         match format {
@@ -443,7 +507,7 @@ mod tests {
         } else {
             8 << 20
         };
-        EncoderTask::start(path, size, format, 5, cap, controls).unwrap()
+        EncoderTask::start(path, size, None, format, 5, cap, controls).unwrap()
     }
     async fn publish(task: EncoderTask, destination: &Path) -> Vec<u8> {
         task.pipe.finish(&[]).unwrap();
@@ -478,6 +542,7 @@ mod tests {
                 width: source.width(),
                 height: source.height(),
             },
+            None,
             OutputFormat::Png,
             5,
             1,
@@ -715,6 +780,7 @@ mod tests {
                     width: 33,
                     height: 19,
                 },
+                None,
                 OutputFormat::Avif,
                 compression,
                 32 << 20,

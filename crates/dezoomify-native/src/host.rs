@@ -1,6 +1,7 @@
 //! Native platform operations used directly by the shared async algorithm.
 mod image_choice;
 mod workers;
+use crate::output::auto_output_path;
 use std::{
     cell::{Cell, RefCell},
     collections::BTreeSet,
@@ -108,37 +109,6 @@ pub struct Publication {
     pub instrumentation: Instrumentation,
 }
 
-fn safe_output_stem(title: Option<&str>) -> String {
-    let mut stem = String::new();
-    let mut previous_separator = false;
-    for character in title.unwrap_or("dezoomify").chars() {
-        if character.is_alphanumeric() {
-            stem.push(character);
-            previous_separator = false;
-        } else if !previous_separator {
-            stem.push('-');
-            previous_separator = true;
-        }
-        if stem.len() >= 120 {
-            break;
-        }
-    }
-    let stem = stem.trim_matches('-');
-    let lower = stem.to_ascii_lowercase();
-    let reserved_windows_name = matches!(lower.as_str(), "con" | "prn" | "aux" | "nul")
-        || (lower.len() == 4
-            && (lower.starts_with("com") || lower.starts_with("lpt"))
-            && lower
-                .as_bytes()
-                .last()
-                .is_some_and(|byte| matches!(byte, b'1'..=b'9')));
-    if stem.is_empty() || reserved_windows_name {
-        "dezoomify".to_string()
-    } else {
-        stem.to_string()
-    }
-}
-
 fn automatic_image_format(size: Vec2d, transparent: bool) -> OutputFormat {
     if !transparent
         && crate::imaging::check_dimensions(
@@ -170,22 +140,6 @@ fn automatic_format_checks_both_sides_at_the_jpeg_boundary() {
         automatic_image_format(Vec2d { x: 1, y: 1 }, true),
         OutputFormat::Png
     );
-}
-
-fn auto_output_path(output_dir: &Path, title: Option<&str>, format: OutputFormat) -> PathBuf {
-    let stem = safe_output_stem(title);
-    let extension = format.extension();
-    let first = output_dir.join(format!("{stem}.{extension}"));
-    if !first.exists() {
-        return first;
-    }
-    for suffix in 2..=9_999 {
-        let candidate = output_dir.join(format!("{stem}-{suffix}.{extension}"));
-        if !candidate.exists() {
-            return candidate;
-        }
-    }
-    first
 }
 
 impl Controls {
@@ -227,7 +181,9 @@ impl Controls {
         &self.0.cancelled
     }
 
-    async fn wait_cancelled(&self) {
+    /// Wait for cancellation, including an earlier request. Dropping this future
+    /// is safe; completion does not imply that active workers have settled.
+    pub async fn wait_cancelled(&self) {
         loop {
             let changed = self.0.changed.notified();
             if self.is_cancelled() {
@@ -329,7 +285,9 @@ pub struct NativeHost<'a> {
     source_format: RefCell<Option<String>>,
     output_plan: RefCell<Option<OutputPlan>>,
     tiled: RefCell<Option<Arc<std::sync::Mutex<crate::tile_output::TileWriter>>>>,
-    encoded_probes: RefCell<Vec<crate::tile_output::EncodedTile>>,
+    encoded_probes: RefCell<Vec<crate::encoded_spool::StoredEncoded>>,
+    encoded_spool: RefCell<Option<Arc<crate::encoded_spool::EncodedSpool>>>,
+    document_page: RefCell<Option<crate::DocumentPage>>,
 }
 
 #[allow(clippy::result_large_err)] // Platform operations return the canonical Host error value.
@@ -342,6 +300,16 @@ impl<'a> NativeHost<'a> {
     }
 
     pub fn with_diagnostics(options: JobOptions, diagnostics: Diagnostics) -> Result<Self, Error> {
+        Self::with_runtime(options, diagnostics, NativeTransport::create_runtime()?)
+    }
+
+    /// Create a fresh job and HTTP client using a shared runtime. The caller must
+    /// retain a runtime owner outside async work until all hosts have settled.
+    pub fn with_runtime(
+        options: JobOptions,
+        diagnostics: Diagnostics,
+        runtime: Arc<tokio::runtime::Runtime>,
+    ) -> Result<Self, Error> {
         let mut options = options.normalized();
         options.output_retain_cap = options
             .output_retain_cap
@@ -371,7 +339,8 @@ impl<'a> NativeHost<'a> {
             },
             ..FetchLimits::default()
         };
-        let transport = NativeTransport::new(&fetch_limits)?.with_diagnostics(diagnostics.clone());
+        let transport = NativeTransport::with_runtime(&fetch_limits, runtime)?
+            .with_diagnostics(diagnostics.clone());
         let user = UserHeaders::new(
             options.headers.clone(),
             url::Url::parse(&options.input_url)
@@ -408,7 +377,29 @@ impl<'a> NativeHost<'a> {
             output_plan: RefCell::new(None),
             tiled: RefCell::new(None),
             encoded_probes: RefCell::new(Vec::new()),
+            encoded_spool: RefCell::new(None),
+            document_page: RefCell::new(None),
         })
+    }
+
+    /// Attach one exclusive document page before starting this host. The caller
+    /// must settle this host before requesting the next page or closing the document.
+    pub fn with_document_page(self, page: crate::DocumentPage) -> Result<Self, Error> {
+        if self.format != OutputFormat::Pdf {
+            return Err(Error::InvalidInput(
+                "document page format differs from the image output".into(),
+            ));
+        }
+        *self.document_page.borrow_mut() = Some(page);
+        Ok(self)
+    }
+
+    /// Install invocation controls before using any Host capability. Blocking
+    /// workers and acquisitions then share cancellation and settlement ownership.
+    pub fn with_controls(mut self, controls: Controls) -> Self {
+        self.workers = BlockingTasks::new(controls.clone());
+        self.controls = controls;
+        self
     }
 
     pub fn on_progress(&self, callback: impl FnMut(Progress) + 'a) {
@@ -589,7 +580,7 @@ impl<'a> NativeHost<'a> {
     async fn inspect_encoded(
         &self,
         mut bytes: Vec<u8>,
-    ) -> Result<(Vec<u8>, Size, image::ImageFormat), Error> {
+    ) -> Result<(Vec<u8>, Size, crate::codecs::NativeFormat), Error> {
         self.check_encoded_inflight(bytes.len())?;
         let budget = self
             .options
@@ -597,8 +588,8 @@ impl<'a> NativeHost<'a> {
             .saturating_sub(self.workers.stats().input_bytes + bytes.len() as u64);
         self.workers
             .run_with_bytes("tile inspection", bytes.len(), move || {
-                crate::tile_output::normalize_orientation(&mut bytes);
-                let (size, format) = crate::tile_output::inspect(&bytes, budget)?;
+                crate::encoded_tile::normalize_orientation(&mut bytes);
+                let (size, format) = crate::encoded_tile::inspect(&bytes, budget)?;
                 Ok((bytes, size, format))
             })
             .await
@@ -607,7 +598,7 @@ impl<'a> NativeHost<'a> {
     async fn encoded_tile(
         &self,
         tile: &ResourceTile,
-    ) -> Result<crate::tile_output::EncodedTile, Error> {
+    ) -> Result<crate::encoded_tile::EncodedTile, Error> {
         let _flight = Flight::new(self);
         let namespace = crate::cache::job_namespace(&self.options.input_url);
         let dir = self
@@ -619,7 +610,8 @@ impl<'a> NativeHost<'a> {
             match self.inspect_encoded(bytes).await {
                 Ok((bytes, size, format)) => {
                     self.diagnostics.count("cache_reads", 1.0);
-                    return Ok(crate::tile_output::EncodedTile {
+                    return Ok(crate::encoded_tile::EncodedTile {
+                        probe_pixels: None,
                         request: Some(tile.request.clone()),
                         id: self.storage_index(tile),
                         placement: tile.placement.clone(),
@@ -650,13 +642,14 @@ impl<'a> NativeHost<'a> {
                 let mut bytes = processing
                     .apply(response.body)
                     .map_err(|e| Error::ProcessingFailed(e.to_string().into()))?;
-                crate::tile_output::normalize_orientation(&mut bytes);
-                let (size, format) = crate::tile_output::inspect(&bytes, budget)?;
+                crate::encoded_tile::normalize_orientation(&mut bytes);
+                let (size, format) = crate::encoded_tile::inspect(&bytes, budget)?;
                 let _ = crate::cache::store(&dir, &namespace, &request, &bytes);
                 Ok((bytes, size, format))
             })
             .await?;
-        Ok(crate::tile_output::EncodedTile {
+        Ok(crate::encoded_tile::EncodedTile {
+            probe_pixels: None,
             request: Some(tile.request.clone()),
             id: self.storage_index(tile),
             placement: tile.placement.clone(),
@@ -680,9 +673,9 @@ impl<'a> NativeHost<'a> {
             .encoded_probes
             .borrow()
             .iter()
-            .map(|tile| tile.bytes.len() as u64)
+            .map(|tile| tile.retained_bytes())
             .sum();
-        crate::tile_output::memory_check(
+        crate::tile_budget::memory_check(
             probes
                 .saturating_add(additional as u64)
                 .saturating_add(workers.input_bytes)
@@ -692,7 +685,7 @@ impl<'a> NativeHost<'a> {
     }
 
     fn evict_failed_tile<T>(&self, tile: &ResourceTile, result: &Result<T, Error>) {
-        if matches!(self.format, OutputFormat::IiifDir | OutputFormat::Zif)
+        if self.format.uses_encoded_tiles()
             && result
                 .as_ref()
                 .is_err_and(|e| matches!(e.cause(), Error::DecodeFailed(_)))
@@ -709,7 +702,7 @@ impl<'a> NativeHost<'a> {
         }
     }
 
-    async fn place_encoded(&self, tile: crate::tile_output::EncodedTile) -> Result<(), Error> {
+    async fn place_encoded(&self, tile: crate::encoded_tile::EncodedTile) -> Result<(), Error> {
         let id = tile.id;
         let writer = self.tiled.borrow().as_ref().cloned();
         if let Some(writer) = writer {
@@ -742,16 +735,31 @@ impl<'a> NativeHost<'a> {
             let mut stats = self.instrumentation.borrow_mut();
             stats.peak_retained_bytes = stats.peak_retained_bytes.max(peak);
         } else {
-            let mut probes = self.encoded_probes.borrow_mut();
-            let retained = probes
-                .iter()
-                .map(|tile| tile.bytes.len() as u64)
-                .sum::<u64>()
-                + tile.bytes.len() as u64;
-            crate::tile_output::memory_check(retained, self.options.output_retain_cap)?;
+            let spool = {
+                let mut spool = self.encoded_spool.borrow_mut();
+                if spool.is_none() {
+                    *spool = Some(crate::encoded_spool::EncodedSpool::new(
+                        &self.output_directory(),
+                    )?);
+                }
+                Arc::clone(spool.as_ref().expect("encoded spool"))
+            };
+            let input_bytes = tile.bytes.len();
+            let stored = self
+                .workers
+                .run_with_bytes("probe storage", input_bytes, move || spool.store(tile))
+                .await?;
+            let retained = stored.retained_bytes()
+                + self
+                    .encoded_probes
+                    .borrow()
+                    .iter()
+                    .map(|tile| tile.retained_bytes())
+                    .sum::<u64>();
+            crate::tile_budget::memory_check(retained, self.options.output_retain_cap)?;
+            self.encoded_probes.borrow_mut().push(stored);
             let mut stats = self.instrumentation.borrow_mut();
             stats.peak_retained_bytes = stats.peak_retained_bytes.max(retained);
-            probes.push(tile);
         }
         self.acquired.borrow_mut().insert(id);
         self.instrumentation.borrow_mut().acquired = self.acquired.borrow().len() as u64;
@@ -813,6 +821,7 @@ impl<'a> NativeHost<'a> {
         dimensions: Size,
         title: Option<&str>,
         format: OutputFormat,
+        grid: Option<dezoomify::model::OutputGrid>,
     ) -> Result<(), Error> {
         let destination = match &self.options.output {
             OutputTarget::File(path) => path.clone(),
@@ -822,6 +831,7 @@ impl<'a> NativeHost<'a> {
         let task = EncoderTask::start(
             &destination,
             dimensions,
+            grid.as_ref(),
             format,
             self.options.compression,
             self.options.output_retain_cap,
@@ -903,7 +913,12 @@ impl<'a> NativeHost<'a> {
                     || pending.iter().any(|tile| tile.pixels.transparent);
                 format = automatic_image_format(size(&dimensions), transparent);
             }
-            self.start_raster(dimensions, request.title.as_deref(), format)
+            let grid = self
+                .output_plan
+                .borrow()
+                .as_ref()
+                .and_then(|plan| plan.grid.clone());
+            self.start_raster(dimensions, request.title.as_deref(), format, grid)
                 .await?;
         }
         let pipe = Arc::clone(&self.raster.borrow().as_ref().expect("raster task").pipe);
@@ -931,25 +946,6 @@ impl<'a> NativeHost<'a> {
         Ok((format, prepared))
     }
 
-    fn next_auto_destination(&self, title: Option<&str>, format: OutputFormat) -> PathBuf {
-        let dir = match &self.options.output {
-            OutputTarget::AutoDir { dir, .. } | OutputTarget::AutoImageDir { dir } => dir,
-            OutputTarget::File(_) => unreachable!("automatic destination"),
-        };
-        let stem = safe_output_stem(title);
-        for suffix in 1..=9_999 {
-            let name = if suffix == 1 {
-                stem.clone()
-            } else {
-                format!("{stem}-{suffix}")
-            };
-            let path = dir.join(format!("{name}.{}", format.extension()));
-            if !path.exists() {
-                return path;
-            }
-        }
-        dir.join(format!("{stem}.{}", format.extension()))
-    }
     fn report_preparation(&self, pipe: &PixelPipe) {
         let mut progress = self.last_progress.borrow().clone();
         progress.preparation = Some(OutputPreparation {
@@ -981,7 +977,7 @@ impl Host for NativeHost<'_> {
         if let OutputTarget::File(path) = &self.options.output {
             crate::output::validate_destination(path, &self.format, self.options.overwrite)?;
         }
-        if matches!(self.format, OutputFormat::IiifDir | OutputFormat::Zif) {
+        if self.format.uses_encoded_tiles() {
             let destination = match &self.options.output {
                 OutputTarget::File(path) => path.clone(),
                 OutputTarget::AutoDir { dir, format } => {
@@ -992,23 +988,28 @@ impl Host for NativeHost<'_> {
                 }
             };
             let probes = std::mem::take(&mut *self.encoded_probes.borrow_mut());
-            let pending: u64 = probes.iter().map(|tile| tile.bytes.len() as u64).sum();
+            let pending: u64 = probes.iter().map(|tile| tile.retained_bytes()).sum();
+            self.encoded_spool.borrow_mut().take();
             let mut writer = crate::tile_output::TileWriter::new(
                 &destination,
                 &plan,
                 self.options.output_retain_cap.saturating_sub(pending),
                 self.options.compression,
                 self.options.max_tiles as u32,
+                self.document_page.borrow_mut().take(),
             )?;
             let controls = self.controls.clone();
             let writer = self
                 .workers
                 .run("tile preflight", move || {
                     for tile in probes {
-                        writer.release_probe_bytes(tile.bytes.len() as u64);
-                        let request = tile.request.clone();
-                        writer
-                            .place(tile, &controls.0.cancelled)
+                        let retained = tile.retained_bytes();
+                        let request = tile.request().cloned();
+                        tile.load(writer.input_budget())
+                            .and_then(|tile| {
+                                writer.release_probe_bytes(retained);
+                                writer.place(tile, &controls.0.cancelled)
+                            })
                             .map_err(|e| match request {
                                 Some(ref request) => resource_context(e, request),
                                 None => e,
@@ -1023,8 +1024,13 @@ impl Host for NativeHost<'_> {
             *self.tiled.borrow_mut() = Some(Arc::new(std::sync::Mutex::new(writer)));
         } else if let Some(dimensions) = &plan.canvas {
             if !matches!(self.options.output, OutputTarget::AutoImageDir { .. }) {
-                self.start_raster(dimensions.clone(), plan.title.as_deref(), self.format)
-                    .await?;
+                self.start_raster(
+                    dimensions.clone(),
+                    plan.title.as_deref(),
+                    self.format,
+                    plan.grid.clone(),
+                )
+                .await?;
             }
         }
         *self.output_plan.borrow_mut() = Some(plan);
@@ -1046,7 +1052,7 @@ impl Host for NativeHost<'_> {
 
     async fn probe(&self, tile: Tile) -> Result<ProbeOutcome, Error> {
         let tile = ResourceTile::try_from(tile)?;
-        if matches!(self.format, OutputFormat::IiifDir | OutputFormat::Zif) {
+        if self.format.uses_encoded_tiles() {
             let result = async {
                 let mut encoded = self.encoded_tile(&tile).await?;
                 let width = std::num::NonZeroU64::new(u64::from(encoded.size.width));
@@ -1061,14 +1067,7 @@ impl Host for NativeHost<'_> {
                         width: extent.width.min(encoded.size.width),
                         height: extent.height.min(encoded.size.height),
                     };
-                    if size != encoded.size
-                        || (self.format == OutputFormat::Zif
-                            && !crate::zif_output::can_reuse(&encoded.bytes))
-                        || !matches!(
-                            encoded.format,
-                            image::ImageFormat::Png | image::ImageFormat::Jpeg
-                        )
-                    {
+                    if crate::tile_output::probe_needs_preparation(self.format, &encoded, &size) {
                         self.check_encoded_inflight(encoded.bytes.len())?;
                         let budget = self.options.output_retain_cap.saturating_sub(
                             self.workers.stats().input_bytes
@@ -1076,16 +1075,34 @@ impl Host for NativeHost<'_> {
                                     .encoded_probes
                                     .borrow()
                                     .iter()
-                                    .map(|tile| tile.bytes.len() as u64)
+                                    .map(|tile| tile.retained_bytes())
                                     .sum::<u64>(),
                         );
                         let compression = self.options.compression;
                         let metrics = self.workers.clone();
+                        let spool = if self.format.supports_pages() {
+                            let mut spool = self.pixel_spool.borrow_mut();
+                            if spool.is_none() {
+                                *spool = Some(TileSpool::new(&self.output_directory())?);
+                            }
+                            Some(Arc::clone(spool.as_ref().expect("tile spool")))
+                        } else {
+                            None
+                        };
                         encoded = self
                             .workers
                             .run_with_bytes("probe conversion", encoded.bytes.len(), move || {
                                 metrics.record_decode();
-                                encoded.convert_to_png(size, budget, compression)?;
+                                if let Some(spool) = spool {
+                                    let image = encoded.decode_pixels(&encoded.size, budget)?;
+                                    encoded.probe_pixels = Some(spool.store(DecodedTile {
+                                        image,
+                                        icc_profile: None,
+                                        exif_metadata: None,
+                                    })?);
+                                } else {
+                                    encoded.convert_to_png(size, budget, compression)?;
+                                }
                                 Ok(encoded)
                             })
                             .await?;
@@ -1138,7 +1155,7 @@ impl Host for NativeHost<'_> {
         self.controls.checkpoint(Gate::Acquisition).await?;
         let tile = ResourceTile::try_from(request.tile)?;
         let result = async {
-            if matches!(self.format, OutputFormat::IiifDir | OutputFormat::Zif) {
+            if self.format.uses_encoded_tiles() {
                 let encoded = self.encoded_tile(&tile).await?;
                 self.controls.checkpoint(Gate::Cancellation).await?;
                 return self.place_encoded(encoded).await;
@@ -1170,14 +1187,8 @@ impl Host for NativeHost<'_> {
 
     async fn finish(&self, request: FinishRequest) -> Result<Output, Error> {
         self.controls.checkpoint(Gate::Cancellation).await?;
-        let destination_for = |format| match &self.options.output {
-            OutputTarget::File(path) => path.clone(),
-            OutputTarget::AutoDir { dir, format } => {
-                auto_output_path(dir, request.title.as_deref(), *format)
-            }
-            OutputTarget::AutoImageDir { dir } => {
-                auto_output_path(dir, request.title.as_deref(), format)
-            }
+        let destination_for = |format| {
+            crate::output::destination_for(&self.options.output, request.title.as_deref(), format)
         };
         let tiled = self.tiled.borrow_mut().take();
         let tiled_result = if let Some(writer) = tiled {
@@ -1186,7 +1197,7 @@ impl Host for NativeHost<'_> {
             let reused = request.reused_tiles.clone();
             Some(
                 self.workers
-                    .run("tile output", move || {
+                    .commit("tile output", move || {
                         let writer = Arc::try_unwrap(writer)
                             .map_err(|_| Error::Internal("tile placement still active".into()))?
                             .into_inner()
@@ -1199,7 +1210,7 @@ impl Host for NativeHost<'_> {
             None
         };
         let mut format = self.format;
-        let mut prepared = if let Some(prepared) = tiled_result {
+        let prepared = if let Some(prepared) = tiled_result {
             prepared
         } else {
             let (raster_format, prepared) = self.finish_raster(&request).await?;
@@ -1207,44 +1218,32 @@ impl Host for NativeHost<'_> {
             prepared
         };
         let image_size = size(&prepared.size);
-        let destination = destination_for(format);
         self.instrumentation.borrow_mut().pixel_decodes += prepared.pixel_decodes;
+        if matches!(prepared.staging, crate::output::StagedOutput::DocumentPage) {
+            return Ok(Output {
+                canvas: Some(prepared.size),
+                format,
+                disposition: OutputDisposition::NativePrepared,
+            });
+        }
         let late_repaints = prepared.late_writes;
-        let mut published = destination;
-        let mut collisions = 0;
-        let encoded_bytes = loop {
-            let validation =
-                crate::output::validate_destination(&published, &format, self.options.overwrite);
-            let result = if validation.is_ok() {
-                let path = published.clone();
-                let controls = self.controls.clone();
-                let overwrite = self.options.overwrite;
-                let (output, result) = self
-                    .workers
-                    .commit("output publication", move || {
-                        let result = prepared.publish(&path, overwrite, &controls.0.cancelled);
-                        Ok((prepared, result))
-                    })
-                    .await?;
-                prepared = output;
-                result
-            } else {
-                validation.map(|_| 0)
-            };
-            match result {
-                Ok(bytes) => break bytes,
-                Err(Error::OutputExists)
-                    if matches!(
-                        self.options.output,
-                        OutputTarget::AutoDir { .. } | OutputTarget::AutoImageDir { .. }
-                    ) && collisions < 9_999 =>
-                {
-                    collisions += 1;
-                    published = self.next_auto_destination(request.title.as_deref(), format);
-                }
-                Err(error) => return Err(error),
-            }
-        };
+        let target = self.options.output.clone();
+        let title = request.title.clone();
+        let overwrite = self.options.overwrite;
+        let controls = self.controls.clone();
+        let (published, encoded_bytes) = self
+            .workers
+            .commit("output publication", move || {
+                crate::output::publish(
+                    prepared.staging,
+                    &target,
+                    title.as_deref(),
+                    format,
+                    overwrite,
+                    &controls.0.cancelled,
+                )
+            })
+            .await?;
         let acquired = self.acquired.borrow();
         let mut instrumentation = self.instrumentation.borrow().clone();
         instrumentation.pixel_decodes += self.workers.stats().pixel_decodes;
@@ -1381,6 +1380,7 @@ impl Host for NativeHost<'_> {
     async fn settle(&self) {
         self.tiled.borrow_mut().take();
         self.encoded_probes.borrow_mut().clear();
+        self.encoded_spool.borrow_mut().take();
         let task = self.raster.borrow_mut().take();
         if let Some(task) = task {
             task.abort().await;
@@ -1388,6 +1388,7 @@ impl Host for NativeHost<'_> {
         self.pending_pixels.borrow_mut().clear();
         self.pixel_spool.borrow_mut().take();
         self.workers.drain().await;
+        self.document_page.borrow_mut().take();
     }
 }
 
