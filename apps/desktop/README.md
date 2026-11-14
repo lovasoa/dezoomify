@@ -1,9 +1,14 @@
 # Desktop application
 
-The Tauri shell runs NativeHost and embeds the shared UI. Image bytes stay
-native; IPC carries generated progress, retry approvals, and output values. See
-[Architecture](../../docs/architecture.md) for ownership and the
-[desktop guide](desktop-app.md) for installation and use.
+The desktop product combines the [shared interface](../../packages/shared-ui/)
+with the [native runtime](../../crates/dezoomify-native/) for large images,
+local sources, and saving directly to disk. It shares the download engine with
+the CLI and browser products.
+
+Tauri connects the interface to native work and provides operating-system
+integration such as opening files and installing updates.
+
+Installation and use: [desktop guide](desktop-app.md).
 
 ## Development and tests
 
@@ -13,27 +18,15 @@ cargo xtask test desktop
 cargo xtask test desktop --e2e-window
 ```
 
-The real-window lane uses an embedded test-only WebDriver on Linux, macOS, and
-Windows. It needs a display (headless Linux: `xvfb-run -a`) and platform webview
-packages. No external driver is needed. [Testing](../../docs/testing.md) explains
-coverage; the [desktop workflow](../../.github/workflows/desktop.yml) owns CI lanes.
-
-Subscribe before starting a native job and await registration before exposing
-controls, so an immediate cancel reaches its task. Retired jobs cannot update
-replacement views. Saved-file references outlive invocation resources and keep
-paths out of IPC; file availability checks must not block rendering or completion.
-
-Permission manifests are generated from Rust commands and events by
-[`generate-desktop-capabilities.mjs`](../../scripts/generate-desktop-capabilities.mjs).
-The updater runs through native menus and dialogs, so it needs no webview
-updater permissions. Its endpoint and public key live in `tauri.conf.json`;
-release signing setup belongs in [Operations](../../docs/operations.md#release-runbook).
+The real-window lane needs a display (headless Linux: `xvfb-run -a`) and the
+platform webview packages below. Its WebDriver is embedded; no driver installation
+is needed. CI lanes live in the [desktop workflow](../../.github/workflows/desktop.yml).
 
 ## Bundles
 
 `cargo xtask build desktop` builds the shell, frontend, icons, and matching-host
 bundles (Linux: `.deb` and `.AppImage`). `--unsigned-test` builds without bundling.
-Native codec build tools are listed in [Development](../../docs/development.md).
+Run repository setup first; see the [root README](../../README.md#build-and-contribute).
 
 | Host    | Prerequisites                                                                                                                               |
 | ------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -41,12 +34,4 @@ Native codec build tools are listed in [Development](../../docs/development.md).
 | Windows | WebView2, NSIS, and generated `icons/icon.ico`                                                                                              |
 | macOS   | Xcode Command Line Tools and generated `icons/icon.icns`                                                                                    |
 
-Icons derive from the root `favicon.svg` through the pinned Tauri CLI. Signing
-and user approval steps live in the [installation guide](desktop-app.md#install).
-Bundle installation checks verify startup and macOS signatures; they do not
-exercise Finder approval of a quarantined download. Check that on a clean Mac.
-
-The macOS section of the desktop guide generates the DMG background. Preserve
-its installation heading, ordered steps, and following note; regenerate with
-`node scripts/generate-dmg-background.mjs` and inspect
-`target/desktop-dmg/background.png` after edits. The generator rejects overflow.
+Signing and publication: [release runbook](../../release/README.md).

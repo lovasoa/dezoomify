@@ -6,10 +6,13 @@ export interface PermissionApi {
 export interface PermissionWait {
   origin: string;
   requesting: boolean;
+  /** Call directly from the user event handler. Awaiting first loses the browser
+   * activation needed by permission APIs. ensure itself never opens a prompt. */
   request(): void;
 }
 
-/** One attempt's grant waits. Only request(), called by a click, opens a prompt. */
+/** Concurrent waits for an origin share one prompt. Each caller must supply its
+ * invocation signal so retirement removes its wait without cancelling others. */
 export function createAttemptPermissions(
   api: PermissionApi,
   changed: (pending: PermissionWait[]) => void,

@@ -787,22 +787,16 @@ export type ResourceKind = "metadata" | "tile" | "probe" | "output";
 export type RetryChoice = "retry" | "cancel";
 
 
-/**
- * Whether a source URL carries secret-bearing query or fragment keys.
- */
 export function hasSecretParams(url: string): boolean;
 
 /**
- * The retry policy of `Error::retryable()`, exposed at the boundary:
- * one policy in Rust; the shared UI reads the boundary-stamped
- * `retryable` hint as plain data.
+ * UI retry hints must use this verdict to agree with acquisition policy.
  */
 export function isRetryable(error: any): boolean;
 
 /**
- * The secret/credential query-key policy of `SENSITIVE_QUERY_KEYS`,
- * exposed at the boundary: one vocabulary in Rust. The TypeScript list
- * exists only for pure callers that load no runtime.
+ * Prefer this vocabulary when WASM is loaded; the TypeScript copy serves
+ * pure callers that cannot load a runtime.
  */
 export function isSecretKey(key: string): boolean;
 

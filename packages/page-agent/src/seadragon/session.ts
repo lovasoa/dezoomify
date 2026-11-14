@@ -32,7 +32,7 @@ export function openSeadragonSource(source: PageObject): LiveViewerSource {
       checkTileBounds(source, grid, x, y);
       const url = source.call("getTileUrl", level, x, y);
       if (typeof url !== "string") throw new Error("unsupported Seadragon tile URL");
-      return { image: await loadImage(url, signal), owned: true };
+      return { image: await loadImage(url, signal), ownership: "transferred" };
     },
   };
 }

@@ -1,13 +1,5 @@
-// Shared-UI message dictionary (English plus French, German, Italian).
-//
-// English (`en`) is the canonical source: every other locale covers it key
-// for key with identical `{placeholders}`, and lookups fall back to English
-// per key. Rules for user copy: `packages/shared-ui/AGENTS.md`.
-//
-// Locale selection: hosts call `setLocale()` (explicit picker choice) or
-// `pickLocale()` (`Accept-Language` / `navigator.languages`); unknown tags
-// fail closed to English. This module is erasable-syntax-only TypeScript so
-// node can type-strip it directly in tests.
+// Locale selection is shared mutable state within a loaded UI. Hosts select it
+// before rendering; independent simultaneous locales must use t's explicit override.
 
 import { de } from "./locales/de.ts";
 import { fr } from "./locales/fr.ts";
@@ -25,7 +17,6 @@ export function getLocale(): Locale {
   return activeLocale;
 }
 
-/** True only for the four shipped locale names (case-insensitive, base tag). */
 export function isSupportedLocaleName(name: string): boolean {
   return normalizeLocaleName(name) !== null;
 }
@@ -508,19 +499,15 @@ const en = {
 
 export type I18nKey = keyof typeof en;
 
-/** Canonical English templates. Tests enumerate this table. */
 export const EN: Record<string, string> = en;
 
-/** French templates (same keys, same placeholders). */
 export const FR: Record<string, string> = fr;
 
-/** German templates (same keys, same placeholders). */
 export const DE: Record<string, string> = de;
 
-/** Italian templates (same keys, same placeholders). */
 export const IT: Record<string, string> = it;
 
-const dictionaries: Record<string, Record<string, string>> = { en, fr, de, it };
+const dictionaries = { en, fr, de, it } satisfies Record<Locale, Record<I18nKey, string>>;
 
 /** Read one locale table with English fallback (never undefined). */
 export function getDictionary(locale: string): Record<string, string> {
@@ -535,7 +522,7 @@ export function getDictionary(locale: string): Record<string, string> {
  * missing from the active locale fall back to English per key.
  */
 export function t(key: I18nKey, vars?: I18nVars, locale?: string): string {
-  const want: string =
+  const want: Locale =
     typeof locale === "string" && locale !== ""
       ? (normalizeLocaleName(locale) ?? activeLocale)
       : activeLocale;

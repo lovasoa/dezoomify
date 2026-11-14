@@ -1,12 +1,10 @@
-# shared-ui
+# Shared UI
 
-The Dezoomify interface shared by the website, desktop app, and extension:
-URL entry, automatic format detection, progress, cancellation, results, and
-error guidance. Shared pure helpers own history, naming, and bounded
-diagnostic reports.
+Provides the website, extension and desktop app with shared screens,
+translated copy and presentation logic. Common controls and error guidance
+keep the products familiar despite their different download and saving
+capabilities.
 
-Products supply progress, results, and ordinary action callbacks. The UI
-never touches network, filesystem, or extension APIs directly.
-
-Contributing: keep components host-neutral, error codes stable, and the
-active transport always visible. Tests live beside the sources.
+Products provide actions and platform capabilities. [browser-runtime](../browser-runtime/)
+connects these screens to browser jobs, while the [desktop app](../../apps/desktop/)
+connects them to native jobs. The interface remains independent of both.

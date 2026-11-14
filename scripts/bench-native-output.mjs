@@ -1,5 +1,7 @@
 // Linux end-to-end benchmark: release CLI binaries, fresh caches, real output.
 // Usage: node scripts/bench-native-output.mjs OLD_CLI NEW_CLI
+// Build each with `cargo build --release --locked -p dezoomify-cli` in separate
+// checkouts and target directories so neither binary is overwritten.
 import { spawn } from "node:child_process";
 import { mkdir, mkdtemp, readdir, readFile, rm, stat } from "node:fs/promises";
 import { createServer } from "node:http";

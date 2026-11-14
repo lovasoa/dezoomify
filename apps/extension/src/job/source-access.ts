@@ -288,9 +288,11 @@ function memoryScanReply(reply: unknown): {
 }
 
 /**
- * Direct, finite access to one source document from the privileged job page.
- * Navigation permanently invalidates this object; retries create a new scan
- * only while the same source document is still current.
+ * Bind access to one document, not a reusable frame ID. Chromium document IDs
+ * and Firefox isolated-world tokens reject navigation races before accepting
+ * replies. Navigation permanently invalidates this object; callers must create
+ * a new one for the replacement page. Page replies remain untrusted even after
+ * identity checks: this boundary validates payloads before Rust sees them.
  */
 export function createSourceAccess(
   browserApi: SourceApi,

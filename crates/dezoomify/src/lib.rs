@@ -1,5 +1,6 @@
-//! Shared image discovery, geometry, and asynchronous dezooming.
-//! Platform I/O is supplied through the Host capability contract.
+//! Parsers consume supplied bytes; [`Host`] supplies platform I/O and resources.
+//! Use [`dezoomify()`] for one selected image or [`Job`] to retain a catalog and
+//! schedule its entries. Staged callers own host settlement; see [`Job`].
 #![forbid(unsafe_code)]
 #![deny(clippy::too_many_lines)]
 #![cfg_attr(not(test), deny(clippy::disallowed_methods, clippy::disallowed_types))]
@@ -33,7 +34,6 @@ pub mod xlimage;
 pub mod zif;
 pub mod zoomify;
 
-/// Canonical public values shared by discovery and hosts.
 pub mod model;
 
 mod acquisition;

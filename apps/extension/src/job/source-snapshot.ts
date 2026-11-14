@@ -6,7 +6,6 @@ export const sourceSnapshotLimits = {
   documentBytes: 8 * 1024 * 1024,
 };
 
-/** The document precedes URL-only resources. */
 export interface SourceSnapshot {
   ok: true;
   documentUrl: string;

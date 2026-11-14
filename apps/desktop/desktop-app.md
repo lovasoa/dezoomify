@@ -7,24 +7,19 @@ formats. It runs on Windows, macOS, and Linux and saves directly to your chosen
 folder. It cannot reuse your browser login; use the
 [extension](../../docs/user/browser-extension.md) for signed-in pages.
 
-The app can build the output file while downloading, without keeping the whole
-image in memory. Memory use depends on the source and output format; WebP and
-AVIF still need the complete picture in memory. If a save reaches a limit,
-choose another format, a smaller resolution, or a tile folder.
-
-Online image information and pieces are downloaded through your own internet
-connection. This can help when a source site blocks Dezoomify’s shared server.
+Downloads use your own internet connection. Most formats can save without keeping
+the whole image in memory; WebP and AVIF need the complete picture. If a save
+reaches a limit, choose another format, a smaller resolution, or a tile folder.
 
 ## Resuming an interrupted save
 
 Run the same job again to reuse cached tiles. The cache is enabled by default;
-choose a custom folder in settings or with CLI `--tile-cache`. If the source
-image changed, remove its cached tiles first. Cached tiles do not contain your
-browser session.
+choose a custom folder in settings. If the source image changed, remove its
+cached tiles first.
 
 ## Recent pictures
 
-History keeps your last 20 started images on this device. Click a saved filename
+History keeps recent images on this device. Click a saved filename
 under **Result** to open its file; missing files show **Deleted**. Click **Source**
 to fill the address field without starting. Remove entries with the trash icon
 or **Clear history**; this never deletes saved images.
@@ -32,20 +27,16 @@ or **Clear history**; this never deletes saved images.
 ## Saving and opening images
 
 Choose the folder, format, and size on the main screen, paste an address, and
-start. Saving is automatic. When **Image saved** appears, use **Open image** or
-**Show in folder**. Settings return on the main screen, not the result screen.
-Pause stops new tile downloads; Cancel remains available while output finishes.
+start. Saving is automatic; existing files are preserved. When **Image saved**
+appears, use **Open image** or **Show in folder**. Pause stops new tile downloads;
+Cancel remains available while output finishes.
 
 When a source offers several images, choose **Download all** above the image
-picker or choose one image individually. Batch results show each saved file and
-any failures. Cancelling stops the remaining work and keeps completed saves.
-With PDF selected, the batch saves one file with one page per image, in picker
-order. If an image fails or you cancel, completed pages are saved and the
-unfinished image is omitted. Use **Open document** in the batch results.
+picker. Cancelling keeps completed saves. With PDF selected, the batch saves
+one file in picker order, keeping completed pages after a failure or cancellation.
 
 Open local source files through **File → Open…**,
 **⌘O** on macOS, **Ctrl+O** on Windows/Linux, or by dropping a file onto the window.
-The file dialog lists the supported formats.
 URL lists are plain text: one address or file path per line, optionally followed
 by a title. Relative entries use the list's directory. Keep local metadata with
 its tile files. Finish or cancel the current download before opening another source.
@@ -66,20 +57,11 @@ Linux releases are built on Ubuntu 24.04; older distributions may not run them.
 Choose **Help → Check for updates…** to check GitHub Releases. The app asks
 before downloading a signed update and restarting. Finish or cancel any
 current save first. Linux and Windows may ask for administrator permission
-to install the update. Older versions without this menu need one manual
-upgrade to gain the updater.
-
-You can also build the app locally with `cargo xtask build desktop`, which
-produces an installer for the matching host under
-`target/release/bundle/` (Linux `.deb` and `.AppImage` on a Linux host with the webview
-system packages; Windows `.exe` (NSIS) and macOS `.dmg` only on their matching
-hosts). Local macOS builds use an ad-hoc signature unless Apple signing
-credentials are supplied; these builds are not notarized by default.
+to install the update. Older versions without this menu need one manual upgrade.
 
 ### Opening the macOS app
 
-Download the `.dmg` from the releases page and open it. The installation
-window displays these steps beside the app and Applications icons:
+Download and open the `.dmg`, then:
 
 1. Drag **Dezoomify** into **Applications**.
 2. Open **Dezoomify** from **Applications**.
@@ -91,78 +73,56 @@ Older releases and local ad-hoc builds may require approval under
 **System Settings → Privacy & Security → Open Anyway**. See
 [Apple's instructions](https://support.apple.com/en-us/102445).
 
-If macOS instead says the app is damaged, will damage your computer, or has
-been moved to Trash, download a fresh copy from the releases page. If it
-still fails, report the exact warning (or a screenshot), your macOS version,
-and the release filename in a
-[GitHub issue](https://github.com/lovasoa/dezoomify/issues).
-A damaged-app warning can indicate a packaging or signature problem;
-automatic movement to Trash can indicate malware detection. Do not assume
-either warning is the ordinary developer-approval prompt.
-
-## Save an image
-
-Paste the viewer page or image description address and start dezooming. The app
-names the output from the image title and adds a numeric suffix if needed;
-existing files are preserved. Copy an address from the website to continue here.
-For terminal use, see the [CLI guide](../../docs/user/command-line.md).
-
-If a server accepts requests only from its viewer, add that page as the Referer
-header in settings. See [access refusals](../../docs/user/troubleshooting.md#forbidden-or-unauthorized-errors).
-This does not sign you in or transfer your browser session.
+If macOS says the app is damaged, will damage your computer, or has been moved
+to Trash, download a fresh copy. These warnings are different from the ordinary
+approval prompt. If it still fails, report the exact warning, macOS version,
+and release filename in a [GitHub issue](https://github.com/lovasoa/dezoomify/issues).
 
 ## Choosing the file format
 
 - **Auto** chooses JPEG for an opaque image within JPEG's dimensions, otherwise PNG.
 - **PNG or TIFF** are lossless choices for archiving and editing.
 - **JPEG** suits smaller on-screen copies; it is limited to 65,535 pixels per side.
-- **JPEG 2000** writes the original tile grid incrementally. It supports lossless
-  and lossy RGB output, without alpha, and requires a regular source grid with
-  at most 65,535 tiles. Compression zero is lossless.
+- **JPEG 2000** supports lossless and lossy output without transparency.
+  Compression zero is lossless. It requires a regular source grid with at most
+  65,535 tiles.
 - **WebP** is lossless here, but needs a complete pixel buffer and is limited to
   16,383 pixels per side.
 - **AVIF** saves lossy images with transparency, up to 65,535 pixels per side.
   It needs the complete image in memory and does not preserve embedded color
   profiles. Quality 100 is not a lossless mode.
 - **ZIF** is a tiled multi-resolution image and omits transparency.
-- **PDF** preserves selected image resolution on a marginless page. Compatible
-  source tiles stay compressed; other tiles use lossless conversion with alpha.
-  **Download all** puts the images in a single multi-page document.
+- **PDF** preserves selected resolution on a marginless page, with transparency.
+  **Download all** creates a single multi-page document.
 - **IIIF** saves a folder with an offline viewer. Press Open or open `viewer.html`
   in your browser. Keep the whole folder together, including `full/` overview images.
 
-The Compression slider at the top of the Size menu updates the size budgets as
-you drag it. Its value passes unchanged to the encoder: higher compression aims
-for smaller files, and each format decides the tradeoff in detail and encoding
-time. The slider is disabled when the format cannot adjust compression.
-An amber warning marks very low lossy quality, where text and fine details may
-become unreadable. The cutoff is a guideline; the effect depends on the image.
-Compatible IIIF/ZIF/PDF tiles keep their original compressed bytes.
+Higher Compression in the Size menu aims for smaller files, at the cost of
+detail for lossy formats. The amber warning marks quality where text and fine
+details may become unreadable. IIIF/ZIF/PDF can preserve original compressed tiles.
 
-Size estimates assume an image filling the selected maximum dimensions; smaller
-sources or different aspect ratios can produce much smaller files. They use the
-chosen format and compression to give a rough budget, not a guaranteed file-size or
-memory limit. Auto assumes an opaque JPEG.
+Size estimates assume an image filling the selected maximum dimensions. They
+are rough budgets; actual file size and memory use can differ.
 
 ## Settings
 
 Choose an output folder, format, compression, optional size caps, retry budget,
-cache folder, and request headers. Settings persist on this device. Invalid
-values are refused rather than starting a job with them.
+cache folder, and request headers. Settings persist on this device.
 
 Network offers **Gentle**, **Automatic** (default), and **Aggressive**. All use
-adaptive pacing and respect server limits; Gentle keeps requests slow from the
-start. Open Network’s information button for the starting and maximum rates.
-These count tile-request starts per server, not download speed. For custom rates,
+adaptive pacing and respect server limits; Gentle starts slowly. Network’s
+information button shows request rates per server. For custom rates,
 use the [CLI](../../docs/user/command-line.md#request-pacing).
+
+If a site accepts requests only from its viewer, add that page as the Referer
+header. See [access refusals](../../docs/user/troubleshooting.md#forbidden-or-unauthorized-errors).
 
 ## If a save fails
 
 Read the error's suggested next step. After automatic retries are exhausted,
 the download pauses and offers **Retry once more** or **Cancel**. Retrying keeps
-successfully downloaded tiles; the app waits for your answer without a timeout.
-Permanent tile failures or cancellation stop the job without publishing an
-incomplete image. Restarting the job can reuse good cached tiles; see
+successfully downloaded tiles. An incomplete image is never published.
+Restarting the job can reuse good cached tiles; see
 [resuming](#resuming-an-interrupted-save).
 
 If opening a saved file fails, try **Show in folder**. Use **Technical details &

@@ -1,5 +1,6 @@
-//! Staging, destination naming and validation, and atomic publication. Concrete
-//! writers own encoding; unpublished output owns its cleanup.
+//! Destination checks are advisory until atomic publication: another job may
+//! claim an automatic name while this job encodes. Keep staging on a collision
+//! so publication can choose a new name without repeating acquisition or encoding.
 
 use std::io::{Read, Seek, Write};
 use std::path::{Path, PathBuf};
@@ -439,7 +440,8 @@ impl Drop for StagedDirectory {
     }
 }
 
-/// Standard Write/Seek adapter shared by the concrete native encoders.
+/// Remembers the original disk failure even when a codec wraps it as an encoding
+/// error. Call `StagedFile::check_error` before returning the codec's result.
 pub(crate) struct GuardedFile<'a, W = std::fs::File> {
     file: &'a mut W,
     cancelled: &'a AtomicBool,

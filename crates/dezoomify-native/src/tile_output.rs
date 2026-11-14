@@ -1,4 +1,6 @@
-//! Concrete encoded-tile writer selection; acquisition and publication are shared.
+//! Required source conversion stays in acquisition so failures retain the tile's
+//! request context and retry handling. Finalization may decode stored tiles for
+//! pyramid generation, but must not reacquire missing source data.
 use crate::{codecs::NativeFormat, encoded_tile::EncodedTile, iiif_output::IiifWriter};
 use dezoomify::model::{Error, OutputPlan, ReusedTile};
 use std::{path::Path, sync::atomic::AtomicBool};

@@ -1,9 +1,6 @@
 //! Repository task runner. Unknown commands fail instead of succeeding as
 //! no-ops.
 
-// 6.1 unwrap policy: task failures return `Err(String)` with a usage message
-// instead of panicking (see the workspace `clippy.toml` + root `Cargo.toml`
-// policy note).
 #![deny(clippy::unwrap_used)]
 
 mod bindings;
@@ -69,8 +66,6 @@ fn dispatch(args: &[String]) -> Result<(), String> {
         },
         "dev" => match args.get(1).map(String::as_str) {
             Some("ui") | Some("web") | Some("desktop") | Some("extension") => {
-                // `Some` by the match guard above; bind it instead of
-                // re-indexing (6.1 unwrap policy: no panics on argv).
                 let Some(target) = args.get(1) else {
                     return Err("usage: cargo xtask dev <ui|web|desktop|extension>".to_string());
                 };
@@ -131,8 +126,7 @@ pub(crate) fn cargo_debug_binary(name: &str) -> Result<std::path::PathBuf, Strin
         .join(format!("{name}{suffix}")))
 }
 
-/// Targets that take no options must fail on unknown flags instead of
-/// silently widening or skipping coverage (docs/testing.md).
+/// Reject misspelled flags so a requested test lane cannot silently run less coverage.
 pub(crate) fn reject_unknown_args(target: &str, args: &[String]) -> Result<(), String> {
     if args.is_empty() {
         Ok(())

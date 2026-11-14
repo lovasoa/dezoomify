@@ -1,32 +1,10 @@
 # Browser runtime
 
-BrowserHost supplies platform operations to the shared Rust algorithm. The
-website and extension share application composition and invocation lifetime;
-products inject source acquisition, transport, permissions, and saving.
-See [Architecture](../../docs/architecture.md) for ownership boundaries.
+Runs the Rust downloader in the website and extension, supplying browser
+networking, image decoding and canvas output. Sharing this runtime keeps
+download behavior consistent while each product supplies its own source
+access, permissions and saving.
 
-## Image access
-
-Readable bytes permit processing, decoding, and saving. Ordinary `<img>` loads
-can display unprocessed tiles after a network failure, but may taint the canvas.
-A tainted canvas stays display-only: never read pixels or promise an encoded save.
-HTTP, permission, decoding, processing, and cancellation failures do not qualify
-as network fallback. Successful ordinary-image loading classifies the origin
-for later tiles in that job.
-
-The website tries direct access, then uses its proxy for eligible public source
-resources. The extension uses its source session and permission-controlled
-transport. Transport preserves request headers, redirect bases,
-and typed failures. Retry limits and backoff belong to Rust. Optional acquisitions
-await a shared Retry/Cancel approval, pausing new work while in-flight operations
-settle. Every required tile must succeed before finalization.
-
-## Resource lifetime
-
-Cancellation updates presentation immediately, but settlement waits for owned
-decoding and encoding callbacks. Late bitmaps close without painting; save
-continuations must check cancellation before publishing. Product save behavior
-determines whether output is ready for a click, confirmed saved, or display-only.
-
-For current canvas and transport limits, consult [limits.ts](src/limits.ts).
-Tests: `cargo xtask test browser`.
+It connects the downloader to [shared-ui](../shared-ui/) and the product's
+browser capabilities. The extension also uses [page-agent](../page-agent/) to
+reach image sources inside the page the user is viewing.

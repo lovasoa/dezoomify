@@ -1,12 +1,6 @@
-/**
- * Bounded readable-byte transport for the extension job tab.
- *
- * This module deliberately has no permission prompt. A job tab can inspect a
- * missing host grant and ask the job page to show an explicit UI action,
- * but it must never turn a background fetch into a surprise browser prompt.
- * Source-document requests are owned by the job page/source script; this
- * transport is only for extension-origin requests with an existing host grant.
- */
+/** Extension-origin requests omit credentials and require an existing host
+ * grant. Missing access is a typed refusal; the job UI owns permission prompts.
+ * Requests needing the source page's session belong in source-access instead. */
 
 import {
   CancelledError,
@@ -53,12 +47,10 @@ export const ALLOWED_MIME_PREFIXES = Object.freeze([
   "application/octet-stream",
 ]);
 
-/** @param {string} url */
 export function isProxyUrl(url: string): boolean {
   return typeof url === "string" && url.includes(PROXY_PATH);
 }
 
-/** Canonical observations from the extension's browser transport. */
 export function transportError(
   kind: "bad-url" | "cancelled" | "network-failure" | "timeout" | "source-lost",
   detail: string,
@@ -81,7 +73,6 @@ export function transportError(
   }
 }
 
-/** @param {string} url */
 function checkedUrl(url: string): URL {
   if (isProxyUrl(url))
     throw transportError("bad-url", "proxy transport is forbidden in the extension");
@@ -95,9 +86,6 @@ function checkedUrl(url: string): URL {
   return parsed;
 }
 
-/**
- * @param {{ fetchImpl?: (url: string, init: RequestInit) => Promise<any>, hasPermission: (origin: string) => boolean | Promise<boolean>, setTimeoutFn?: typeof setTimeout, clearTimeoutFn?: typeof clearTimeout }} deps
- */
 export function createExtensionFetcher(deps: FetchDeps) {
   const fetchImpl: (url: string, init: RequestInit) => Promise<Response> =
     deps.fetchImpl ?? (fetch as (url: string, init: RequestInit) => Promise<Response>);

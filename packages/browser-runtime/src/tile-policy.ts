@@ -1,34 +1,25 @@
-// Browser tile policy: politeness, resilience, and timeouts.
-//
-// Request timeouts and proxy retry delays. Rust owns tile pacing and retries.
+// Direct metadata gets a shorter timeout so eligible proxy fallback remains
+// responsive. Tile retry and pacing decisions belong to Rust.
 
-/** Per-request timeout applied to every individual HTTP request (30 s). */
 export const REQUEST_TIMEOUT_MS = 30000;
 
 /**
- * Head-start window for the direct metadata fetch: if the site does not
- * answer within 1500 ms, the eligible website proxy takes over
- * automatically after the direct request settles.
- * Tiles keep the full 30 s timeout before eligible proxy fallback.
+ * Proxy fallback starts only after the direct request settles. This is a timeout,
+ * not a race between two requests that could consume the source twice.
  */
 export const DIRECT_METADATA_TIMEOUT_MS = 1500;
 
-/** Maximum concurrent tile requests in browser products. */
 export const BROWSER_MAX_CONCURRENCY = 6;
 
 export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/**
- * Delay before a single retry after PROXY_RATE_LIMITED. Honors
- * the relay's Retry-After hint when present, otherwise backs off 1 s.
- * Returns null when the hint exceeds the UX budget: fail fast with
- * extension/desktop guidance instead of stalling the job on a long throttle.
- */
 export const PROXY_RATE_LIMIT_RETRY_BASE_MS = 1000;
 export const PROXY_RATE_LIMIT_RETRY_MAX_MS = 5000;
 
+/** Null declines a retry rather than truncating a server's long Retry-After.
+ * This bounds the metadata wait without retrying earlier than requested. */
 export function proxyRateLimitDelayMs(retryAfterMs?: number): number | null {
   if (typeof retryAfterMs === "number" && Number.isFinite(retryAfterMs)) {
     if (retryAfterMs <= 0) return 0;
@@ -44,10 +35,8 @@ export interface TimeoutCombined {
   timedOut?: () => boolean;
 }
 
-/**
- * Combine a caller signal with the per-request timeout.
- * Uses AbortSignal.any/timeout when available, manual wiring otherwise.
- */
+/** Always call cleanup after the request body settles. The fallback owns a
+ * timer and parent listener; cleanup does not abort the returned signal. */
 export function combineTimeout(
   parentSignal?: AbortSignal,
   ms: number = REQUEST_TIMEOUT_MS,

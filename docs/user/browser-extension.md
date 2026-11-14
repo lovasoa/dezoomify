@@ -34,19 +34,6 @@ active job. Closing the job tab also stops it, including an unfinished save.
 Source-page navigation ends access to the old document; a job can continue only
 with discovered data it can fetch without that document's session.
 
-## 1. Click the Dezoomify icon
-
-Follow [Save an image](#save-an-image) above; pin the icon if it is hidden.
-
-## 2. Let the page settle
-
-Let the viewer load and zoom before clicking. The extension does not keep
-watching for resources loaded afterward.
-
-## 3. Start dezooming
-
-The job tab starts automatically and confirms when saving finishes.
-
 ## Tiled or static?
 
 Use the browser's normal **Save image as** when it already gives you the complete

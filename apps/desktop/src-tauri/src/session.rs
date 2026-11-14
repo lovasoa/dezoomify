@@ -33,9 +33,9 @@ impl Session<'_> {
         let host = NativeHost::with_runtime(
             self.options.clone(),
             self.registration.diagnostics.child(),
+            self.registration.controls.clone(),
             self.runtime.clone(),
-        )?
-        .with_controls(self.registration.controls.clone());
+        )?;
         host.on_progress(|progress| self.events.progress(progress));
         host.on_retry(|request| {
             let (question, answer) = self.registration.request_retry();

@@ -44,5 +44,5 @@ export async function loadTile(
       reject(cause);
     }
   });
-  return { image: tile.call("getImage") };
+  return { image: tile.call("getImage"), ownership: "borrowed" };
 }

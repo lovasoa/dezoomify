@@ -1,3 +1,6 @@
+/** Replacement updates presentation immediately, then waits for retired host
+ * work before starting the new invocation. Every callback captures its attempt:
+ * a late completion must not alter replacement output or history. */
 import {
   AccessRequestView,
   type Completion,
@@ -74,6 +77,9 @@ export interface BrowserCapabilities
   recoverDiscovery?(error: JobError): Promise<Completion | undefined>;
   canvas(): HTMLCanvasElement;
   showCanvas?(canvas: HTMLCanvasElement): void;
+  /** Keep the Blob alive until saving settles. Website saves return save-ready
+   * while awaiting a click; extension saves return save-initiated only after
+   * download-manager confirmation. */
   save(
     blob: Blob,
     width: number,
@@ -85,6 +91,8 @@ export interface BrowserCapabilities
   saveOutput?(): void;
   openOutput?(): Promise<void>;
   revealOutput?(): Promise<void>;
+  /** Stop external access immediately on retirement. Host decoding/encoding
+   * may still be settling, so their resource cleanup belongs to the host. */
   dispose?(): void;
 }
 export interface BrowserApplicationOptions {
@@ -103,7 +111,6 @@ export interface BrowserApplicationOptions {
   openSource?(): void;
 }
 
-/** Website and extension share the entire invocation, interaction, and presentation flow. */
 export function createBrowserApplication(options: BrowserApplicationOptions) {
   const history = createHistory(options.history?.store, options.history?.key ?? "", Date.now);
   let current: ReturnType<typeof invocation> | undefined;

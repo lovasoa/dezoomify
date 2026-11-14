@@ -1,4 +1,8 @@
-# wasm-bindings
+# WASM bindings
 
-`src/generated.d.ts` is emitted by `wasm-bindgen` from the Rust types used by
-`dezoomify-wasm`. Do not edit it by hand.
+Provides the TypeScript declarations and output-format metadata shared by
+JavaScript products and the Rust core. They are generated from the Rust
+definitions so both languages describe the same capabilities and values.
+
+This package describes the boundary; [dezoomify-wasm](../../crates/dezoomify-wasm/)
+provides the executable bridge used by [browser-runtime](../browser-runtime/).
