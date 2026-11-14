@@ -69,7 +69,7 @@ impl Resource {
 struct Search {
     resources: BTreeMap<Request, Resource>,
     ready: Vec<Branch>,
-    catalogs: BTreeMap<String, (Priority, DiscoveryCatalog)>,
+    catalogs: Vec<(Priority, DiscoveryCatalog)>,
     observations: BTreeMap<usize, (Priority, DiscoveryCatalog)>,
     /// A rescan can return the same job-owned loader more than once.
     observed: BTreeSet<String>,
@@ -270,14 +270,8 @@ impl Search {
         Ok(())
     }
 
-    /// Keep one interpretation per source, preserving distinct sources as choices.
     fn accept(&mut self, branch: Branch) -> Result<(), DiscoveryError> {
         let priority = branch.priority;
-        let source = branch
-            .canonical_uri
-            .clone()
-            .or_else(|| branch.history.last().map(|read| read.request.uri.clone()))
-            .unwrap_or_else(|| format!("input:{}", priority.2));
         let result =
             branch
                 .parsed
@@ -296,15 +290,7 @@ impl Search {
                     self.observations.insert(priority.2, (priority, catalog));
                 }
             }
-            Ok(catalog) => {
-                if self
-                    .catalogs
-                    .get(&source)
-                    .is_none_or(|(old, _)| priority < *old)
-                {
-                    self.catalogs.insert(source, (priority, catalog));
-                }
-            }
+            Ok(catalog) => self.catalogs.push((priority, catalog)),
             Err(error) => self.rejected(branch.spec, error)?,
         }
         Ok(())
@@ -413,7 +399,7 @@ impl Search {
 
     fn specificity(&self) -> Option<Specificity> {
         self.catalogs
-            .values()
+            .iter()
             .chain(self.observations.values())
             .map(|(rank, _)| rank.0)
             .min()
@@ -432,21 +418,31 @@ impl Search {
         let specificity = self.specificity().expect("settled result");
         let mut catalogs: Vec<_> = self
             .catalogs
-            .into_values()
+            .into_iter()
             .filter(|(rank, _)| rank.0 == specificity)
             .collect();
         if catalogs.is_empty() {
-            catalogs = self
-                .observations
-                .into_values()
-                .filter(|(rank, _)| rank.0 == specificity)
-                .collect();
+            return DiscoveryCatalog::new(
+                self.observations
+                    .into_values()
+                    .filter(|(rank, _)| rank.0 == specificity)
+                    .flat_map(|(_, catalog)| catalog.into_entries()),
+            );
         }
         catalogs.sort_by_key(|(rank, _)| *rank);
+        let mut seen = Vec::new();
         DiscoveryCatalog::new(
             catalogs
                 .into_iter()
-                .flat_map(|(_, catalog)| catalog.into_entries()),
+                .filter_map(|(_, catalog)| {
+                    let public = catalog.public_catalog();
+                    if seen.contains(&public) {
+                        return None;
+                    }
+                    seen.push(public);
+                    Some(catalog)
+                })
+                .flat_map(DiscoveryCatalog::into_entries),
         )
     }
 
@@ -644,9 +640,9 @@ where
 
 /// Discover through matcher evidence and a shared table of bounded resource reads.
 /// Supplied contents and accessible Host observations run before remote fallback.
-/// Collect equally strong source catalogs in discovery priority order, keeping
-/// the preferred interpretation of a shared source. Weaker matches and viewer
-/// snapshots remain fallbacks when declared sources are available.
+/// Collect equally strong source catalogs in discovery priority order, coalescing
+/// identical catalogs. Weaker matches and viewer snapshots remain fallbacks when
+/// declared sources are available.
 /// Hosts bound response sizes and stop I/O when the owning job is cancelled.
 pub async fn discover<F, Fut, P, PFut, O, OFut>(
     inputs: Vec<DiscoveryInput>,

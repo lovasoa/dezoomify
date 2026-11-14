@@ -786,7 +786,6 @@ fn shared_reads_keep_branch_history_headers_and_redirected_bases() {
         |_| async { Ok(Vec::new()) },
     ))
     .unwrap();
-    assert_eq!(catalog.len(), 1);
     assert_eq!(selected(catalog), "child");
     assert_eq!(calls.borrow().len(), 2);
 }

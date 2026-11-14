@@ -41,10 +41,9 @@ most one network slot, shared by its decoder continuations. See
 Resource inventory initiates reads only for recognized URLs; explicit sources,
 format-directed references and supplied contents remain available to parsers.
 Equally strong source catalogs are collected in discovery priority order;
-multiple parsers of the same source keep the preferred interpretation. Weaker
-matches and reconstructed metadata remain fallbacks, so a loaded canvas does not
-hide the rest of its manifest. Recognized metadata resources precede live
-page-loader fallback.
+identical catalogs appear once. Weaker matches and reconstructed metadata remain
+fallbacks, so a loaded canvas does not hide the rest of its manifest. Recognized
+metadata resources precede live page-loader fallback.
 The `viewer` format uses the page's tile loader; `generic` remains URL-template discovery.
 Discovery explores accessible alternatives before requesting interactive access.
 The Host owns the actual permission prompt. It can supply additional observations
