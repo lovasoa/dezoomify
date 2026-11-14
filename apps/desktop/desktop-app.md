@@ -53,10 +53,15 @@ its tile files. Finish or cancel the current download before opening another sou
 ## Install
 
 The [releases page](https://github.com/lovasoa/dezoomify/releases/latest)
-ships installers for Linux x86_64 (`.deb`), Windows x86_64 (`.exe`, NSIS),
+ships Linux x86_64 downloads (`.AppImage` and `.deb`), Windows x86_64 (`.exe`, NSIS),
 and Apple silicon macOS (`.dmg`). Linux and Windows installers are unsigned.
 macOS releases use a Developer ID signature and Apple notarization. The operating
 system may ask you to confirm that you want to open a downloaded app.
+
+On Linux, make the AppImage executable in its file properties, then open it.
+It needs no installation. If FUSE is unavailable, run it from a terminal with
+`APPIMAGE_EXTRACT_AND_RUN=1 ./dezoomify-desktop.AppImage`.
+Linux releases are built on Ubuntu 24.04; older distributions may not run them.
 
 Choose **Help → Check for updates…** to check GitHub Releases. The app asks
 before downloading a signed update and restarting. Finish or cancel any
@@ -66,7 +71,7 @@ upgrade to gain the updater.
 
 You can also build the app locally with `cargo xtask build desktop`, which
 produces an installer for the matching host under
-`target/release/bundle/` (Linux `.deb` on a Linux host with the webview
+`target/release/bundle/` (Linux `.deb` and `.AppImage` on a Linux host with the webview
 system packages; Windows `.exe` (NSIS) and macOS `.dmg` only on their matching
 hosts). Local macOS builds use an ad-hoc signature unless Apple signing
 credentials are supplied; these builds are not notarized by default.

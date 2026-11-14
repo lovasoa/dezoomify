@@ -32,7 +32,7 @@ release signing setup belongs in [Operations](../../docs/operations.md#release-r
 ## Bundles
 
 `cargo xtask build desktop` builds the shell, frontend, icons, and matching-host
-installer. `--unsigned-test` builds without bundling.
+bundles (Linux: `.deb` and `.AppImage`). `--unsigned-test` builds without bundling.
 Native codec build tools are listed in [Development](../../docs/development.md).
 
 | Host    | Prerequisites                                                                                                                               |
