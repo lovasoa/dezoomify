@@ -47,7 +47,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-24.04, macos-latest, windows-latest]
     steps:
       - name: Enable fixture symlinks on Windows
         if: runner.os == 'Windows'
@@ -79,7 +79,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-24.04, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup-pnpm
@@ -89,7 +89,7 @@ jobs:
         with:
           key: desktop-bundle
           desktop: true
-      - name: Build, install, and launch (Linux deb)
+      - name: Build, install, and launch (Linux deb and AppImage)
         if: runner.os == 'Linux'
         run: bash scripts/ci-desktop-linux.sh
       - name: Build, install, and launch (macOS dmg)
@@ -107,6 +107,7 @@ jobs:
           path: |
             bundle.log
             bundle-launch.log
+            appimage-launch.log
             signature.log
             dmg-installation.png
           retention-days: 30

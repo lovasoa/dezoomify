@@ -153,44 +153,45 @@ fn build_desktop_artifact(target: &str, target_os: &str, out: &Path) -> Result<(
         ));
     }
     std::fs::copy(&hits[0], out).map_err(|e| format!("copy {}: {e}", hits[0].display()))?;
-    let (subdir, extension) = match target {
-        "desktop-linux-x86_64" => ("deb", "deb"),
-        "desktop-windows-x86_64" => ("nsis", "exe"),
-        "desktop-macos-aarch64" => ("macos", "app.tar.gz"),
-        _ => return Err(format!("missing updater recipe for {target}")),
-    };
-    let dir = crate::repo_root()
-        .join("target/release/bundle")
-        .join(subdir);
-    let bundles = std::fs::read_dir(&dir)
-        .map_err(|error| format!("{}: {error}", dir.display()))?
-        .map(|entry| entry.map(|entry| entry.path()))
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| error.to_string())?
-        .into_iter()
-        .filter(|path| path.to_string_lossy().ends_with(&format!(".{extension}")))
-        .collect::<Vec<_>>();
-    let [bundle] = bundles.as_slice() else {
-        return Err(format!("expected one updater bundle in {}", dir.display()));
-    };
-    let name = super::updater::bundle_name(
+    let destination = out.parent().ok_or("missing release artifact directory")?;
+    for (platform, name) in super::updater::bundles(
         target,
         &std::env::var("DEZOOMIFY_VERSION").map_err(|error| error.to_string())?,
-    )
-    .ok_or("missing updater bundle name")?;
-    let destination = out.parent().ok_or("missing release artifact directory")?;
-    if bundle != &hits[0] {
-        std::fs::copy(bundle, destination.join(&name)).map_err(|error| error.to_string())?;
+    ) {
+        let (subdir, extension) = match platform {
+            "linux-x86_64" => ("deb", "deb"),
+            "linux-x86_64-appimage" => ("appimage", "AppImage"),
+            "windows-x86_64" => ("nsis", "exe"),
+            "darwin-aarch64" => ("macos", "app.tar.gz"),
+            _ => return Err(format!("missing updater recipe for {platform}")),
+        };
+        let dir = crate::repo_root()
+            .join("target/release/bundle")
+            .join(subdir);
+        let bundles = std::fs::read_dir(&dir)
+            .map_err(|error| format!("{}: {error}", dir.display()))?
+            .map(|entry| entry.map(|entry| entry.path()))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| error.to_string())?
+            .into_iter()
+            .filter(|path| path.to_string_lossy().ends_with(&format!(".{extension}")))
+            .collect::<Vec<_>>();
+        let [bundle] = bundles.as_slice() else {
+            return Err(format!("expected one updater bundle in {}", dir.display()));
+        };
+        if bundle != &hits[0] {
+            std::fs::copy(bundle, destination.join(&name)).map_err(|error| error.to_string())?;
+        }
+        let signature = bundle.with_file_name(format!(
+            "{}.sig",
+            bundle
+                .file_name()
+                .ok_or("missing bundle filename")?
+                .to_string_lossy()
+        ));
+        std::fs::copy(signature, destination.join(format!("{name}.sig")))
+            .map_err(|error| format!("copy updater signature: {error}"))?;
     }
-    let signature = bundle.with_file_name(format!(
-        "{}.sig",
-        bundle
-            .file_name()
-            .ok_or("missing bundle filename")?
-            .to_string_lossy()
-    ));
-    std::fs::copy(signature, destination.join(format!("{name}.sig")))
-        .map_err(|error| format!("copy updater signature: {error}"))?;
     if target_os == "macos" {
         run_cmd(&[
             "bash",

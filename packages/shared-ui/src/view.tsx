@@ -1155,7 +1155,7 @@ function DesktopDownloadLinks({ hints }: { hints?: PlatformHints }) {
   const installers = [
     { platform: "windows", extension: "exe" },
     { platform: "macos", extension: "dmg" },
-    { platform: "linux", extension: "deb" },
+    { platform: "linux", extension: "AppImage" },
   ] as const;
   return (
     <ul className="dz-modal-list dz-desktop-downloads">
