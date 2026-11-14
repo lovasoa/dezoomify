@@ -19,6 +19,8 @@ env:
   # bursts and would make the verification flap.
   SITE_HOST: ${{ github.event_name == 'pull_request' && format('pr-{0}.dezoomify.pages.dev', github.event.pull_request.number) || 'dezoomify.pages.dev' }}
   DEPLOY_BRANCH: ${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.ref_name }}
+  # Match the commit tracked by GitHub's automatic deployment record.
+  DEPLOY_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
   CLOUDFLARE_PROJECT: dezoomify
 permissions:
   contents: read
@@ -28,8 +30,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   deploy:
-    # Never give deploy credentials to code from a fork. Same-repository PRs
-    # retain the normal pull_request event and are checked out at the merge ref.
+    # Never give deploy credentials to code from a fork.
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     environment:
@@ -38,6 +39,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.DEPLOY_COMMIT }}
       - uses: ./.github/actions/setup-pnpm
         with:
           install: true
@@ -69,8 +72,8 @@ jobs:
           pnpm exec wrangler pages deploy dist \
             --project-name "$CLOUDFLARE_PROJECT" \
             --branch "$DEPLOY_BRANCH" \
-            --commit-hash "${{ github.sha }}" \
-            --commit-message "deploy ${{ github.sha }}"
+            --commit-hash "$DEPLOY_COMMIT" \
+            --commit-message "deploy $DEPLOY_COMMIT"
       - name: Verify the deployment serves both apps and no repository files
         if: steps.creds.outputs.ready == 'true'
         run: |
