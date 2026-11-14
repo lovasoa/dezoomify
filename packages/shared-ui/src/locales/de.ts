@@ -398,6 +398,8 @@ export const de = {
     "Dieses Bild ({dims}) ist zu groß für {format}, das höchstens {maxSide} Pixel pro Seite erlaubt. Speichern Sie es als PNG. Quelle: {host}.",
   "desktop.quick.format.avif":
     "Fortgeschrittene Kompression mit Transparenz. Verlustbehaftete Ausgabe, begrenzt auf {maxSide} Pixel pro Seite. Die Kompression lässt sich im Menü Größe einstellen. Benötigt das gesamte Bild im Arbeitsspeicher und erhält eingebettete Farbprofile nicht. Auch die niedrigste Kompression ist verlustbehaftet.",
+  "desktop.quick.format.jpeg2000":
+    "Verlustfreie oder verlustbehaftete RGB-Ausgabe ohne Transparenz. Kompression 0 ist verlustfrei. Erfordert ein regelmäßiges Quellraster mit höchstens 65.535 Kacheln.",
   "desktop.quick.format.generic": "Das Bild als {format} speichern.",
   "desktop.advanced.dimensions": "Eigene Abmessungen",
   "desktop.advanced.dimensionsDesc":
