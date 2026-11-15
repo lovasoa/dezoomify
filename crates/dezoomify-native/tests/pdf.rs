@@ -150,8 +150,7 @@ fn interrupted_documents_publish_only_complete_pages() {
     let first = jpeg([200, 40, 20, 255]);
     let second = jpeg([20, 180, 60, 255]);
     let output = directory.path().join("collection.pdf");
-    let mut document =
-        OutputDocument::new(OutputTarget::File(output.clone()), false, 1 << 20).unwrap();
+    let mut document = OutputDocument::new(OutputTarget::File(output.clone()), false).unwrap();
     for (name, bytes, cancel) in [
         ("first", &first, false),
         ("second", &second, false),
@@ -200,8 +199,7 @@ fn prepare_document_page(document: &mut OutputDocument, input: &Path, output: &P
 fn dropping_an_incomplete_first_page_publishes_nothing() {
     let directory = tempfile::tempdir().unwrap();
     let output = directory.path().join("empty.pdf");
-    let mut document =
-        OutputDocument::new(OutputTarget::File(output.clone()), false, 1 << 20).unwrap();
+    let mut document = OutputDocument::new(OutputTarget::File(output.clone()), false).unwrap();
     drop(document.page().unwrap());
     assert!(document.finish().unwrap().is_none());
     assert!(!output.exists());
@@ -215,8 +213,7 @@ fn failure_after_streaming_part_of_a_page_keeps_earlier_pages() {
     let bytes = jpeg([80, 120, 40, 255]);
     let input = source(directory.path(), "first", &bytes);
     let output = directory.path().join("partial.pdf");
-    let mut document =
-        OutputDocument::new(OutputTarget::File(output.clone()), false, 1 << 20).unwrap();
+    let mut document = OutputDocument::new(OutputTarget::File(output.clone()), false).unwrap();
     let host = NativeHost::new(options(&input, &output))
         .unwrap()
         .with_document_page(document.page().unwrap())
@@ -299,7 +296,7 @@ fn failure_after_streaming_part_of_a_page_keeps_earlier_pages() {
 }
 
 #[test]
-fn compressed_tiles_stream_beyond_the_memory_budget_on_a_large_canvas() {
+fn compressed_tiles_stream_on_a_large_canvas() {
     let directory = tempfile::tempdir().unwrap();
     let input = directory.path().join("wide.dzi");
     let tiles = directory.path().join("wide_files/16");
@@ -315,7 +312,6 @@ fn compressed_tiles_stream_beyond_the_memory_budget_on_a_large_canvas() {
     }
     let output = directory.path().join("wide.pdf");
     let host = NativeHost::new(JobOptions {
-        output_retain_cap: 256 << 10,
         max_concurrent: 1,
         ..options(&input, &output)
     })
@@ -329,8 +325,8 @@ fn compressed_tiles_stream_beyond_the_memory_budget_on_a_large_canvas() {
         .unwrap();
     let result = host.publication().unwrap();
     assert_eq!(result.instrumentation.pixel_decodes, 0);
-    assert!(result.instrumentation.encoded_bytes > host.options.output_retain_cap);
-    assert!(result.instrumentation.peak_retained_bytes <= host.options.output_retain_cap);
+    assert!(result.instrumentation.encoded_bytes > 256 << 10);
+    assert!(result.instrumentation.peak_retained_bytes <= 256 << 10);
     let pdf = Pdf::new(std::fs::read(output).unwrap()).unwrap();
     assert_eq!(pdf.pages().len(), 1);
     assert_eq!(payloads(&pdf, 0).len(), 256);

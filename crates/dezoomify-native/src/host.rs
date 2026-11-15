@@ -19,7 +19,7 @@ use workers::BlockingTasks;
 use crate::{
     diagnostics::Diagnostics,
     http::{FetchLimits, FetchOutcome, TlsPolicy, UserHeaders},
-    imaging::{load_image_with_limit, DecodedTile},
+    imaging::{load_image_with_metadata, DecodedTile},
     options::{JobOptions, OutputTarget},
     pixel_pipe::PixelPipe,
     pixel_store::{StoredPixels, TileSpool},
@@ -83,7 +83,7 @@ pub struct Instrumentation {
     /// Peak concurrent in-flight tasks.
     pub peak_inflight: usize,
     /// Peak retained encoded tiles and metadata for tiled output. Raster pixels
-    /// live in staging files; this excludes process RSS and the OS file cache.
+    /// and their storage, process RSS, and the OS file cache are excluded.
     pub peak_retained_bytes: u64,
     /// Peak in-flight decode bytes: encoded bodies held by blocking decode
     /// tails (including tails detached by cancelling their parent task).
@@ -319,10 +319,7 @@ impl<'a> NativeHost<'a> {
         controls: Controls,
         runtime: Arc<tokio::runtime::Runtime>,
     ) -> Result<Self, Error> {
-        let mut options = options.normalized();
-        options.output_retain_cap = options
-            .output_retain_cap
-            .min(crate::imaging::available_memory_bytes() / 5 * 4);
+        let options = options.normalized();
         options.validate()?;
         diagnostics.context(serde_json::json!({"input": options.input_url, "settings": {
             "format": options.format, "image_index": options.image_index, "zoom_level": options.zoom_level,
@@ -545,8 +542,7 @@ impl<'a> NativeHost<'a> {
                     let _ = crate::cache::store(dir, namespace, request, &bytes);
                 }
                 metrics.record_decode();
-                load_image_with_limit(&bytes, None)
-                    .map_err(|error| Error::DecodeFailed(error.to_string().into()))
+                load_image_with_metadata(&bytes).map_err(crate::codecs::decode_error)
             })
             .await
     }
@@ -585,15 +581,10 @@ impl<'a> NativeHost<'a> {
         &self,
         mut bytes: Vec<u8>,
     ) -> Result<(Vec<u8>, Size, crate::codecs::NativeFormat), Error> {
-        self.check_encoded_inflight(bytes.len())?;
-        let budget = self
-            .options
-            .output_retain_cap
-            .saturating_sub(self.workers.stats().input_bytes + bytes.len() as u64);
         self.workers
             .run_with_bytes("tile inspection", bytes.len(), move || {
                 crate::encoded_tile::normalize_orientation(&mut bytes);
-                let (size, format) = crate::encoded_tile::inspect(&bytes, budget)?;
+                let (size, format) = crate::encoded_tile::inspect(&bytes)?;
                 Ok((bytes, size, format))
             })
             .await
@@ -634,12 +625,8 @@ impl<'a> NativeHost<'a> {
         }
         let response = self.read(&tile.request).await?;
         let processing = tile.placement.processing;
-        self.check_encoded_inflight(response.body.len())?;
+
         let request = tile.request.clone();
-        let budget = self
-            .options
-            .output_retain_cap
-            .saturating_sub(self.workers.stats().input_bytes + response.body.len() as u64);
         let (bytes, size, format) = self
             .workers
             .run_with_bytes("tile processing", response.body.len(), move || {
@@ -647,7 +634,7 @@ impl<'a> NativeHost<'a> {
                     .apply(response.body)
                     .map_err(|e| Error::ProcessingFailed(e.to_string().into()))?;
                 crate::encoded_tile::normalize_orientation(&mut bytes);
-                let (size, format) = crate::encoded_tile::inspect(&bytes, budget)?;
+                let (size, format) = crate::encoded_tile::inspect(&bytes)?;
                 let _ = crate::cache::store(&dir, &namespace, &request, &bytes);
                 Ok((bytes, size, format))
             })
@@ -669,23 +656,6 @@ impl<'a> NativeHost<'a> {
         } else {
             tile.index
         }
-    }
-
-    fn check_encoded_inflight(&self, additional: usize) -> Result<(), Error> {
-        let workers = self.workers.stats();
-        let probes: u64 = self
-            .encoded_probes
-            .borrow()
-            .iter()
-            .map(|tile| tile.retained_bytes())
-            .sum();
-        crate::tile_budget::memory_check(
-            probes
-                .saturating_add(additional as u64)
-                .saturating_add(workers.input_bytes)
-                .saturating_add(workers.retained_bytes),
-            self.options.output_retain_cap,
-        )
     }
 
     fn evict_failed_tile<T>(&self, tile: &ResourceTile, result: &Result<T, Error>) {
@@ -711,8 +681,7 @@ impl<'a> NativeHost<'a> {
         let writer = self.tiled.borrow().as_ref().cloned();
         if let Some(writer) = writer {
             let input_bytes = tile.bytes.len();
-            let workers = self.workers.clone();
-            self.check_encoded_inflight(input_bytes)?;
+
             let controls = self.controls.clone();
             let peak = self
                 .workers
@@ -721,15 +690,7 @@ impl<'a> NativeHost<'a> {
                         let mut writer = writer
                             .lock()
                             .map_err(|_| Error::Internal("tile writer poisoned".into()))?;
-                        let queued = workers
-                            .stats()
-                            .input_bytes
-                            .saturating_sub(input_bytes as u64);
-                        writer.hold_queued_bytes(queued)?;
-                        let result = writer.place(tile, &controls.0.cancelled);
-                        writer.release_probe_bytes(queued);
-                        workers.retain(writer.retained_bytes());
-                        result?;
+                        writer.place(tile, &controls.0.cancelled)?;
                         Ok(writer.peak_retained())
                     })();
                     drop(writer);
@@ -760,7 +721,7 @@ impl<'a> NativeHost<'a> {
                     .iter()
                     .map(|tile| tile.retained_bytes())
                     .sum::<u64>();
-            crate::tile_budget::memory_check(retained, self.options.output_retain_cap)?;
+
             self.encoded_probes.borrow_mut().push(stored);
             let mut stats = self.instrumentation.borrow_mut();
             stats.peak_retained_bytes = stats.peak_retained_bytes.max(retained);
@@ -838,7 +799,6 @@ impl<'a> NativeHost<'a> {
             grid.as_ref(),
             format,
             self.options.compression,
-            self.options.output_retain_cap,
             self.controls.clone(),
         )?;
         let pipe = Arc::clone(&task.pipe);
@@ -992,12 +952,10 @@ impl Host for NativeHost<'_> {
                 }
             };
             let probes = std::mem::take(&mut *self.encoded_probes.borrow_mut());
-            let pending: u64 = probes.iter().map(|tile| tile.retained_bytes()).sum();
             self.encoded_spool.borrow_mut().take();
             let mut writer = crate::tile_output::TileWriter::new(
                 &destination,
                 &plan,
-                self.options.output_retain_cap.saturating_sub(pending),
                 self.options.compression,
                 self.options.max_tiles as u32,
                 self.document_page.borrow_mut().take(),
@@ -1007,13 +965,9 @@ impl Host for NativeHost<'_> {
                 .workers
                 .run("tile preflight", move || {
                     for tile in probes {
-                        let retained = tile.retained_bytes();
                         let request = tile.request().cloned();
-                        tile.load(writer.input_budget())
-                            .and_then(|tile| {
-                                writer.release_probe_bytes(retained);
-                                writer.place(tile, &controls.0.cancelled)
-                            })
+                        tile.load()
+                            .and_then(|tile| writer.place(tile, &controls.0.cancelled))
                             .map_err(|e| match request {
                                 Some(ref request) => resource_context(e, request),
                                 None => e,
@@ -1024,7 +978,6 @@ impl Host for NativeHost<'_> {
                 .await?;
             let mut stats = self.instrumentation.borrow_mut();
             stats.peak_retained_bytes = stats.peak_retained_bytes.max(writer.peak_retained());
-            self.workers.retain(writer.retained_bytes());
             *self.tiled.borrow_mut() = Some(Arc::new(std::sync::Mutex::new(writer)));
         } else if let Some(dimensions) = &plan.canvas {
             if !matches!(self.options.output, OutputTarget::AutoImageDir { .. }) {
@@ -1072,16 +1025,6 @@ impl Host for NativeHost<'_> {
                         height: extent.height.min(encoded.size.height),
                     };
                     if crate::tile_output::probe_needs_preparation(self.format, &encoded, &size) {
-                        self.check_encoded_inflight(encoded.bytes.len())?;
-                        let budget = self.options.output_retain_cap.saturating_sub(
-                            self.workers.stats().input_bytes
-                                + self
-                                    .encoded_probes
-                                    .borrow()
-                                    .iter()
-                                    .map(|tile| tile.retained_bytes())
-                                    .sum::<u64>(),
-                        );
                         let compression = self.options.compression;
                         let metrics = self.workers.clone();
                         let spool = if self.format.supports_pages() {
@@ -1098,14 +1041,14 @@ impl Host for NativeHost<'_> {
                             .run_with_bytes("probe conversion", encoded.bytes.len(), move || {
                                 metrics.record_decode();
                                 if let Some(spool) = spool {
-                                    let image = encoded.decode_pixels(&encoded.size, budget)?;
+                                    let image = encoded.decode_pixels(&encoded.size)?;
                                     encoded.probe_pixels = Some(spool.store(DecodedTile {
                                         image,
                                         icc_profile: None,
                                         exif_metadata: None,
                                     })?);
                                 } else {
-                                    encoded.convert_to_png(size, budget, compression)?;
+                                    encoded.convert_to_png(size, compression)?;
                                 }
                                 Ok(encoded)
                             })
@@ -1546,7 +1489,7 @@ mod tests {
     }
 
     #[test]
-    fn png_succeeds_when_pixels_exceed_the_former_memory_budget() {
+    fn png_streams_a_large_canvas() {
         let directory =
             crate::output::temp_sibling(&std::env::temp_dir().join("decode-reservation"));
         std::fs::create_dir(&directory).expect("test directory");
@@ -1560,7 +1503,6 @@ mod tests {
         let host = NativeHost::new(JobOptions {
             input_url: source.to_string_lossy().into_owned(),
             output: OutputTarget::File(directory.join("out.png")),
-            output_retain_cap: 2 << 20,
             largest: true,
             cache_dir: Some(directory.join("cache")),
             ..Default::default()
@@ -1573,7 +1515,7 @@ mod tests {
                 host.algorithm_options(),
                 &host,
             ))
-            .expect("PNG uses disk instead of exhausting its memory budget");
+            .expect("PNG streams the assembled pixels");
         assert_eq!(
             result.canvas,
             Some(Size {

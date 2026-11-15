@@ -1,5 +1,5 @@
 //! Batch destinations and final publication.
-use super::{arguments::Args, bulk_output_for, job_options_for, report};
+use super::{arguments::Args, bulk_output_for, report};
 use dezoomify::model::Error;
 use dezoomify_native::{DocumentPage, OutputDocument, OutputTarget};
 use std::path::PathBuf;
@@ -13,19 +13,17 @@ pub(crate) enum BatchOutput {
 }
 
 impl BatchOutput {
-    pub(crate) fn new(parsed: &Args, input: &str) -> Result<Self, Error> {
+    pub(crate) fn new(parsed: &Args) -> Result<Self, Error> {
         let base = parsed.bulk_output_file();
         if let Some(path) = &base {
             if dezoomify_native::output::infer_from_path(path)
                 .is_ok_and(|format| format.supports_pages())
             {
-                let options = job_options_for(parsed, input, path);
                 return Ok(Self::Document {
                     path: path.clone(),
                     document: OutputDocument::new(
                         OutputTarget::File(path.clone()),
                         parsed.overwrite,
-                        options.output_retain_cap,
                     )?,
                 });
             }

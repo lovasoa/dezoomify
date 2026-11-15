@@ -339,7 +339,7 @@ async fn run_batch(
 ) -> Result<bool, dezoomify::model::Error> {
     use batch_output::BatchOutput;
     use dezoomify::model::Error;
-    let mut output = BatchOutput::new(parsed, &entries[0].0)?;
+    let mut output = BatchOutput::new(parsed)?;
     let document = matches!(output, BatchOutput::Document { .. });
     let controls = dezoomify_native::Controls::default();
     let _interrupt = interrupt::Interrupt::watch(controls.clone());
