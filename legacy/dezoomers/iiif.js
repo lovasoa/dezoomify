@@ -250,7 +250,7 @@ var iiif = (function () {
         try {
           data["@id"] = data["@id"] || data.id;
           if (!data["@id"]) throw new Error("missing iiif @id");
-          // See https://github.com/lovasoa/dezoomify/issues/582
+          // See https://github.com/dezoomify/dezoomify/issues/582
           data["@id"] = data["@id"].replace(/^https?, (https?:\/\/)/, '$1');
           var origin = new URL(data["@id"], url);
           var infoUrl = new URL(url);

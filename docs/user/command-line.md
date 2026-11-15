@@ -3,7 +3,7 @@
 # Command-line tool
 
 Use the CLI for scripts, specific image/level selection, and bulk saving.
-Download it from [GitHub Releases](https://github.com/lovasoa/dezoomify/releases/latest)
+Download it from [GitHub Releases](https://github.com/dezoomify/dezoomify/releases/latest)
 or build it from the repository with `cargo xtask build cli`. The Windows ZIP
 contains `dezoomify-cli.exe`; extract it before running it from a terminal.
 

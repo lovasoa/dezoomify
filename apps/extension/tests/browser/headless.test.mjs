@@ -782,7 +782,7 @@ for (const [browser, run, scenario] of [
           assert.equal(await page.locator("details[open]").count(), 0);
           const draft = new URL(
             await page
-              .locator('a[href*="github.com/lovasoa/dezoomify/issues/new"]')
+              .locator('a[href*="github.com/dezoomify/dezoomify/issues/new"]')
               .getAttribute("href"),
           );
           assert.match(draft.searchParams.get("body"), /discovery-failed/);

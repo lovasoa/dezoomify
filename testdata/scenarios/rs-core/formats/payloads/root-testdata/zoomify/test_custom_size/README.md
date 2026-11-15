@@ -1,1 +1,1 @@
-See: https://github.com/lovasoa/dezoomify/issues/81
+See: https://github.com/dezoomify/dezoomify/issues/81

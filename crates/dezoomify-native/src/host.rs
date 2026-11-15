@@ -287,7 +287,7 @@ pub struct NativeHost<'a> {
     published: RefCell<Option<Publication>>,
     source_format: RefCell<Option<String>>,
     output_plan: RefCell<Option<OutputPlan>>,
-    tiled: RefCell<Option<Arc<std::sync::Mutex<crate::tile_output::TileWriter>>>>,
+    tiled: RefCell<Option<crate::tile_output::SharedTileWriter>>,
     encoded_probes: RefCell<Vec<crate::encoded_spool::StoredEncoded>>,
     encoded_spool: RefCell<Option<Arc<crate::encoded_spool::EncodedSpool>>>,
     document_page: RefCell<Option<crate::DocumentPage>>,
@@ -583,7 +583,7 @@ impl<'a> NativeHost<'a> {
     ) -> Result<(Vec<u8>, Size, crate::codecs::NativeFormat), Error> {
         self.workers
             .run_with_bytes("tile inspection", bytes.len(), move || {
-                crate::encoded_tile::normalize_orientation(&mut bytes);
+                crate::formats::jpeg::normalize_orientation(&mut bytes);
                 let (size, format) = crate::encoded_tile::inspect(&bytes)?;
                 Ok((bytes, size, format))
             })
@@ -633,7 +633,7 @@ impl<'a> NativeHost<'a> {
                 let mut bytes = processing
                     .apply(response.body)
                     .map_err(|e| Error::ProcessingFailed(e.to_string().into()))?;
-                crate::encoded_tile::normalize_orientation(&mut bytes);
+                crate::formats::jpeg::normalize_orientation(&mut bytes);
                 let (size, format) = crate::encoded_tile::inspect(&bytes)?;
                 let _ = crate::cache::store(&dir, &namespace, &request, &bytes);
                 Ok((bytes, size, format))
@@ -953,7 +953,7 @@ impl Host for NativeHost<'_> {
             };
             let probes = std::mem::take(&mut *self.encoded_probes.borrow_mut());
             self.encoded_spool.borrow_mut().take();
-            let mut writer = crate::tile_output::TileWriter::new(
+            let mut writer = crate::formats::tile_writer(
                 &destination,
                 &plan,
                 self.options.compression,
@@ -1024,7 +1024,7 @@ impl Host for NativeHost<'_> {
                         width: extent.width.min(encoded.size.width),
                         height: extent.height.min(encoded.size.height),
                     };
-                    if crate::tile_output::probe_needs_preparation(self.format, &encoded, &size) {
+                    if crate::formats::probe_needs_preparation(self.format, &encoded, &size) {
                         let compression = self.options.compression;
                         let metrics = self.workers.clone();
                         let spool = if self.format.supports_pages() {
@@ -1048,7 +1048,11 @@ impl Host for NativeHost<'_> {
                                         exif_metadata: None,
                                     })?);
                                 } else {
-                                    encoded.convert_to_png(size, compression)?;
+                                    crate::formats::png::convert_tile(
+                                        &mut encoded,
+                                        size,
+                                        compression,
+                                    )?;
                                 }
                                 Ok(encoded)
                             })
@@ -1134,12 +1138,8 @@ impl Host for NativeHost<'_> {
 
     async fn finish(&self, request: FinishRequest) -> Result<Output, Error> {
         self.controls.checkpoint(Gate::Cancellation).await?;
-        let destination_for = |format| {
-            crate::output::destination_for(&self.options.output, request.title.as_deref(), format)
-        };
         let tiled = self.tiled.borrow_mut().take();
         let tiled_result = if let Some(writer) = tiled {
-            let destination = destination_for(self.format);
             let controls = self.controls.clone();
             let reused = request.reused_tiles.clone();
             Some(
@@ -1149,7 +1149,7 @@ impl Host for NativeHost<'_> {
                             .map_err(|_| Error::Internal("tile placement still active".into()))?
                             .into_inner()
                             .map_err(|_| Error::Internal("tile writer poisoned".into()))?;
-                        writer.finish(&destination, &reused, &controls.0.cancelled)
+                        writer.finish(&reused, &controls.0.cancelled)
                     })
                     .await?,
             )

@@ -235,7 +235,7 @@ fn fractional_dimensions_keep_the_next_level() {
 
 #[test]
 fn test_levels_recount() {
-    // See: https://github.com/lovasoa/dezoomify-rs/issues/35
+    // See: https://github.com/dezoomify/dezoomify-rs/issues/35
     // The official implementation returns
     // https://gist.github.com/lovasoa/a1442d684a6cabb6e7fe790e4f765f02
     // get_tile_counts(2052, 3185, 256, 256, 117)

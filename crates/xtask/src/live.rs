@@ -174,7 +174,7 @@ const TARGETS: &[LiveTarget] = &[
     },
     LiveTarget {
         name: "custom_yaml",
-        url: "https://raw.githubusercontent.com/lovasoa/dezoomify-rs/master/tiles.yaml",
+        url: "https://raw.githubusercontent.com/dezoomify/dezoomify-rs/master/tiles.yaml",
         headers: &[],
         accept_invalid_certs: false,
     },

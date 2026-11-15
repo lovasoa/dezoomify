@@ -86,7 +86,7 @@ See [extension data use](./browser-extension.md#what-the-extension-does-with-you
 Open **Technical details & logs** to copy or save a report or prepare an issue
 draft. Reports can contain sensitive addresses or settings: review them before
 sharing. Include the viewing page, app, error, and a screenshot in a
-[GitHub issue](https://github.com/lovasoa/dezoomify/issues).
+[GitHub issue](https://github.com/dezoomify/dezoomify/issues).
 
 ## Next steps
 

@@ -1,8 +1,8 @@
 //! One native multi-page PDF transaction. Page hosts own acquisition and
 //! settlement; the caller closes the document after their workers have stopped.
 use crate::{
+    formats::pdf::document::{Checkpoint, PdfDocument},
     output::{self, StagedOutput},
-    pdf_document::{Checkpoint, PdfDocument},
     OutputTarget,
 };
 use dezoomify::model::{Error, OutputFormat};

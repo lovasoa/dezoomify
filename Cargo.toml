@@ -6,7 +6,7 @@ resolver = "2"
 version = "3.1.0"
 edition = "2021"
 license = "GPL-3.0-or-later"
-repository = "https://github.com/lovasoa/dezoomify"
+repository = "https://github.com/dezoomify/dezoomify"
 
 # Full DWARF information makes local test and build artifacts substantially
 # larger. Keep the normal edit/build loop lean; debug assertions and

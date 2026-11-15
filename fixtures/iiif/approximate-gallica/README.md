@@ -1,7 +1,7 @@
 # Gallica IIIF 1.1 without a declared pyramid
 
 Synthetic GPL-3.0-or-later reproduction of
-[issue #1301](https://github.com/lovasoa/dezoomify/issues/1301), distilled from the
+[issue #1301](https://github.com/dezoomify/dezoomify/issues/1301), distilled from the
 user-supplied HAR for
 <https://gallica.bnf.fr/view3if/ga/ark:/12148/btv1b52504834s>.
 Preserves the manifest's array-valued metadata, separate painting/service IDs,

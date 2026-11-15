@@ -1148,7 +1148,7 @@ function detectPlatform(hints?: PlatformHints) {
   return undefined;
 }
 
-const RELEASES_URL = "https://github.com/lovasoa/dezoomify/releases/latest";
+const RELEASES_URL = "https://github.com/dezoomify/dezoomify/releases/latest";
 
 function DesktopDownloadLinks({ hints }: { hints?: PlatformHints }) {
   const preferred = detectPlatform(hints);

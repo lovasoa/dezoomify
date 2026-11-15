@@ -280,7 +280,10 @@ test("extension discovery failure offers a diagnostic issue draft and the hosted
     assert.equal(el.querySelector("#dz-card-extension"), null);
     assert.equal(el.querySelector("#dz-card-desktop"), null);
     const draft = new URL(guidance.querySelector("#dz-card-report-bug").getAttribute("href"));
-    assert.equal(draft.origin + draft.pathname, "https://github.com/lovasoa/dezoomify/issues/new");
+    assert.equal(
+      draft.origin + draft.pathname,
+      "https://github.com/dezoomify/dezoomify/issues/new",
+    );
     assert.match(draft.searchParams.get("body"), /scan-complete/);
     assert.ok(draft.searchParams.get("body").includes(input));
     assert.ok(draft.searchParams.get("body").includes(t("view.discovery.noneExtension")));
@@ -315,7 +318,7 @@ test("fallback saves stay successful while original discovery diagnostics remain
       assert.ok(el.textContent.includes(t("view.done.fallback")));
       assert.equal(el.querySelector("details").hasAttribute("open"), false);
       const draft = new URL(
-        el.querySelector('a[href*="github.com/lovasoa/dezoomify/issues/new"]').href,
+        el.querySelector('a[href*="github.com/dezoomify/dezoomify/issues/new"]').href,
       );
       const body = draft.searchParams.get("body");
       assert.match(body, /original parser evidence/);
@@ -560,7 +563,7 @@ test("desktop handoff shows and copies the discovered URL, handles failure and u
   assert.ok(dialog.querySelector(".dz-desktop-downloads a").href.endsWith(".AppImage"));
   assert.ok(
     dialog.querySelector(
-      'a[href="https://github.com/lovasoa/dezoomify/releases/latest/download/dezoomify-desktop.exe"]',
+      'a[href="https://github.com/dezoomify/dezoomify/releases/latest/download/dezoomify-desktop.exe"]',
     ),
   );
   assert.equal(dialog.querySelector("input").value, source);

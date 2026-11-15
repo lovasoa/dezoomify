@@ -225,7 +225,7 @@ mod tests {
                 image::Rgba([0, 0, 0, 0])
             }
         });
-        let bytes = crate::imaging::encode_png(
+        let bytes = crate::formats::png::encode(
             &pixels,
             image::codecs::png::CompressionType::Fast,
             None,

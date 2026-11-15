@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 license = "GPL-3.0-or-later"
 description = "Generated asynchronous Host bindings for Dezoomify."
-repository = "https://github.com/lovasoa/dezoomify"
+repository = "https://github.com/dezoomify/dezoomify"
 
 [lib]
 crate-type = ["cdylib", "rlib"]

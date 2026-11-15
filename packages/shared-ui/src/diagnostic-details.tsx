@@ -5,7 +5,7 @@ import { plainMessageFor } from "./failure.ts";
 import { t } from "./i18n.ts";
 import type { ViewCallbacks } from "./view-types.ts";
 
-const ISSUE_URL_PREFIX = "https://github.com/lovasoa/dezoomify/issues/new?";
+const ISSUE_URL_PREFIX = "https://github.com/dezoomify/dezoomify/issues/new?";
 // Leave room for GitHub to re-encode the draft URL in its sign-in redirect.
 // Reported server limit: https://github.com/github/docs/issues/5136.
 const ISSUE_URL_MAX_LENGTH = 4096;

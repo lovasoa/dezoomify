@@ -108,7 +108,7 @@ fn manifest_with_key(
                 .map_err(|error| format!("missing updater signature for {name}: {error}"))?;
             verify_bundle(key, &dir.join(&name), &signature)?;
             platforms.insert(platform, serde_json::json!({
-                "url": format!("https://github.com/lovasoa/dezoomify/releases/download/{}/{name}", plan.tag),
+                "url": format!("https://github.com/dezoomify/dezoomify/releases/download/{}/{name}", plan.tag),
                 "signature": signature.trim(),
             }));
         }
@@ -166,7 +166,10 @@ mod tests {
             ("darwin-aarch64", "desktop-macos-aarch64", ".app.tar.gz"),
         ] {
             let url = platforms[platform]["url"].as_str().unwrap();
-            assert!(url.contains(&format!("/releases/download/{}/", plan.tag)));
+            assert!(url.starts_with(&format!(
+                "https://github.com/dezoomify/dezoomify/releases/download/{}/",
+                plan.tag
+            )));
             assert!(url.ends_with(extension));
             assert_eq!(platforms[platform]["signature"], signature);
             assert!(assets(&plan, &root)

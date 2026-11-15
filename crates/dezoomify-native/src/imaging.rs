@@ -1,7 +1,7 @@
 //! Image decoding, metadata, encoders, and format limits.
 use std::path::PathBuf;
 
-use dezoomify::model::{Error, LimitContext, LimitReason, OutputFormat, Size};
+use dezoomify::model::{Error, LimitContext, LimitReason, Size};
 
 pub(crate) fn check_dimensions(
     format: dezoomify::model::OutputFormat,
@@ -45,31 +45,6 @@ pub fn available_memory_bytes() -> u64 {
 #[must_use]
 pub fn default_tile_cache_dir() -> PathBuf {
     std::env::temp_dir().join("dezoomify-tile-cache")
-}
-
-/// PNG deflate tier for a `--compression` value.
-pub(crate) fn png_compression_for(compression: u8) -> image::codecs::png::CompressionType {
-    use image::codecs::png::CompressionType;
-    match compression {
-        0..=19 => CompressionType::Fast,
-        20..=60 => CompressionType::Default,
-        _ => CompressionType::Best,
-    }
-}
-
-/// TIFF deflate level for a `--compression` value: the same tiers as
-/// [`png_compression_for`] (0-19 fast, 20-60 balanced, above best), so one
-/// flag drives every lossless encoder identically. The `tiff` encoder has
-/// no inner-JPEG quality knob, and native never re-encodes lossy inside
-/// TIFF: higher compression only trades slower encodes for smaller files.
-pub(crate) fn tiff_compression_for(compression: u8) -> tiff::encoder::compression::DeflateLevel {
-    use image::codecs::png::CompressionType;
-    use tiff::encoder::compression::DeflateLevel;
-    match png_compression_for(compression) {
-        CompressionType::Fast => DeflateLevel::Fast,
-        CompressionType::Default => DeflateLevel::Balanced,
-        _ => DeflateLevel::Best,
-    }
 }
 
 /// One owned tile decode, with its embedded metadata.
@@ -120,164 +95,5 @@ pub(crate) fn load_image_with_metadata(bytes: &[u8]) -> Result<DecodedTile, imag
     })
 }
 
-/// Encode PNG at the configured deflate tier, preserving ICC and EXIF metadata.
-pub fn encode_png(
-    image: &image::RgbaImage,
-    compression: image::codecs::png::CompressionType,
-    icc_profile: Option<&[u8]>,
-    exif_metadata: Option<&[u8]>,
-) -> Result<Vec<u8>, Error> {
-    let mut bytes = crate::buffers::Buffer::default();
-    encode_png_to(&mut bytes, image, compression, icc_profile, exif_metadata)?;
-    Ok(bytes.into_vec())
-}
-
-pub(crate) fn encode_png_to<W: std::io::Write>(
-    writer: W,
-    image: &image::RgbaImage,
-    compression: image::codecs::png::CompressionType,
-    icc_profile: Option<&[u8]>,
-    exif_metadata: Option<&[u8]>,
-) -> Result<(), Error> {
-    use image::codecs::png::FilterType;
-    let mut encoder =
-        image::codecs::png::PngEncoder::new_with_quality(writer, compression, FilterType::Adaptive);
-    if let Some(profile) = icc_profile {
-        let _ = image::ImageEncoder::set_icc_profile(
-            &mut encoder,
-            crate::buffers::copy(profile).map_err(crate::buffers::allocation_error)?,
-        );
-    }
-    if let Some(exif) = exif_metadata {
-        let _ = image::ImageEncoder::set_exif_metadata(
-            &mut encoder,
-            crate::buffers::copy(exif).map_err(crate::buffers::allocation_error)?,
-        );
-    }
-    image::ImageEncoder::write_image(
-        encoder,
-        image.as_raw(),
-        image.width(),
-        image.height(),
-        image::ExtendedColorType::Rgba8,
-    )
-    .map_err(|e| {
-        Error::EncodeFailed(
-            format!("png encode failed: {}", dezoomify::model::chain_text(&e)).into(),
-        )
-    })?;
-    Ok(())
-}
-
-/// Borrow RGB channels without copying the RGBA allocation.
-struct RgbView<'a>(&'a image::RgbaImage);
-
-impl image::GenericImageView for RgbView<'_> {
-    type Pixel = image::Rgb<u8>;
-
-    fn dimensions(&self) -> (u32, u32) {
-        self.0.dimensions()
-    }
-
-    fn get_pixel(&self, x: u32, y: u32) -> Self::Pixel {
-        let pixel = self.0.get_pixel(x, y);
-        image::Rgb([pixel[0], pixel[1], pixel[2]])
-    }
-}
-
-/// Encode a local RGB tile, borrowing the RGBA allocation.
-pub fn encode_jpeg(
-    image: &image::RgbaImage,
-    quality: u8,
-    icc_profile: Option<&[u8]>,
-) -> Result<Vec<u8>, Error> {
-    let mut bytes = crate::buffers::Buffer::default();
-    encode_jpeg_to(&mut bytes, image, quality, icc_profile)?;
-    Ok(bytes.into_vec())
-}
-
-pub(crate) fn encode_jpeg_to<W: std::io::Write>(
-    writer: W,
-    image: &image::RgbaImage,
-    quality: u8,
-    icc_profile: Option<&[u8]>,
-) -> Result<(), Error> {
-    check_dimensions(
-        dezoomify::model::OutputFormat::Jpeg,
-        &Size {
-            width: image.width(),
-            height: image.height(),
-        },
-    )?;
-    let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(writer, quality);
-    if let Some(profile) = icc_profile {
-        let _ = image::ImageEncoder::set_icc_profile(
-            &mut encoder,
-            crate::buffers::copy(profile).map_err(crate::buffers::allocation_error)?,
-        );
-    }
-    encoder.encode_image(&RgbView(image)).map_err(|e| {
-        Error::EncodeFailed(
-            format!("jpeg encode failed: {}", dezoomify::model::chain_text(&e)).into(),
-        )
-    })?;
-    Ok(())
-}
-
-/// The common image-crate path. Override construction only when the crate's
-/// default encoder cannot express the codec's settings or metadata contract.
-pub(crate) fn encode_buffered_to<W: std::io::Write + std::io::Seek>(
-    mut writer: W,
-    image: &image::RgbaImage,
-    format: OutputFormat,
-    compression: u8,
-    icc_profile: Option<&[u8]>,
-) -> Result<(), Error> {
-    macro_rules! encode {
-        ($encoder:expr) => {
-            image::ImageEncoder::write_image(
-                $encoder,
-                image.as_raw(),
-                image.width(),
-                image.height(),
-                image::ExtendedColorType::Rgba8,
-            )
-        };
-    }
-    let result = match format {
-        OutputFormat::Webp => {
-            let mut encoder = image::codecs::webp::WebPEncoder::new_lossless(writer);
-            if let Some(profile) = icc_profile {
-                let _ = image::ImageEncoder::set_icc_profile(
-                    &mut encoder,
-                    crate::buffers::copy(profile).map_err(crate::buffers::allocation_error)?,
-                );
-            }
-            encode!(encoder)
-        }
-        OutputFormat::Avif => encode!(image::codecs::avif::AvifEncoder::new_with_speed_quality(
-            writer,
-            4,
-            format.codec().control.quality(compression),
-        )),
-        _ => image::write_buffer_with_format(
-            &mut writer,
-            image.as_raw(),
-            image.width(),
-            image.height(),
-            image::ExtendedColorType::Rgba8,
-            image::ImageFormat::from_extension(format.extension())
-                .ok_or_else(|| Error::InvalidState("unregistered image encoder".into()))?,
-        ),
-    };
-    result.map_err(|error| {
-        Error::EncodeFailed(
-            format!(
-                "{} encode failed: {}",
-                format.as_str(),
-                dezoomify::model::chain_text(&error)
-            )
-            .into(),
-        )
-    })
-}
+// Retain the public helpers at their existing paths.
+pub use crate::formats::{jpeg::encode as encode_jpeg, png::encode as encode_png};

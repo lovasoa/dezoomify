@@ -43,7 +43,7 @@ its tile files. Finish or cancel the current download before opening another sou
 
 ## Install
 
-The [releases page](https://github.com/lovasoa/dezoomify/releases/latest)
+The [releases page](https://github.com/dezoomify/dezoomify/releases/latest)
 ships Linux x86_64 downloads (`.AppImage` and `.deb`), Windows x86_64 (`.exe`, NSIS),
 and Apple silicon macOS (`.dmg`). Linux and Windows installers are unsigned.
 macOS releases use a Developer ID signature and Apple notarization. The operating
@@ -76,7 +76,7 @@ Older releases and local ad-hoc builds may require approval under
 If macOS says the app is damaged, will damage your computer, or has been moved
 to Trash, download a fresh copy. These warnings are different from the ordinary
 approval prompt. If it still fails, report the exact warning, macOS version,
-and release filename in a [GitHub issue](https://github.com/lovasoa/dezoomify/issues).
+and release filename in a [GitHub issue](https://github.com/dezoomify/dezoomify/issues).
 
 ## Choosing the file format
 

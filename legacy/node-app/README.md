@@ -1,7 +1,7 @@
 # dezoomify node app
 
 ## Installation tutorial and information
-See our wiki page: https://github.com/lovasoa/dezoomify/wiki/Very-large-images
+See our wiki page: https://github.com/dezoomify/dezoomify/wiki/Very-large-images
 
 ## Technical details
 This is a very simple node script (`dezoomify-node.js`), that makes dezoomify run outside a browser,

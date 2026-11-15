@@ -85,7 +85,7 @@ impl NativeHost<'_> {
             (f64::from(size.width) * scale).round().max(1.0) as u32,
             (f64::from(size.height) * scale).round().max(1.0) as u32,
         );
-        let png = crate::imaging::encode_png(
+        let png = crate::formats::png::encode(
             &thumbnail,
             image::codecs::png::CompressionType::Fast,
             None,

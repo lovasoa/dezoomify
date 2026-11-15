@@ -1,8 +1,9 @@
 //! PDF image eligibility and tile-local lossless fallback. Shared inspection and
 //! decoding live in encoded_tile; this module owns PDF filters and color spaces.
 use crate::{
-    encoded_tile::{jpeg_header, png_header, tile_metadata, EncodedTile},
-    pdf_document::PdfDocument,
+    encoded_tile::{tile_metadata, EncodedTile},
+    formats::pdf::document::PdfDocument,
+    formats::{jpeg::header as jpeg_header, png::header as png_header},
 };
 use dezoomify::model::{Error, Size};
 use flate2::{write::ZlibEncoder, Compression};
@@ -103,25 +104,7 @@ fn reusable(tile: &EncodedTile) -> Result<Option<ImageData<'_>>, Error> {
     let Some(colors) = png_colors(&tile.bytes) else {
         return Ok(None);
     };
-    let mut payload = Vec::new();
-    payload
-        .try_reserve_exact(tile.bytes.len())
-        .map_err(crate::buffers::allocation_error)?;
-    let mut at = 8usize;
-    while let Some(chunk) = tile.bytes.get(at..at.saturating_add(8)) {
-        let length = u32::from_be_bytes(chunk[..4].try_into().expect("chunk length")) as usize;
-        if &chunk[4..] == b"IDAT" {
-            payload.extend_from_slice(
-                tile.bytes
-                    .get(at + 8..at + 8 + length)
-                    .ok_or_else(|| Error::DecodeFailed("truncated PNG data".into()))?,
-            );
-        }
-        at = at
-            .checked_add(length)
-            .and_then(|end| end.checked_add(12))
-            .ok_or_else(|| Error::DecodeFailed("PNG chunk overflow".into()))?;
-    }
+    let payload = crate::formats::png::image_data(&tile.bytes)?;
     Ok(Some(ImageData {
         bytes: Cow::Owned(payload),
         colors,
@@ -133,11 +116,7 @@ fn reusable(tile: &EncodedTile) -> Result<Option<ImageData<'_>>, Error> {
 }
 
 fn convert(pixels: &image::RgbaImage, compression: u8) -> Result<ImageData<'static>, Error> {
-    let level = Compression::new(match compression {
-        0..=19 => 1,
-        20..=60 => 6,
-        _ => 9,
-    });
+    let level = Compression::new(super::super::deflate_level(compression));
     let mut rgb = ZlibEncoder::new(crate::buffers::Buffer::default(), level);
     let transparent = pixels.pixels().any(|pixel| pixel[3] != 255);
     let mut alpha = transparent.then(|| ZlibEncoder::new(crate::buffers::Buffer::default(), level));
