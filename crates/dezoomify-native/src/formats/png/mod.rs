@@ -96,16 +96,10 @@ fn write_image<P: image::PixelWithColorType<Subpixel = u8>>(
     let mut encoder =
         image::codecs::png::PngEncoder::new_with_quality(writer, compression, FilterType::Adaptive);
     if let Some(profile) = icc_profile {
-        let _ = image::ImageEncoder::set_icc_profile(
-            &mut encoder,
-            crate::buffers::copy(profile).map_err(crate::buffers::allocation_error)?,
-        );
+        let _ = image::ImageEncoder::set_icc_profile(&mut encoder, profile.to_vec());
     }
     if let Some(exif) = exif_metadata {
-        let _ = image::ImageEncoder::set_exif_metadata(
-            &mut encoder,
-            crate::buffers::copy(exif).map_err(crate::buffers::allocation_error)?,
-        );
+        let _ = image::ImageEncoder::set_exif_metadata(&mut encoder, exif.to_vec());
     }
     image::ImageEncoder::write_image(
         encoder,

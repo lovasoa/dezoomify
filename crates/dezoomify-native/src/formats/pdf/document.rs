@@ -1,10 +1,10 @@
 //! Streaming PDF object storage and final page tree. Cross-reference offsets
-//! use adaptive storage; payloads stream to the output staging file.
+//! stay in memory; payloads stream to the output staging file.
 use crate::output::{write_failed, StagedFile};
 use dezoomify::model::Error;
 use pdf_writer::{Chunk, Name, Ref};
 use std::{
-    io::{BufWriter, Read, Seek, SeekFrom, Write},
+    io::{BufWriter, Write},
     path::Path,
     sync::atomic::AtomicBool,
 };
@@ -17,7 +17,7 @@ pub(crate) struct Checkpoint {
 
 pub(crate) struct PdfDocument {
     staging: Option<StagedFile>,
-    offsets: crate::storage::TemporaryStorage,
+    offsets: Vec<u64>,
     position: u64,
     next_id: i32,
     pages: Vec<Ref>,
@@ -33,14 +33,9 @@ impl PdfDocument {
             .writer(&AtomicBool::new(false))
             .write_all(header)
             .map_err(|e| write_failed("PDF header failed", &e))?;
-        let offsets = crate::storage::TemporaryStorage::new(
-            staging.path().parent().expect("staging parent"),
-            0,
-        )
-        .map_err(|e| write_failed("PDF index creation failed", &e))?;
         Ok(Self {
             staging: Some(staging),
-            offsets,
+            offsets: Vec::new(),
             position: header.len() as u64,
             next_id: 3,
             pages: Vec::new(),
@@ -50,7 +45,7 @@ impl PdfDocument {
     }
 
     pub(crate) fn retained_bytes(&self) -> u64 {
-        self.pages.len() as u64 * 128
+        (self.pages.len() * 128 + self.offsets.len() * 8) as u64
     }
     pub(crate) fn page_count(&self) -> usize {
         self.pages.len()
@@ -64,9 +59,6 @@ impl PdfDocument {
             ));
         }
 
-        self.pages
-            .try_reserve(1)
-            .map_err(|error| Error::ResourceLimit(error.to_string().into()))?;
         self.active = true;
         Ok(Checkpoint {
             position: self.position,
@@ -85,6 +77,7 @@ impl PdfDocument {
         }
         self.position = checkpoint.position;
         self.next_id = checkpoint.next_id;
+        self.offsets.truncate(checkpoint.next_id as usize);
         self.active = false;
     }
 
@@ -105,11 +98,12 @@ impl PdfDocument {
         self.failure.clone().map_or(Ok(()), Err)
     }
 
-    fn record_offset(&mut self, id: Ref) -> Result<(), Error> {
-        self.offsets
-            .seek(SeekFrom::Start(id.get() as u64 * 8))
-            .and_then(|_| self.offsets.write_all(&self.position.to_be_bytes()))
-            .map_err(|e| write_failed("PDF index write failed", &e))
+    fn record_offset(&mut self, id: Ref) {
+        let index = id.get() as usize;
+        if self.offsets.len() <= index {
+            self.offsets.resize(index + 1, 0);
+        }
+        self.offsets[index] = self.position;
     }
 
     /// Each chunk must contain exactly this one indirect object. IDs are allocated
@@ -121,7 +115,7 @@ impl PdfDocument {
         cancelled: &AtomicBool,
     ) -> Result<(), Error> {
         self.check()?;
-        self.record_offset(id)?;
+        self.record_offset(id);
         let staging = self.staging.as_mut().expect("unpublished PDF");
         let result = (|| {
             let mut writer = staging.writer(cancelled);
@@ -166,7 +160,7 @@ impl PdfDocument {
 
     fn write_xref(&mut self, cancelled: &AtomicBool) -> Result<(), Error> {
         let id = self.alloc()?;
-        self.record_offset(id)?;
+        self.record_offset(id);
         let size = u64::from(id.get() as u32) + 1;
         let start = self.position;
         let staging = self.staging.as_mut().expect("unpublished PDF");
@@ -174,12 +168,9 @@ impl PdfDocument {
             let mut writer = BufWriter::with_capacity(64 << 10, staging.writer(cancelled));
             write!(writer, "{} 0 obj\n<< /Type /XRef /Size {size} /Root 1 0 R /W [1 8 2] /Length {} >>\nstream\n", id.get(), size * 11)?;
             writer.write_all(&[0, 0, 0, 0, 0, 0, 0, 0, 0, 255, 255])?;
-            self.offsets.seek(SeekFrom::Start(8))?;
-            let mut offset = [0; 8];
-            for _ in 1..size {
-                self.offsets.read_exact(&mut offset)?;
+            for offset in &self.offsets[1..size as usize] {
                 writer.write_all(&[1])?;
-                writer.write_all(&offset)?;
+                writer.write_all(&offset.to_be_bytes())?;
                 writer.write_all(&[0, 0])?;
             }
             write!(writer, "\nendstream\nendobj\nstartxref\n{start}\n%%EOF\n")?;

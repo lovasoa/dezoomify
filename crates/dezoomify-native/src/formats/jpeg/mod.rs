@@ -76,10 +76,7 @@ pub(crate) fn encode_to<W: std::io::Write>(
     )?;
     let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(writer, quality);
     if let Some(profile) = icc_profile {
-        let _ = image::ImageEncoder::set_icc_profile(
-            &mut encoder,
-            crate::buffers::copy(profile).map_err(crate::buffers::allocation_error)?,
-        );
+        let _ = image::ImageEncoder::set_icc_profile(&mut encoder, profile.to_vec());
     }
     encoder.encode_image(&RgbView(image)).map_err(|e| {
         Error::EncodeFailed(

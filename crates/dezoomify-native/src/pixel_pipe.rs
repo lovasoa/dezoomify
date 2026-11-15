@@ -1,11 +1,7 @@
 //! Composition and ordered strip delivery over adaptive temporary storage.
 //! Pixels and coverage share rectangular blocks. Producers never wait for the
 //! encoder; unread blocks remain in storage until consumed.
-use crate::{
-    imaging::DecodedTile,
-    pixel_store::{read_metadata, storage_error, store_metadata, MetadataLocation},
-    storage::TemporaryStorage,
-};
+use crate::{imaging::DecodedTile, storage::TemporaryStorage};
 use dezoomify::model::{Error, OutputGrid, ReusedTile, Size, TilePlacement};
 use image::{
     imageops::{crop_imm, overlay},
@@ -34,15 +30,15 @@ pub(crate) struct PixelStrip {
 }
 struct Metadata {
     position: (u32, u32),
-    icc: MetadataLocation,
-    exif: MetadataLocation,
+    icc: Option<Vec<u8>>,
+    exif: Option<Vec<u8>>,
 }
 struct Producer {
     file: Arc<Mutex<TemporaryStorage>>,
     pending: BTreeMap<u32, u64>,
     next_region: u32,
     metadata: BTreeMap<u32, Metadata>,
-    origin_icc: MetadataLocation,
+    origin_icc: Option<Vec<u8>>,
     late: u64,
 }
 impl Producer {
@@ -50,21 +46,16 @@ impl Producer {
         &mut self,
         id: u32,
         placement: &TilePlacement,
-        decoded: &DecodedTile,
-    ) -> Result<(), Error> {
-        if decoded.icc_profile.is_some() || decoded.exif_metadata.is_some() {
-            let icc = store_metadata(
-                &mut *self.file.lock().expect("pixel storage lock"),
-                decoded.icc_profile.as_deref(),
-            )
-            .map_err(storage_error)?;
-            let exif = store_metadata(
-                &mut *self.file.lock().expect("pixel storage lock"),
-                decoded.exif_metadata.as_deref(),
-            )
-            .map_err(storage_error)?;
-            if placement.position.x == 0 && placement.position.y == 0 && self.next_region == 0 {
-                self.origin_icc = self.origin_icc.or(icc);
+        icc: Option<Vec<u8>>,
+        exif: Option<Vec<u8>>,
+    ) {
+        if icc.is_some() || exif.is_some() {
+            if placement.position.x == 0
+                && placement.position.y == 0
+                && self.next_region == 0
+                && self.origin_icc.is_none()
+            {
+                self.origin_icc = icc.clone();
             }
             self.metadata.insert(
                 id,
@@ -75,7 +66,6 @@ impl Producer {
                 },
             );
         }
-        Ok(())
     }
 }
 #[derive(Default)]
@@ -117,7 +107,7 @@ impl PixelPipe {
             size,
             directory,
             grid,
-            crate::storage::memory_storage_limit(),
+            crate::storage::memory_storage_limit(crate::imaging::available_memory_bytes()),
         )
     }
 
@@ -238,7 +228,7 @@ impl PixelPipe {
         if let Some(error) = self.error() {
             return Err(error);
         }
-        producer.remember(id, placement, &decoded)?;
+        producer.remember(id, placement, decoded.icc_profile, decoded.exif_metadata);
         let image = decoded.image;
         let rect = self.contribution(placement, &image);
         let (x, y, width, height) = (rect.x, rect.y, rect.w, rect.h);
@@ -390,19 +380,11 @@ impl PixelPipe {
             .iter()
             .map(|t| ((t.position.x, t.position.y), t.index))
             .collect();
-        let mut ordered: Vec<_> = producer.metadata.iter().collect();
-        ordered.sort_by_key(|(id, m)| mapping.get(&m.position).copied().unwrap_or(**id));
-        let icc = ordered.iter().find_map(|(_, m)| m.icc);
-        let exif = ordered.iter().find_map(|(_, m)| m.exif);
-        let metadata = {
-            let mut file = producer.file.lock().expect("pixel storage lock");
-            (
-                read_metadata(&mut *file, icc).map_err(storage_error)?,
-                read_metadata(&mut *file, exif).map_err(storage_error)?,
-            )
-        };
-        producer.metadata.clear();
-        self.queue.lock().expect("strip queue lock").metadata = Some(metadata);
+        let mut ordered: Vec<_> = std::mem::take(&mut producer.metadata).into_iter().collect();
+        ordered.sort_by_key(|(id, m)| mapping.get(&m.position).copied().unwrap_or(*id));
+        let icc = ordered.iter_mut().find_map(|(_, m)| m.icc.take());
+        let exif = ordered.iter_mut().find_map(|(_, m)| m.exif.take());
+        self.queue.lock().expect("strip queue lock").metadata = Some((icc, exif));
         self.changed.notify_all();
         while producer.next_region < self.count {
             self.publish_next(&mut producer)?;
@@ -419,23 +401,13 @@ impl PixelPipe {
         if let Some(error) = &queue.failure {
             return Err(error.clone());
         }
-        let (icc, exif) = queue.metadata.as_ref().expect("finished metadata");
-        let copy = |bytes: &Option<Vec<u8>>| {
-            bytes
-                .as_deref()
-                .map(crate::buffers::copy)
-                .transpose()
-                .map_err(crate::buffers::allocation_error)
-        };
-        Ok((copy(icc)?, copy(exif)?))
+        Ok(queue.metadata.as_ref().expect("finished metadata").clone())
     }
     /// Read the first source tile's profile once the first region has frozen.
     /// Later tiles cannot change the container header. Call after receive_region.
     pub(crate) fn origin_profile(&self) -> Result<Option<Vec<u8>>, Error> {
         let producer = self.producer.lock().expect("pixel producer lock");
-        let location = producer.origin_icc;
-        let mut file = producer.file.lock().expect("pixel storage lock");
-        read_metadata(&mut *file, location).map_err(storage_error)
+        Ok(producer.origin_icc.clone())
     }
     pub(crate) fn consumed_region(&self, region: &PixelRegion) {
         self.queue.lock().expect("strip queue lock").consumed +=
@@ -508,6 +480,10 @@ impl PixelPipe {
             })
         })
     }
+}
+
+fn storage_error(error: impl std::fmt::Display) -> Error {
+    Error::WriteFailed(format!("temporary storage: {error}").into())
 }
 
 // Extremely large overlap makes the source cell ambiguous from a clipped

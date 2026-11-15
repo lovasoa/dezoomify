@@ -207,7 +207,7 @@ fn dropping_an_incomplete_first_page_publishes_nothing() {
 }
 
 #[test]
-fn failure_after_streaming_part_of_a_page_keeps_earlier_pages() {
+fn failure_after_streaming_part_of_a_page_allows_later_pages() {
     use dezoomify::model::*;
     let directory = tempfile::tempdir().unwrap();
     let bytes = jpeg([80, 120, 40, 255]);
@@ -289,10 +289,12 @@ fn failure_after_streaming_part_of_a_page_keeps_earlier_pages() {
         }
         host.settle().await;
     });
-    assert_eq!(document.finish().unwrap().unwrap().pages, 1);
+    prepare_document_page(&mut document, &input, &output, false);
+    assert_eq!(document.finish().unwrap().unwrap().pages, 2);
     let pdf = Pdf::new(std::fs::read(output).unwrap()).unwrap();
-    assert_eq!(pdf.pages().len(), 1);
-    assert_eq!(payloads(&pdf, 0), [bytes]);
+    assert_eq!(pdf.pages().len(), 2);
+    assert_eq!(payloads(&pdf, 0).as_slice(), std::slice::from_ref(&bytes));
+    assert_eq!(payloads(&pdf, 1), [bytes]);
 }
 
 #[test]

@@ -27,7 +27,7 @@ pub(crate) fn check_dimensions(
 pub const MAX_CONCURRENT: usize = 16;
 
 /// Bytes currently available to the process according to the operating
-/// system. Temporary storage uses this to choose RAM or disk; availability can
+/// system. Image composition uses this to choose RAM or disk; availability can
 /// change after sampling. Returns zero if the system probe
 /// cannot be initialized.
 #[must_use]

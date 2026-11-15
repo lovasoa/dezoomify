@@ -50,11 +50,7 @@ impl ImageDecoder for Decoder {
         image::ColorType::Rgba8
     }
     fn icc_profile(&mut self) -> ImageResult<Option<Vec<u8>>> {
-        self.icc_profile
-            .as_deref()
-            .map(crate::buffers::copy)
-            .transpose()
-            .map_err(image::ImageError::from)
+        Ok(self.icc_profile.clone())
     }
     fn read_image(mut self, buf: &mut [u8]) -> ImageResult<()> {
         let core = self

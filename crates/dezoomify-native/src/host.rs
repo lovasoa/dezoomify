@@ -6,7 +6,7 @@ use std::{
     cell::{Cell, RefCell},
     collections::BTreeSet,
     future::Future,
-    path::{Path, PathBuf},
+    path::PathBuf,
     pin::Pin,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -22,7 +22,6 @@ use crate::{
     imaging::{load_image_with_metadata, DecodedTile},
     options::{JobOptions, OutputTarget},
     pixel_pipe::PixelPipe,
-    pixel_store::{StoredPixels, TileSpool},
     raster::EncoderTask,
     transport::NativeTransport,
 };
@@ -82,8 +81,8 @@ pub struct Instrumentation {
     pub bytes_fetched: u64,
     /// Peak concurrent in-flight tasks.
     pub peak_inflight: usize,
-    /// Peak retained encoded tiles and metadata for tiled output. Raster pixels
-    /// and their storage, process RSS, and the OS file cache are excluded.
+    /// Peak retained encoded tiles, decoded probes, and metadata for tiled output.
+    /// Raster composition, process RSS, and the OS file cache are excluded.
     pub peak_retained_bytes: u64,
     /// Peak in-flight decode bytes: encoded bodies held by blocking decode
     /// tails (including tails detached by cancelling their parent task).
@@ -254,7 +253,7 @@ type LevelChooser<'a> = Box<dyn FnMut(Image) -> LevelAnswer<'a> + 'a>;
 struct PendingPixels {
     id: u32,
     placement: TilePlacement,
-    pixels: StoredPixels,
+    pixels: DecodedTile,
 }
 
 /// Use a fresh host for each image. The shared runner settles it on every exit;
@@ -271,7 +270,6 @@ pub struct NativeHost<'a> {
     format: OutputFormat,
     raster: RefCell<Option<EncoderTask>>,
     pending_pixels: RefCell<Vec<PendingPixels>>,
-    pixel_spool: RefCell<Option<Arc<TileSpool>>>,
     acquired: RefCell<BTreeSet<u32>>,
     instrumentation: RefCell<Instrumentation>,
     inflight: Cell<usize>,
@@ -288,8 +286,7 @@ pub struct NativeHost<'a> {
     source_format: RefCell<Option<String>>,
     output_plan: RefCell<Option<OutputPlan>>,
     tiled: RefCell<Option<crate::tile_output::SharedTileWriter>>,
-    encoded_probes: RefCell<Vec<crate::encoded_spool::StoredEncoded>>,
-    encoded_spool: RefCell<Option<Arc<crate::encoded_spool::EncodedSpool>>>,
+    encoded_probes: RefCell<Vec<crate::encoded_tile::EncodedTile>>,
     document_page: RefCell<Option<crate::DocumentPage>>,
 }
 
@@ -364,7 +361,6 @@ impl<'a> NativeHost<'a> {
             format,
             raster: RefCell::new(None),
             pending_pixels: RefCell::new(Vec::new()),
-            pixel_spool: RefCell::new(None),
             acquired: RefCell::default(),
             instrumentation: RefCell::default(),
             inflight: Cell::new(0),
@@ -382,7 +378,6 @@ impl<'a> NativeHost<'a> {
             output_plan: RefCell::new(None),
             tiled: RefCell::new(None),
             encoded_probes: RefCell::new(Vec::new()),
-            encoded_spool: RefCell::new(None),
             document_page: RefCell::new(None),
         })
     }
@@ -700,21 +695,7 @@ impl<'a> NativeHost<'a> {
             let mut stats = self.instrumentation.borrow_mut();
             stats.peak_retained_bytes = stats.peak_retained_bytes.max(peak);
         } else {
-            let spool = {
-                let mut spool = self.encoded_spool.borrow_mut();
-                if spool.is_none() {
-                    *spool = Some(crate::encoded_spool::EncodedSpool::new(
-                        &self.output_directory(),
-                    )?);
-                }
-                Arc::clone(spool.as_ref().expect("encoded spool"))
-            };
-            let input_bytes = tile.bytes.len();
-            let stored = self
-                .workers
-                .run_with_bytes("probe storage", input_bytes, move || spool.store(tile))
-                .await?;
-            let retained = stored.retained_bytes()
+            let retained = tile.retained_bytes()
                 + self
                     .encoded_probes
                     .borrow()
@@ -722,7 +703,7 @@ impl<'a> NativeHost<'a> {
                     .map(|tile| tile.retained_bytes())
                     .sum::<u64>();
 
-            self.encoded_probes.borrow_mut().push(stored);
+            self.encoded_probes.borrow_mut().push(tile);
             let mut stats = self.instrumentation.borrow_mut();
             stats.peak_retained_bytes = stats.peak_retained_bytes.max(retained);
         }
@@ -748,17 +729,6 @@ impl<'a> NativeHost<'a> {
                 })
                 .await?;
         } else {
-            let spool = {
-                let mut spool = self.pixel_spool.borrow_mut();
-                if spool.is_none() {
-                    *spool = Some(TileSpool::new(&self.output_directory())?);
-                }
-                Arc::clone(spool.as_ref().expect("tile spool"))
-            };
-            let pixels = self
-                .workers
-                .run("tile storage", move || spool.store(pixels))
-                .await?;
             self.pending_pixels.borrow_mut().push(PendingPixels {
                 id: storage_index,
                 placement: tile.placement.clone(),
@@ -768,17 +738,6 @@ impl<'a> NativeHost<'a> {
         self.acquired.borrow_mut().insert(storage_index);
         self.instrumentation.borrow_mut().acquired = self.acquired.borrow().len() as u64;
         Ok(())
-    }
-
-    fn output_directory(&self) -> PathBuf {
-        match &self.options.output {
-            OutputTarget::File(path) => path
-                .parent()
-                .filter(|p| !p.as_os_str().is_empty())
-                .unwrap_or_else(|| Path::new("."))
-                .to_path_buf(),
-            OutputTarget::AutoDir { dir, .. } | OutputTarget::AutoImageDir { dir } => dir.clone(),
-        }
     }
 
     async fn start_raster(
@@ -804,13 +763,12 @@ impl<'a> NativeHost<'a> {
         let pipe = Arc::clone(&task.pipe);
         *self.raster.borrow_mut() = Some(task);
         let pending = std::mem::take(&mut *self.pending_pixels.borrow_mut());
-        self.pixel_spool.borrow_mut().take();
         self.report_preparation(&pipe);
         for pending in pending {
             let target = Arc::clone(&pipe);
             self.workers
                 .run("tile placement", move || {
-                    target.place(pending.id, &pending.placement, pending.pixels.read()?)
+                    target.place(pending.id, &pending.placement, pending.pixels)
                 })
                 .await?;
             self.report_preparation(&pipe);
@@ -830,20 +788,20 @@ impl<'a> NativeHost<'a> {
                     height: 0,
                 };
                 for pending in self.pending_pixels.borrow().iter() {
-                    let image = &pending.pixels.size;
-                    let w = image.width.min(
+                    let image = &pending.pixels.image;
+                    let w = image.width().min(
                         pending
                             .placement
                             .expected_size
                             .as_ref()
-                            .map_or(image.width, |s| s.width),
+                            .map_or(image.width(), |s| s.width),
                     );
-                    let h = image.height.min(
+                    let h = image.height().min(
                         pending
                             .placement
                             .expected_size
                             .as_ref()
-                            .map_or(image.height, |s| s.height),
+                            .map_or(image.height(), |s| s.height),
                     );
                     dimensions.width = dimensions
                         .width
@@ -860,8 +818,8 @@ impl<'a> NativeHost<'a> {
                 let pending = self.pending_pixels.borrow();
                 let covered = pending.len() == 1
                     && pending[0].placement.position == (Point { x: 0, y: 0 })
-                    && pending[0].pixels.size.width >= dimensions.width
-                    && pending[0].pixels.size.height >= dimensions.height;
+                    && pending[0].pixels.image.width() >= dimensions.width
+                    && pending[0].pixels.image.height() >= dimensions.height;
                 let grid_covered = self
                     .output_plan
                     .borrow()
@@ -869,12 +827,14 @@ impl<'a> NativeHost<'a> {
                     .is_some_and(|plan| plan.grid.is_some())
                     && pending.iter().all(|tile| {
                         tile.placement.expected_size.as_ref().is_some_and(|extent| {
-                            tile.pixels.size.width >= extent.width
-                                && tile.pixels.size.height >= extent.height
+                            tile.pixels.image.width() >= extent.width
+                                && tile.pixels.image.height() >= extent.height
                         })
                     });
                 let transparent = !(covered || grid_covered)
-                    || pending.iter().any(|tile| tile.pixels.transparent);
+                    || pending
+                        .iter()
+                        .any(|tile| tile.pixels.image.pixels().any(|pixel| pixel[3] != 255));
                 format = automatic_image_format(size(&dimensions), transparent);
             }
             let grid = self
@@ -952,7 +912,6 @@ impl Host for NativeHost<'_> {
                 }
             };
             let probes = std::mem::take(&mut *self.encoded_probes.borrow_mut());
-            self.encoded_spool.borrow_mut().take();
             let mut writer = crate::formats::tile_writer(
                 &destination,
                 &plan,
@@ -964,10 +923,10 @@ impl Host for NativeHost<'_> {
             let writer = self
                 .workers
                 .run("tile preflight", move || {
-                    for tile in probes {
-                        let request = tile.request().cloned();
-                        tile.load()
-                            .and_then(|tile| writer.place(tile, &controls.0.cancelled))
+                    for mut tile in probes {
+                        let request = tile.request.take();
+                        writer
+                            .place(tile, &controls.0.cancelled)
                             .map_err(|e| match request {
                                 Some(ref request) => resource_context(e, request),
                                 None => e,
@@ -1027,26 +986,14 @@ impl Host for NativeHost<'_> {
                     if crate::formats::probe_needs_preparation(self.format, &encoded, &size) {
                         let compression = self.options.compression;
                         let metrics = self.workers.clone();
-                        let spool = if self.format.supports_pages() {
-                            let mut spool = self.pixel_spool.borrow_mut();
-                            if spool.is_none() {
-                                *spool = Some(TileSpool::new(&self.output_directory())?);
-                            }
-                            Some(Arc::clone(spool.as_ref().expect("tile spool")))
-                        } else {
-                            None
-                        };
+                        let document = self.format.supports_pages();
                         encoded = self
                             .workers
                             .run_with_bytes("probe conversion", encoded.bytes.len(), move || {
                                 metrics.record_decode();
-                                if let Some(spool) = spool {
-                                    let image = encoded.decode_pixels(&encoded.size)?;
-                                    encoded.probe_pixels = Some(spool.store(DecodedTile {
-                                        image,
-                                        icc_profile: None,
-                                        exif_metadata: None,
-                                    })?);
+                                if document {
+                                    encoded.probe_pixels =
+                                        Some(encoded.decode_pixels(&encoded.size)?);
                                 } else {
                                     crate::formats::png::convert_tile(
                                         &mut encoded,
@@ -1327,13 +1274,11 @@ impl Host for NativeHost<'_> {
     async fn settle(&self) {
         self.tiled.borrow_mut().take();
         self.encoded_probes.borrow_mut().clear();
-        self.encoded_spool.borrow_mut().take();
         let task = self.raster.borrow_mut().take();
         if let Some(task) = task {
             task.abort().await;
         }
         self.pending_pixels.borrow_mut().clear();
-        self.pixel_spool.borrow_mut().take();
         self.workers.drain().await;
         self.document_page.borrow_mut().take();
     }
