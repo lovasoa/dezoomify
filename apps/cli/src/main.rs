@@ -667,44 +667,31 @@ fn extract_iiif_collection_urls(
 
 fn iiif_label(value: Option<&serde_json::Value>) -> Option<String> {
     match value? {
-        serde_json::Value::String(s) => {
-            let s = s.trim();
-            if s.is_empty() {
-                None
-            } else {
-                Some(s.to_string())
-            }
-        }
-        serde_json::Value::Array(items) => {
-            for item in items {
-                if let Some(s) = item.as_str() {
-                    if !s.trim().is_empty() {
-                        return Some(s.trim().to_string());
-                    }
-                } else if let Some(map) = item.as_object() {
-                    for lang in ["en", "@value", "value"] {
-                        if let Some(s) = map.get(lang).and_then(|v| v.as_str()) {
-                            if !s.trim().is_empty() {
-                                return Some(s.trim().to_string());
-                            }
-                        }
-                    }
-                }
-            }
-            None
-        }
-        serde_json::Value::Object(map) => {
-            for lang in ["en", "@value", "value", "none"] {
-                if let Some(list) = map.get(lang) {
-                    if let Some(found) = iiif_label(Some(list)) {
-                        return Some(found);
-                    }
-                }
-            }
-            None
-        }
+        value @ serde_json::Value::String(_) => iiif_label_text(value),
+        serde_json::Value::Array(items) => items.iter().find_map(iiif_array_label),
+        serde_json::Value::Object(map) => ["en", "@value", "value", "none"]
+            .iter()
+            .find_map(|lang| iiif_label(map.get(*lang))),
         _ => None,
     }
+}
+
+fn iiif_array_label(value: &serde_json::Value) -> Option<String> {
+    if let Some(text) = iiif_label_text(value) {
+        return Some(text);
+    }
+    let map = value.as_object()?;
+    ["en", "@value", "value"]
+        .iter()
+        .find_map(|lang| map.get(*lang).and_then(iiif_label_text))
+}
+
+fn iiif_label_text(value: &serde_json::Value) -> Option<String> {
+    value
+        .as_str()
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(str::to_string)
 }
 
 fn looks_like_url(s: &str) -> bool {
@@ -730,6 +717,46 @@ mod url {
             None
         } else {
             Some(host.to_string())
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::extract_iiif_collection_urls;
+    use serde_json::json;
+
+    #[test]
+    fn collection_labels_preserve_precedence_and_skip_empty_text() {
+        for (label, expected) in [
+            (json!(" Page one "), Some("Page one")),
+            (json!([" ", " Page two ", "Other"]), Some("Page two")),
+            (
+                json!([{"en": " ", "@value": " Page three "}]),
+                Some("Page three"),
+            ),
+            (
+                json!({"none": ["Fallback"], "en": [" English "]}),
+                Some("English"),
+            ),
+            (
+                json!({"en": [" "], "none": [" Fallback "]}),
+                Some("Fallback"),
+            ),
+            (json!([{"en": ["Nested"]}]), None),
+            (json!(false), None),
+        ] {
+            let input = json!({
+                "items": [{"id": "https://example.test/manifest", "label": label}],
+            });
+            assert_eq!(
+                extract_iiif_collection_urls(&input.to_string(), None),
+                Some(vec![(
+                    "https://example.test/manifest".into(),
+                    expected.map(str::to_string)
+                )]),
+                "label: {label}",
+            );
         }
     }
 }

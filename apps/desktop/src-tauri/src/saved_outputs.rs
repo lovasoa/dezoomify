@@ -119,6 +119,18 @@ fn unavailable(error: impl std::error::Error + 'static) -> Error {
 mod tests {
     use super::*;
 
+    fn assert_tracks_file_deletion_and_restoration(
+        registry: &SavedOutputs,
+        id: &str,
+        path: &std::path::Path,
+    ) {
+        assert_eq!(registry.inspect(id).unwrap(), SavedOutputState::Available);
+        std::fs::remove_file(path).unwrap();
+        assert_eq!(registry.inspect(id).unwrap(), SavedOutputState::Deleted);
+        std::fs::write(path, b"restored image").unwrap();
+        assert_eq!(registry.inspect(id).unwrap(), SavedOutputState::Available);
+    }
+
     #[test]
     fn references_survive_restart_distinguish_missing_files_and_forget_without_deleting() {
         let root = std::env::temp_dir().join(format!("dezoomify-saved-{}", std::process::id()));
@@ -131,20 +143,7 @@ mod tests {
         registry.persist(&saved.id).unwrap();
         let restored = SavedOutputs::new(root.join("references"));
         assert_eq!(restored.resolve(&saved.id).unwrap(), path);
-        assert_eq!(
-            restored.inspect(&saved.id).unwrap(),
-            SavedOutputState::Available
-        );
-        std::fs::remove_file(&path).unwrap();
-        assert_eq!(
-            restored.inspect(&saved.id).unwrap(),
-            SavedOutputState::Deleted
-        );
-        std::fs::write(&path, b"restored image").unwrap();
-        assert_eq!(
-            restored.inspect(&saved.id).unwrap(),
-            SavedOutputState::Available
-        );
+        assert_tracks_file_deletion_and_restoration(&restored, &saved.id, &path);
         registry.forget(&saved.id).unwrap();
         registry.persist(&saved.id).unwrap();
         let next = registry.register(path.clone(), "job:next").unwrap();

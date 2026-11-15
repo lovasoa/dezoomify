@@ -52,13 +52,17 @@ fn diagnostic_budget_protects_problem_samples_and_terminal() {
     d.finish("retired", json!({}));
     let report = d.report();
     let context = serde_json::to_value(&report.context).unwrap();
-    assert_eq!(context["selection_policy"], "automatic");
-    assert_eq!(context["path"], "/home/me/output.png");
-    assert_eq!(
-        context["canonical"],
-        "https://images.test/info.json?sig=exact%2Bvalue"
-    );
-    assert_eq!(context["format"], "iiif");
+    for (field, expected) in [
+        ("selection_policy", "automatic"),
+        ("path", "/home/me/output.png"),
+        (
+            "canonical",
+            "https://images.test/info.json?sig=exact%2Bvalue",
+        ),
+        ("format", "iiif"),
+    ] {
+        assert_eq!(context[field], expected, "{field}");
+    }
     assert!(serde_json::to_vec(&report).unwrap().len() <= MAX_BYTES);
     assert!(report.records.len() <= 1000 && report.omitted_records > 0);
     assert_eq!(report.failures[0].count, 2001);

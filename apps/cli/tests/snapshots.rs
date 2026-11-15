@@ -1,14 +1,15 @@
 //! Check the CLI's public entry points without pinning help prose.
 use std::process::Command;
 
+fn run(args: &[&str]) -> std::process::Output {
+    Command::new(env!("CARGO_BIN_EXE_dezoomify-cli"))
+        .args(args)
+        .output()
+        .unwrap()
+}
+
 #[test]
-fn help_and_version_exit_without_io_or_prompting() {
-    let run = |args: &[&str]| {
-        Command::new(env!("CARGO_BIN_EXE_dezoomify-cli"))
-            .args(args)
-            .output()
-            .unwrap()
-    };
+fn help_exits_without_io_or_prompting() {
     let help = run(&["--help"]);
     assert!(help.status.success());
     assert!(!help.stdout.is_empty());
@@ -19,6 +20,10 @@ fn help_and_version_exit_without_io_or_prompting() {
         assert_eq!(output.stdout, help.stdout);
         assert!(output.stderr.is_empty());
     }
+}
+
+#[test]
+fn version_exits_without_io_or_prompting() {
     let version = run(&["--version"]);
     assert!(version.status.success());
     assert!(version.stderr.is_empty());

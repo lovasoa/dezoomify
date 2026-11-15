@@ -24,6 +24,10 @@ fn rust_errors_serialize_to_the_tagged_wire_shape() {
     assert_eq!(value["transport"], "metadata-proxy");
     // Absent optional facts are omitted, never nulled.
     assert!(value.get("detail").is_some());
+}
+
+#[test]
+fn wrapped_errors_preserve_resource_context_and_omit_absent_facts() {
     let wrapped = Error::NoImageFound(Failure::default())
         .resource("https://example.test/viewer", ResourceKind::Metadata);
     let value = serde_json::to_value(&wrapped).expect("serializes");

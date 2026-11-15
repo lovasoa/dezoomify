@@ -33,6 +33,7 @@ codegen-units = 1
 # own crate roots (`lib.rs`/`main.rs`/bins, which never cover `tests/`),
 # and unit tests are exempt via `allow-unwrap-in-tests` in `clippy.toml`.
 [workspace.lints.rust]
+warnings = "deny"
 rust_2018_idioms = "deny"
 unused_must_use = "deny"
 unsafe_op_in_unsafe_fn = "deny"
@@ -41,6 +42,9 @@ unsafe_op_in_unsafe_fn = "deny"
 pedantic = { level = "allow", priority = -1 }
 nursery = { level = "allow", priority = -1 }
 cognitive_complexity = "deny"
+# Hosts own I/O; the pure domain crate denies these in its crate root.
+disallowed_methods = "allow"
+disallowed_types = "allow"
 redundant_clone = "deny"
 match_same_arms = "deny"
 nonminimal_bool = "deny"

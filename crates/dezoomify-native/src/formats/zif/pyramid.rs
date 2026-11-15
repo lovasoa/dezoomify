@@ -79,42 +79,7 @@ impl ZifWriter {
         Ok(())
     }
 
-    pub(super) fn finish(
-        mut self,
-        reused: &[ReusedTile],
-        cancelled: &AtomicBool,
-    ) -> Result<crate::output::PreparedOutput, Error> {
-        if !self.base.regular {
-            let order = crate::tile_geometry::TileOrder::new(reused);
-            let mut tiles = BTreeMap::new();
-            for (index, tile) in std::mem::take(&mut self.base.tiles) {
-                let index = order.index(index, tile.rect.x, tile.rect.y);
-                tiles.insert(index, tile);
-            }
-            self.base.tiles = tiles;
-            self.metadata = std::mem::take(&mut self.metadata)
-                .into_iter()
-                .map(|(index, meta)| (order.index(index, meta.0.x, meta.0.y), meta))
-                .collect();
-        }
-        if self.writer.is_none() {
-            let selected = if self.base.regular {
-                self.base
-                    .tiles
-                    .values()
-                    .find_map(|tile| {
-                        if let TileBytes::Memory(bytes) = &tile.bytes {
-                            profile(bytes)
-                        } else {
-                            None
-                        }
-                    })
-                    .unwrap_or(Profile::PngRgb)
-            } else {
-                Profile::PngRgb
-            };
-            self.initialize(self.select_profile(Some(selected)), cancelled)?;
-        }
+    pub(super) fn normalize_base(&mut self, cancelled: &AtomicBool) -> Result<(), Error> {
         let mut normalized = TileLevel {
             size: self.base.size.clone(),
             cell: self.base.cell.clone(),
@@ -158,6 +123,46 @@ impl ZifWriter {
         }
         self.base = normalized;
         self.retained = 0;
+        Ok(())
+    }
+
+    pub(super) fn finish(
+        mut self,
+        reused: &[ReusedTile],
+        cancelled: &AtomicBool,
+    ) -> Result<crate::output::PreparedOutput, Error> {
+        if !self.base.regular {
+            let order = crate::tile_geometry::TileOrder::new(reused);
+            let mut tiles = BTreeMap::new();
+            for (index, tile) in std::mem::take(&mut self.base.tiles) {
+                let index = order.index(index, tile.rect.x, tile.rect.y);
+                tiles.insert(index, tile);
+            }
+            self.base.tiles = tiles;
+            self.metadata = std::mem::take(&mut self.metadata)
+                .into_iter()
+                .map(|(index, meta)| (order.index(index, meta.0.x, meta.0.y), meta))
+                .collect();
+        }
+        if self.writer.is_none() {
+            let selected = if self.base.regular {
+                self.base
+                    .tiles
+                    .values()
+                    .find_map(|tile| {
+                        if let TileBytes::Memory(bytes) = &tile.bytes {
+                            profile(bytes)
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or(Profile::PngRgb)
+            } else {
+                Profile::PngRgb
+            };
+            self.initialize(self.select_profile(Some(selected)), cancelled)?;
+        }
+        self.normalize_base(cancelled)?;
         let full_size = self.base.size.clone();
         let cell = self.base.cell.clone();
         let mut previous = std::mem::replace(

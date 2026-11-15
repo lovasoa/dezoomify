@@ -1,3 +1,6 @@
+use super::super::invalid_structure;
+use dezoomify::model::Error;
+
 /// JPEG container facts inspected without decoding entropy data. Unsupported
 /// frames return None; each output applies its own stricter eligibility rules.
 pub(crate) struct Header {
@@ -37,18 +40,20 @@ pub(crate) fn header(bytes: &[u8]) -> Option<Header> {
             return None;
         }
         let data = bytes.get(at + 2..at.checked_add(len)?)?;
-        if marker == 0xe0 && data.starts_with(b"JFIF\0") {
-            header.jfif = true;
-        }
-        if marker == 0xee && data.starts_with(b"Adobe") {
-            header.adobe_transform = data.get(11).copied();
-        }
-        if matches!(marker, 0xc0 | 0xc2) {
-            read_jpeg_frame(data, &mut header)?;
-        }
+        read_jpeg_segment(marker, data, &mut header)?;
         at += len;
     }
     None
+}
+
+fn read_jpeg_segment(marker: u8, data: &[u8], header: &mut Header) -> Option<()> {
+    match marker {
+        0xe0 if data.starts_with(b"JFIF\0") => header.jfif = true,
+        0xee if data.starts_with(b"Adobe") => header.adobe_transform = data.get(11).copied(),
+        0xc0 | 0xc2 => read_jpeg_frame(data, header)?,
+        _ => {}
+    }
+    Some(())
 }
 
 fn read_jpeg_frame(data: &[u8], header: &mut Header) -> Option<()> {
@@ -114,52 +119,58 @@ pub(crate) fn normalize_orientation(bytes: &mut [u8]) {
     }
 }
 
-// Bounded checks do not decode entropy data.
-pub(crate) fn check_structure(bytes: &[u8]) -> Result<(), dezoomify::model::Error> {
-    let invalid = super::super::invalid_structure;
+pub(crate) fn check_structure(bytes: &[u8]) -> Result<(), Error> {
     let mut pos = 2;
     let mut scan = false;
     while bytes.get(pos) == Some(&0xff) {
         while bytes.get(pos) == Some(&0xff) {
             pos += 1;
         }
-        let marker = *bytes.get(pos).ok_or_else(invalid)?;
+        let marker = *bytes.get(pos).ok_or_else(invalid_structure)?;
         pos += 1;
         if marker == 0xd9 {
-            return if scan { Ok(()) } else { Err(invalid()) };
+            return if scan {
+                Ok(())
+            } else {
+                Err(invalid_structure())
+            };
         }
         if marker == 0 || marker == 0xd8 {
-            return Err(invalid());
+            return Err(invalid_structure());
         }
         if marker == 1 || (0xd0..=0xd7).contains(&marker) {
             continue;
         }
-        let length = bytes.get(pos..pos + 2).ok_or_else(invalid)?;
+        let length = bytes.get(pos..pos + 2).ok_or_else(invalid_structure)?;
         let len = u16::from_be_bytes(length.try_into().expect("segment length")) as usize;
         if len < 2 || len > bytes.len().saturating_sub(pos) {
-            return Err(invalid());
+            return Err(invalid_structure());
         }
         pos += len;
         if marker == 0xda {
             scan = true;
-            while pos < bytes.len() {
-                if bytes[pos] != 0xff {
-                    pos += 1;
-                    continue;
-                }
-                let start = pos;
-                while bytes.get(pos) == Some(&0xff) {
-                    pos += 1;
-                }
-                let next = *bytes.get(pos).ok_or_else(invalid)?;
-                if next == 0 || (0xd0..=0xd7).contains(&next) {
-                    pos += 1;
-                } else {
-                    pos = start;
-                    break;
-                }
-            }
+            pos = jpeg_scan_end(bytes, pos)?;
         }
     }
-    Err(invalid())
+    Err(invalid_structure())
+}
+
+fn jpeg_scan_end(bytes: &[u8], mut pos: usize) -> Result<usize, Error> {
+    while pos < bytes.len() {
+        if bytes[pos] != 0xff {
+            pos += 1;
+            continue;
+        }
+        let start = pos;
+        while bytes.get(pos) == Some(&0xff) {
+            pos += 1;
+        }
+        let next = *bytes.get(pos).ok_or_else(invalid_structure)?;
+        if next == 0 || (0xd0..=0xd7).contains(&next) {
+            pos += 1;
+        } else {
+            return Ok(start);
+        }
+    }
+    Ok(pos)
 }

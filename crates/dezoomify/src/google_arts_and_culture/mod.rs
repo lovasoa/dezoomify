@@ -251,6 +251,10 @@ mod tests {
         };
         assert_eq!(plan.count(), 88);
         let tiles: Vec<_> = plan.tiles_row_major().map(Result::unwrap).collect();
+        assert_fixture_tiles(&tiles);
+    }
+
+    fn assert_fixture_tiles(tiles: &[crate::core::TileSpec]) {
         let first = &tiles[0];
         assert_eq!(first.destination, Vec2d::default());
         assert_eq!(first.expected_size, Some(Vec2d { x: 512, y: 512 }));

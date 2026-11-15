@@ -726,7 +726,7 @@ fn schema_image_objects_are_not_image_services() {
 }
 
 #[test]
-fn json_ld_context_arrays_and_legacy_profiles_preserve_image_capabilities() {
+fn json_ld_context_arrays_preserve_image_capabilities() {
     for context in [
         serde_json::json!([
             "https://example.test/extension.json",
@@ -746,7 +746,10 @@ fn json_ld_context_arrays_and_legacy_profiles_preserve_image_capabilities() {
         assert!(image.supports_custom_size());
         assert!(image.warnings().is_empty());
     }
+}
 
+#[test]
+fn legacy_profiles_preserve_image_capabilities() {
     for profile in [
         "http://library.stanford.edu/iiif/image-api/compliance.html#level1",
         "https://library.stanford.edu/iiif/image-api/1.1/compliance.html#level1",

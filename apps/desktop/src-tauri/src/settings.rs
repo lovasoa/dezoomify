@@ -404,6 +404,11 @@ mod tests {
         assert_eq!(settings.retries, 3);
         assert_eq!(settings.max_width, None);
         assert_eq!(settings.max_height, None);
+    }
+
+    #[test]
+    fn default_settings_configure_native_downloads() {
+        let settings = DesktopSettings::with_defaults();
         let options = job_options_for(&settings).unwrap();
         assert_eq!(options.compression, 5);
         assert_eq!(options.max_retries, 3);

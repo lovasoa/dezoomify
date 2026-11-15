@@ -1,3 +1,6 @@
+use super::super::invalid_structure;
+use dezoomify::model::Error;
+
 /// PNG header/chunk facts, shared by encoded output profiles. Pixel bytes stay
 /// compressed; structural validation belongs to `inspect` before this call.
 pub(crate) struct Header {
@@ -37,8 +40,7 @@ pub(crate) fn header(bytes: &[u8]) -> Option<Header> {
 }
 
 // Bounded checks do not decompress pixels or validate zlib.
-pub(crate) fn check_structure(bytes: &[u8]) -> Result<(), dezoomify::model::Error> {
-    let invalid = super::super::invalid_structure;
+pub(crate) fn check_structure(bytes: &[u8]) -> Result<(), Error> {
     let mut pos = 8usize;
     let mut data = false;
     while let Some(header) = bytes.get(pos..pos + 8) {
@@ -46,25 +48,25 @@ pub(crate) fn check_structure(bytes: &[u8]) -> Result<(), dezoomify::model::Erro
         let end = pos
             .checked_add(len)
             .and_then(|v| v.checked_add(12))
-            .ok_or_else(invalid)?;
+            .ok_or_else(invalid_structure)?;
         if end > bytes.len() {
-            return Err(invalid());
+            return Err(invalid_structure());
         }
         match &header[4..] {
-            b"IHDR" if pos == 8 && len != 13 => return Err(invalid()),
+            b"IHDR" if pos == 8 && len != 13 => return Err(invalid_structure()),
             b"IDAT" => data = true,
             b"IEND" => {
                 return if len == 0 && data {
                     Ok(())
                 } else {
-                    Err(invalid())
+                    Err(invalid_structure())
                 }
             }
             _ => {}
         }
         pos = end;
     }
-    Err(invalid())
+    Err(invalid_structure())
 }
 
 /// Concatenate compressed scanlines without decoding pixels. Call after inspection.

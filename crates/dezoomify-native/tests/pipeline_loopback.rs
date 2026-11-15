@@ -338,13 +338,10 @@ fn iiif_dir_writes_manifest_and_addressable_tiles() {
         &mut |_| {},
     )
     .expect("iiif-dir pipeline succeeds");
-    assert_eq!(outcome.tile_count, 4);
+    let canvas = outcome.output.canvas.as_ref().unwrap();
     assert_eq!(
-        (
-            outcome.output.canvas.as_ref().unwrap().width,
-            outcome.output.canvas.as_ref().unwrap().height
-        ),
-        (512, 512)
+        (outcome.tile_count, canvas.width, canvas.height),
+        (4, 512, 512)
     );
     assert!(outcome.output.disposition == dezoomify::model::OutputDisposition::NativePublication);
     // The manifest is spec-shaped: v2 context, real dimensions, one tile
@@ -353,8 +350,10 @@ fn iiif_dir_writes_manifest_and_addressable_tiles() {
         &std::fs::read(output.join("info.json")).expect("info.json written"),
     )
     .expect("info.json parses");
-    assert_eq!(info["width"], 512);
-    assert_eq!(info["height"], 512);
+    assert_eq!(
+        (info["width"].as_u64(), info["height"].as_u64()),
+        (Some(512), Some(512))
+    );
     assert_eq!(info["tiles"][0]["width"], 256);
     assert_eq!(info["tiles"][0]["scaleFactors"], serde_json::json!([1, 2]));
     // Each tile sits at its real IIIF request path, so a plain static file

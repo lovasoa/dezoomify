@@ -80,14 +80,18 @@ fn edge_responses_control_publication_and_keep_request_context() {
             );
             assert_eq!(error.retryable(), retryable, "{input}: {error}");
             assert!(!output.exists(), "{input} wrote output after failure");
-            assert!(
-                records.lock().unwrap().iter().any(|record| {
-                    record["event"] == "request"
-                        && record["fields"]["purpose"] == purpose
-                        && record["fields"]["transport"] == "native"
-                }),
-                "{input} lost transport/request context"
-            );
+            assert_request_context(&records.lock().unwrap(), purpose, input);
         }
     }
+}
+
+fn assert_request_context(records: &[serde_json::Value], purpose: &str, input: &str) {
+    assert!(
+        records.iter().any(|record| {
+            record["event"] == "request"
+                && record["fields"]["purpose"] == purpose
+                && record["fields"]["transport"] == "native"
+        }),
+        "{input} lost transport/request context"
+    );
 }

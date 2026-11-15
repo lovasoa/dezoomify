@@ -145,6 +145,12 @@ fn flags_and_logging_reach_the_runtime() {
         dimensions(&dir.join("out.png"), if index == 1 { 256 } else { 512 });
     }
     assert!(PathBuf::from(cache).exists());
+}
+
+#[test]
+fn logging_levels_control_human_messages_and_keep_json_events() {
+    let url = source("pyramid.dzi");
+    let dir = temp_dir("cli-logging");
     for level in ["error", "info", "debug", "trace"] {
         let log_cache = dir.join(level);
         let run = cli(
@@ -260,24 +266,28 @@ fn bulk_continues_after_failure_in_human_and_json_modes() {
             assert_eq!(run.status.success(), !failed);
             dimensions(&dir.join("collection_1.png"), 512);
             assert_eq!(dir.join("collection_2.png").exists(), !failed);
-            if json {
-                let observed = events(&run);
-                assert_eq!(
-                    observed.iter().filter(|e| e["kind"] == "bulk-item").count(),
-                    2
-                );
-                let summary = observed.last().unwrap();
-                assert_eq!(summary["kind"], "bulk-completed");
-                assert_eq!(summary["succeeded"], if failed { 1 } else { 2 });
-                assert_eq!(summary["failed"], u64::from(failed));
-            } else {
-                assert!(String::from_utf8_lossy(&run.stderr).contains(if failed {
-                    "1 succeeded, 1 failed, 2 total"
-                } else {
-                    "2 succeeded, 0 failed, 2 total"
-                }));
-            }
+            bulk_summary(&run, json, failed);
         }
+    }
+}
+
+fn bulk_summary(run: &Output, json: bool, failed: bool) {
+    if json {
+        let observed = events(run);
+        assert_eq!(
+            observed.iter().filter(|e| e["kind"] == "bulk-item").count(),
+            2
+        );
+        let summary = observed.last().unwrap();
+        assert_eq!(summary["kind"], "bulk-completed");
+        assert_eq!(summary["succeeded"], if failed { 1 } else { 2 });
+        assert_eq!(summary["failed"], u64::from(failed));
+    } else {
+        assert!(String::from_utf8_lossy(&run.stderr).contains(if failed {
+            "1 succeeded, 1 failed, 2 total"
+        } else {
+            "2 succeeded, 0 failed, 2 total"
+        }));
     }
 }
 
@@ -317,23 +327,33 @@ fn pdf_bulk_saves_one_document_and_reports_partial_completion() {
         let expected = failed_at.unwrap_or(3);
         assert_eq!(output.exists(), expected > 0);
         assert!(!dir.join("collection_1.pdf").exists());
-        let events = events(&run);
-        let summary = events.last().unwrap();
-        assert_eq!(summary["succeeded"], expected);
-        assert_eq!(summary["failed"], usize::from(failed_at.is_some()));
-        let pages: Vec<_> = events
-            .iter()
-            .filter(|event| event["kind"] == "bulk-item" && event["status"] == "ok")
-            .map(|event| event["page"].as_u64().unwrap())
-            .collect();
-        assert_eq!(pages, (1..=expected as u64).collect::<Vec<_>>());
-        if expected > 0 {
-            assert_eq!(summary["pages"], expected);
-        }
-        if failed_at.is_some() {
-            assert!(summary["error"].is_object());
-        }
+        pdf_bulk_summary(&run, expected, failed_at.is_some());
     }
+}
+
+fn pdf_bulk_summary(run: &Output, expected: usize, failed: bool) {
+    let events = events(run);
+    let summary = events.last().unwrap();
+    assert_eq!(summary["succeeded"], expected);
+    assert_eq!(summary["failed"], usize::from(failed));
+    let pages: Vec<_> = events
+        .iter()
+        .filter(|event| event["kind"] == "bulk-item" && event["status"] == "ok")
+        .map(|event| event["page"].as_u64().unwrap())
+        .collect();
+    assert_eq!(pages, (1..=expected as u64).collect::<Vec<_>>());
+    if expected > 0 {
+        assert_eq!(summary["pages"], expected);
+    }
+    if failed {
+        assert!(summary["error"].is_object());
+    }
+}
+
+#[test]
+fn pdf_bulk_preserves_an_existing_document() {
+    let dir = temp_dir("cli-pdf-bulk-existing");
+    std::fs::write(dir.join("list.txt"), source("pyramid.dzi")).unwrap();
     std::fs::write(dir.join("collection.pdf"), b"keep this file").unwrap();
     let run = cli(&dir, &["--bulk", "list.txt", "--outfile", "collection.pdf"]);
     assert!(!run.status.success());

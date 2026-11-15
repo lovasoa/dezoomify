@@ -382,6 +382,10 @@ mod tests {
         assert_eq!(log_level_rank("debug"), 3);
         assert_eq!(log_level_rank("trace"), 4);
         assert_eq!(log_level_rank("nope"), 2);
+    }
+
+    #[test]
+    fn log_levels_gate_human_messages_and_progress() {
         assert!(!show_warning("error"));
         assert!(show_warning("warn"));
         assert!(!show_success("error"));

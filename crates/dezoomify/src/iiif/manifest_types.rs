@@ -1018,26 +1018,16 @@ mod tests {
         let infos = manifest.extract_image_infos(manifest_base_url);
         assert_eq!(infos.len(), 3);
 
-        assert_eq!(
-            infos[0].image_uri,
-            "https://example.com/base/svc1/info.json"
-        );
-        assert_eq!(infos[0].manifest_label, Some("Multi".to_string()));
-        assert_eq!(infos[0].canvas_label, Some("Canvas 1".to_string()));
-        assert_eq!(infos[0].canvas_index, 0);
-
-        assert_eq!(
-            infos[1].image_uri,
-            "https://example.com/base/svc2.1/info.json"
-        );
-        assert_eq!(infos[1].manifest_label, Some("Multi".to_string()));
-        assert_eq!(infos[1].canvas_label, Some("Canvas 2".to_string()));
-        assert_eq!(infos[1].canvas_index, 1);
-
-        assert_eq!(infos[2].image_uri, "https://example.com/base/img2.2.png");
-        assert_eq!(infos[2].manifest_label, Some("Multi".to_string()));
-        assert_eq!(infos[2].canvas_label, Some("Canvas 2".to_string()));
-        assert_eq!(infos[2].canvas_index, 1);
+        for (info, (uri, canvas, index)) in infos.iter().zip([
+            ("https://example.com/base/svc1/info.json", "Canvas 1", 0),
+            ("https://example.com/base/svc2.1/info.json", "Canvas 2", 1),
+            ("https://example.com/base/img2.2.png", "Canvas 2", 1),
+        ]) {
+            assert_eq!(info.image_uri, uri);
+            assert_eq!(info.manifest_label.as_deref(), Some("Multi"));
+            assert_eq!(info.canvas_label.as_deref(), Some(canvas));
+            assert_eq!(info.canvas_index, index);
+        }
     }
 
     #[test]
@@ -1226,46 +1216,30 @@ mod tests {
 
         assert_eq!(infos.len(), 5);
 
-        assert_eq!(
-            infos[0].image_uri,
-            "https://example.com/iiif/collection1/images/page1_svc/info.json"
-        );
-        assert_eq!(infos[0].canvas_label, Some("Canvas 1 Rel Svc".to_string()));
-
-        assert_eq!(
-            infos[1].image_uri,
-            "https://example.com/abs/path/to/img_svc/info.json"
-        );
-        assert_eq!(
-            infos[1].canvas_label,
-            Some("Canvas 2 Abs Path Svc".to_string())
-        );
-
-        assert_eq!(
-            infos[2].image_uri,
-            "https://example.com/iiif/collection1/bookA/images/cover.jpg"
-        );
-        assert_eq!(
-            infos[2].canvas_label,
-            Some("Canvas 3 Rel Direct Img".to_string())
-        );
-
-        assert_eq!(
-            infos[3].image_uri,
-            "https://other.example.net/iiif/itemQ/svc/info.json"
-        );
-        assert_eq!(
-            infos[3].canvas_label,
-            Some("Canvas 4 Full URL Svc".to_string())
-        );
-
-        assert_eq!(
-            infos[4].image_uri,
-            "https://example.com/iiif/collection1/bookA/images_rel_noslash_svc/info.json"
-        );
-        assert_eq!(
-            infos[4].canvas_label,
-            Some("Canvas 5 Rel Svc No Slash".to_string())
-        );
+        for (info, (uri, canvas)) in infos.iter().zip([
+            (
+                "https://example.com/iiif/collection1/images/page1_svc/info.json",
+                "Canvas 1 Rel Svc",
+            ),
+            (
+                "https://example.com/abs/path/to/img_svc/info.json",
+                "Canvas 2 Abs Path Svc",
+            ),
+            (
+                "https://example.com/iiif/collection1/bookA/images/cover.jpg",
+                "Canvas 3 Rel Direct Img",
+            ),
+            (
+                "https://other.example.net/iiif/itemQ/svc/info.json",
+                "Canvas 4 Full URL Svc",
+            ),
+            (
+                "https://example.com/iiif/collection1/bookA/images_rel_noslash_svc/info.json",
+                "Canvas 5 Rel Svc No Slash",
+            ),
+        ]) {
+            assert_eq!(info.image_uri, uri);
+            assert_eq!(info.canvas_label.as_deref(), Some(canvas));
+        }
     }
 }
