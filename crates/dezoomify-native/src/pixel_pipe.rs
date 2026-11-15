@@ -451,8 +451,10 @@ impl PixelPipe {
             h: self.region.height.min(self.size.height - y),
         }
     }
-    /// Reads one immutable region. Waiting never holds the producer lock; unread
-    /// regions remain in storage, regardless of arrival order or encoder speed.
+    /// Consume the next immutable region into an owned pixel buffer. Its stored
+    /// bytes may be reclaimed before the encoder uses the returned buffer.
+    /// Waiting never holds the producer lock; unread regions remain in storage,
+    /// regardless of arrival order or encoder speed.
     pub(crate) fn receive_region(&self) -> Result<Option<PixelRegion>, Error> {
         let mut queue = self
             .changed

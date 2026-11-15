@@ -72,8 +72,8 @@ impl BlobStore {
         Ok((offset, bytes.len()))
     }
 
-    /// Restore a range on a blocking worker, then reclaim its disk space.
-    /// Each range may be read only once.
+    /// Restore a range into an owned buffer on a blocking worker. After a
+    /// successful read, its stored bytes may be reclaimed and must not be read again.
     pub(crate) fn read(&self, (offset, length): (u64, usize)) -> Result<Vec<u8>, Error> {
         let mut bytes = Vec::new();
         bytes

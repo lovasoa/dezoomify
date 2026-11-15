@@ -10,7 +10,8 @@ trait Storage: Read + Write + Seek + Send {
     fn len(&self) -> u64;
     /// Establish the writable extent before writes. Added bytes must read as zero.
     fn set_len(&mut self, length: u64) -> io::Result<()>;
-    /// The caller gives up the range permanently after reading it.
+    /// Optionally reclaim a byte range the caller will never read again.
+    /// Reclamation must preserve the store's length, offsets, and cursor.
     fn discard(&self, offset: u64, length: u64);
 }
 
@@ -47,6 +48,8 @@ impl Storage for MemoryStorage {
         bytes.resize(length, 0);
         Ok(())
     }
+    /// A contiguous RAM allocation cannot release an interior range. Its capacity
+    /// remains allocated until the store is dropped or spills to disk.
     fn discard(&self, _: u64, _: u64) {}
 }
 
@@ -82,6 +85,10 @@ impl Storage for DiskStorage {
         self.length = length;
         Ok(())
     }
+    /// Reclaim consumed temporary-file blocks through Linux hole punching.
+    /// This releases disk space without shifting the remaining data. Other
+    /// platforms leave the file unchanged. Filesystem errors are ignored:
+    /// failed reclamation must not fail a download whose data was already read.
     fn discard(&self, offset: u64, length: u64) {
         #[cfg(target_os = "linux")]
         let _ = rustix::fs::fallocate(
@@ -95,12 +102,15 @@ impl Storage for DiskStorage {
     }
 }
 
+/// RAM-to-disk selection threshold in bytes, leaving room for concurrent tile
+/// decoding and encoder workspace. This does not limit job memory. A failed
+/// memory probe selects disk for any nonempty store.
 pub(crate) fn memory_storage_limit() -> u64 {
-    // Leave room for concurrent tile decoding and encoder workspace. This only
-    // selects a backend; an unavailable memory probe simply selects disk.
     (crate::imaging::available_memory_bytes() / 16).min(64 << 20)
 }
 
+/// Seekable temporary bytes for composition, probe spools, and PDF indexes.
+/// Once a store spills to disk, it remains there until dropped.
 pub(crate) struct TemporaryStorage {
     storage: Box<dyn Storage>,
     directory: PathBuf,
@@ -108,10 +118,14 @@ pub(crate) struct TemporaryStorage {
 }
 
 impl TemporaryStorage {
+    /// Create zero-filled storage with automatic RAM or disk selection.
     pub(crate) fn new(directory: &Path, length: u64) -> io::Result<Self> {
         Self::with_memory_limit(directory, length, memory_storage_limit())
     }
 
+    /// Create `length` zero-filled bytes. `limit` is the maximum logical length
+    /// kept in RAM, not an allocation limit: exceeding it or failing a RAM
+    /// reservation selects disk. The directory is used only when disk is needed.
     pub(crate) fn with_memory_limit(directory: &Path, length: u64, limit: u64) -> io::Result<Self> {
         let mut result = Self {
             storage: Box::new(MemoryStorage(Cursor::new(Vec::new()))),
@@ -122,6 +136,9 @@ impl TemporaryStorage {
         Ok(result)
     }
 
+    /// Extend with zeros while preserving existing offsets and the cursor.
+    /// A spill replaces RAM only after copying successfully; failed spills leave
+    /// the RAM contents and cursor intact so the caller retains its data.
     fn grow(&mut self, length: u64) -> io::Result<()> {
         if length <= self.storage.len() {
             return Ok(());
@@ -149,6 +166,10 @@ impl TemporaryStorage {
         self.storage.set_len(length)
     }
 
+    /// Give up a byte range after its data has been copied into an owned buffer.
+    /// The range must never be read again. File length, offsets, and cursor stay
+    /// unchanged. Reclamation is best effort on Linux and does nothing for RAM
+    /// or on other platforms; failure only delays releasing temporary disk space.
     pub(crate) fn discard(&self, offset: u64, length: u64) {
         self.storage.discard(offset, length);
     }
