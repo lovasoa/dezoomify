@@ -478,6 +478,61 @@ impl Search {
         true
     }
 
+    fn next_remote(&mut self, limit: usize) -> Option<(Request, Interaction)> {
+        while let Some(request) = self.next(false) {
+            if !self.admit(&request, limit) {
+                continue;
+            }
+            let interaction = if self.resources[&request].interactive {
+                Interaction::Allowed
+            } else {
+                Interaction::Forbidden
+            };
+            return Some((request, interaction));
+        }
+        None
+    }
+
+    async fn read_supplied<P, PFut>(
+        &mut self,
+        request: Request,
+        limit: usize,
+        specs: &[FormatSpec],
+        selectors: Vec<String>,
+        parse_html: &P,
+    ) -> Result<(), DiscoveryError>
+    where
+        P: Fn(HtmlQuery) -> PFut,
+        PFut: std::future::Future<Output = Result<HtmlDocument, Error>>,
+    {
+        if !self.admit(&request, limit) {
+            return Ok(());
+        }
+        let supplied = self.resources[&request]
+            .supplied
+            .clone()
+            .expect("local bytes");
+        let result = parse(
+            supplied.bytes,
+            None,
+            supplied.snapshot,
+            selectors,
+            parse_html,
+        )
+        .await;
+        self.complete(request, result, specs)
+    }
+
+    fn failure(self) -> DiscoveryError {
+        if self.exhausted {
+            DiscoveryError::ResourceLimitExceeded
+        } else {
+            DiscoveryError::NoCandidateAccepted {
+                diagnostics: self.diagnostics,
+            }
+        }
+    }
+
     fn allow_blocked(&mut self) -> bool {
         let mut queued = false;
         for entry in self.resources.values_mut() {
@@ -638,6 +693,34 @@ where
     })))
 }
 
+async fn read<F, Fut, P, PFut>(
+    request: Request,
+    interaction: Interaction,
+    selectors: Vec<String>,
+    fetch: &F,
+    parse_html: &P,
+) -> Result<Read, Error>
+where
+    F: Fn(Request, Interaction) -> Fut,
+    Fut: std::future::Future<Output = Result<crate::model::ResourceRead, Error>>,
+    P: Fn(HtmlQuery) -> PFut,
+    PFut: std::future::Future<Output = Result<HtmlDocument, Error>>,
+{
+    match fetch(request, interaction).await? {
+        crate::model::ResourceRead::NeedsAccess { .. } => Ok(Read::NeedsAccess),
+        crate::model::ResourceRead::Response { response } => {
+            parse(
+                Arc::new(response.bytes),
+                response.final_uri,
+                false,
+                selectors,
+                parse_html,
+            )
+            .await
+        }
+    }
+}
+
 /// Discover through matcher evidence and a shared table of bounded resource reads.
 /// Supplied contents and accessible Host observations run before remote fallback.
 /// Collect equally strong source catalogs in discovery priority order, coalescing
@@ -668,21 +751,15 @@ where
     loop {
         search.advance()?;
         if let Some(request) = search.next(true) {
-            if search.admit(&request, limits.resources) {
-                let supplied = search.resources[&request]
-                    .supplied
-                    .clone()
-                    .expect("local bytes");
-                let result = parse(
-                    supplied.bytes,
-                    None,
-                    supplied.snapshot,
+            search
+                .read_supplied(
+                    request,
+                    limits.resources,
+                    specs,
                     selectors.clone(),
                     &parse_html,
                 )
-                .await;
-                search.complete(request, result, specs)?;
-            }
+                .await?;
             continue;
         }
         if search.settled() {
@@ -696,36 +773,16 @@ where
             continue;
         }
         while active.len() < limits.concurrent.max(1) {
-            let Some(request) = search.next(false) else {
+            let Some((request, interaction)) = search.next_remote(limits.resources) else {
                 break;
-            };
-            if !search.admit(&request, limits.resources) {
-                continue;
-            }
-            let interaction = if search.resources[&request].interactive {
-                Interaction::Allowed
-            } else {
-                Interaction::Forbidden
             };
             let fetch = &fetch;
             let parse_html = &parse_html;
             let selectors = selectors.clone();
             active.push(
                 async move {
-                    let result = match fetch(request.clone(), interaction).await {
-                        Ok(crate::model::ResourceRead::NeedsAccess { .. }) => Ok(Read::NeedsAccess),
-                        Ok(crate::model::ResourceRead::Response { response }) => {
-                            parse(
-                                Arc::new(response.bytes),
-                                response.final_uri,
-                                false,
-                                selectors,
-                                parse_html,
-                            )
-                            .await
-                        }
-                        Err(error) => Err(error),
-                    };
+                    let result =
+                        read(request.clone(), interaction, selectors, fetch, parse_html).await;
                     (request, result)
                 }
                 .boxed_local(),
@@ -741,13 +798,7 @@ where
         if search.inputs(inputs, specs, true)? {
             observed = false;
         } else if !search.allow_blocked() {
-            return Err(if search.exhausted {
-                DiscoveryError::ResourceLimitExceeded
-            } else {
-                DiscoveryError::NoCandidateAccepted {
-                    diagnostics: search.diagnostics,
-                }
-            });
+            return Err(search.failure());
         }
     }
 }

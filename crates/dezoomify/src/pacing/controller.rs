@@ -155,13 +155,7 @@ impl Controller {
             return Feedback::Ordinary;
         }
         if generation != self.generation {
-            if let Some(recovery) = &mut self.recovery {
-                recovery.widespread |= forbidden && recovery.tile != tile;
-                if explicit {
-                    recovery.until = recovery.until.max(now.saturating_add(delay_ms));
-                    recovery.quick = false;
-                }
-            }
+            self.update_recovery(tile, forbidden, explicit, now, delay_ms);
             return Feedback::Shared;
         }
         if let Some(recovery) = &mut self.recovery
@@ -193,6 +187,23 @@ impl Controller {
             quick: !explicit,
         });
         Feedback::Backoff(if explicit { delay_ms } else { QUICK_PROBE_MS })
+    }
+
+    fn update_recovery(
+        &mut self,
+        tile: u32,
+        forbidden: bool,
+        explicit: bool,
+        now: u64,
+        delay_ms: u64,
+    ) {
+        if let Some(recovery) = &mut self.recovery {
+            recovery.widespread |= forbidden && recovery.tile != tile;
+            if explicit {
+                recovery.until = recovery.until.max(now.saturating_add(delay_ms));
+                recovery.quick = false;
+            }
+        }
     }
 
     /// Lower the start rate and learned ceiling using recent request starts at `now`.

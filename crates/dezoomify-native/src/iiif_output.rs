@@ -298,31 +298,11 @@ impl IiifWriter {
         Ok(())
     }
 
-    pub(crate) fn finish(
-        mut self,
-        _destination: &Path,
-        reused: &[ReusedTile],
+    fn normalize_base(
+        &mut self,
+        format: NativeFormat,
         cancelled: &AtomicBool,
-    ) -> Result<crate::output::PreparedOutput, Error> {
-        if !self.base.regular {
-            let order = crate::tile_geometry::TileOrder::new(reused);
-            let mut tiles = BTreeMap::new();
-            for (index, tile) in std::mem::take(&mut self.base.tiles) {
-                let index = order.index(index, tile.rect.x, tile.rect.y);
-                tiles.insert(index, tile);
-            }
-            self.base.tiles = tiles;
-        }
-        let format = if self
-            .base
-            .tiles
-            .values()
-            .all(|tile| tile.format == NativeFormat::Image(image::ImageFormat::Jpeg))
-        {
-            NativeFormat::Image(image::ImageFormat::Jpeg)
-        } else {
-            NativeFormat::Image(image::ImageFormat::Png)
-        };
+    ) -> Result<(), Error> {
         let mut normalized = TileLevel {
             size: self.base.size.clone(),
             cell: self.base.cell.clone(),
@@ -406,6 +386,35 @@ impl IiifWriter {
         }
         self.base = normalized;
         self.retained = self.icc_profile.as_ref().map_or(0, Vec::len) as u64;
+        Ok(())
+    }
+
+    pub(crate) fn finish(
+        mut self,
+        _destination: &Path,
+        reused: &[ReusedTile],
+        cancelled: &AtomicBool,
+    ) -> Result<crate::output::PreparedOutput, Error> {
+        if !self.base.regular {
+            let order = crate::tile_geometry::TileOrder::new(reused);
+            let mut tiles = BTreeMap::new();
+            for (index, tile) in std::mem::take(&mut self.base.tiles) {
+                let index = order.index(index, tile.rect.x, tile.rect.y);
+                tiles.insert(index, tile);
+            }
+            self.base.tiles = tiles;
+        }
+        let format = if self
+            .base
+            .tiles
+            .values()
+            .all(|tile| tile.format == NativeFormat::Image(image::ImageFormat::Jpeg))
+        {
+            NativeFormat::Image(image::ImageFormat::Jpeg)
+        } else {
+            NativeFormat::Image(image::ImageFormat::Png)
+        };
+        self.normalize_base(format, cancelled)?;
         let full_size = self.base.size.clone();
         let mut factors = vec![1u32];
         let replacement = TileLevel {

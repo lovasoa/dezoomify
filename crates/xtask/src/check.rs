@@ -12,10 +12,6 @@ pub fn run(args: &[String]) -> Result<(), String> {
         "--",
         "-D",
         "warnings",
-        "-A",
-        "clippy::disallowed-methods",
-        "-A",
-        "clippy::disallowed-types",
     ])?;
     // The disallowed API catalog lives in the workspace-level Clippy config,
     // but only the pure domain crate is subject to it. Run its production
@@ -33,6 +29,17 @@ pub fn run(args: &[String]) -> Result<(), String> {
         "clippy::disallowed-methods",
         "-D",
         "clippy::disallowed-types",
+    ])?;
+    super::command::cargo(&[
+        "clippy",
+        "-p",
+        "dezoomify-wasm",
+        "--target",
+        "wasm32-unknown-unknown",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings",
     ])?;
     super::command::cargo(&[
         "rustdoc",

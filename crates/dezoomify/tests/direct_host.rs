@@ -696,7 +696,7 @@ fn pause_blocks_new_acquisition_and_retry_waits_until_resume() {
 }
 
 #[test]
-fn host_selection_follows_catalog_entries_and_rejects_cycles() {
+fn host_selection_follows_catalog_entries() {
     let mut host = MemoryHost::default();
     host.resources.insert(
         "https://images.test/list.txt".into(),
@@ -727,9 +727,12 @@ fn host_selection_follows_catalog_entries_and_rejects_cycles() {
         CatalogEntry::ImageRequest(_)
     ));
     assert!(matches!(catalogs[1].entries[0], CatalogEntry::Image(_)));
-    assert!(host.progress.borrow().iter().filter(|progress| progress.selected.is_some()).all(
-        |progress| progress.source_url.as_deref() == Some("https://images.test/image.dzi")
-    ));
+    assert!(host
+        .progress
+        .borrow()
+        .iter()
+        .filter(|progress| progress.selected.is_some())
+        .all(|progress| progress.source_url.as_deref() == Some("https://images.test/image.dzi")));
     assert_eq!(
         host.fetched
             .borrow()
@@ -738,6 +741,10 @@ fn host_selection_follows_catalog_entries_and_rejects_cycles() {
             .count(),
         1
     );
+}
+
+#[test]
+fn host_selection_rejects_deferred_cycles() {
     let mut host = MemoryHost::default();
     host.resources.insert(
         "https://images.test/list.txt".into(),

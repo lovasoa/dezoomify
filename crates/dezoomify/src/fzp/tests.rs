@@ -231,7 +231,7 @@ fn unsupported_variants_and_invalid_geometry_have_bounded_diagnostics() {
 }
 
 #[test]
-fn direct_metadata_and_ordered_deferred_index() {
+fn direct_metadata_uses_legacy_titles_and_redirected_bases() {
     let legacy = image(include_str!(
         "../../../../testdata/scenarios/rs-core/formats/payloads/fzp/unversioned.xml"
     ));
@@ -253,6 +253,10 @@ fn direct_metadata_and_ordered_deferred_index() {
     assert!(
         tile_urls(image.levels.last().unwrap())[0].starts_with("https://cdn.test/redirected/0/")
     );
+}
+
+#[test]
+fn ordered_deferred_index_skips_invalid_siblings() {
     let index_uri = "https://images.test/collection/xmls/book.xml";
     let (catalog, reads) = discover(index_uri, &[(index_uri, INDEX, None)]);
     assert_eq!(reads.len(), 1);
@@ -285,7 +289,7 @@ fn direct_metadata_and_ordered_deferred_index() {
 }
 
 #[test]
-fn literal_navigation_and_comparison_catalog() {
+fn literal_navigation_and_dynamic_path_rejection() {
     for page in [
         "jime_vars.ResourcePath='../resources/'; lime('nested/image&amp;name','fzp');",
         "Lime.Viewer.loadIn('view',{path:'../resources/',name:'nested/image&amp;name',type:'fzp'});",
@@ -319,6 +323,10 @@ fn literal_navigation_and_comparison_catalog() {
                 .contains("unsupported dynamic Lime path")
         );
     }
+}
+
+#[test]
+fn comparison_catalog_preserves_both_paths() {
     let page = "lime_compare('visible','fzp','infrared','fzp',{'path':'../pictures/','syncpath':'../comparison/'});";
     let (catalog, _) = discover(VIEWER, &[(VIEWER, page, None)]);
     assert_eq!(catalog.len(), 2);

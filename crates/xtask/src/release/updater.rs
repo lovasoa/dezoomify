@@ -134,12 +134,8 @@ mod tests {
     const KEY: &str = "RWQf6LRCGA9i53mlYecO4IzT51TGPpvWucNSCh1CBM0QTaLn73Y7GFO3";
     const SIGNATURE: &str = "untrusted comment: signature from minisign secret key\nRUQf6LRCGA9i559r3g7V1qNyJDApGip8MfqcadIgT9CuhV3EMhHoN1mGTkUidF/z7SrlQgXdy8ofjb7bNJJylDOocrCo8KLzZwo=\ntrusted comment: timestamp:1556193335\tfile:test\ny/rUw2y8/hOUYjZU71eHp/Wo1KZ40fGy2VJEDl34XMJM+TX48Ss/17u3IvIfbVR1FkZZSNCisQbuQY+bHwhEBg==";
 
-    #[test]
-    fn manifest_verifies_bundles_and_keeps_downloads_pinned_to_the_release() {
-        let root = temp_root("updater");
-        let key = PublicKey::from_base64(KEY).unwrap();
+    fn write_signed_bundles(plan: &Plan, root: &Path) -> String {
         let signature = STANDARD.encode(SIGNATURE);
-        let plan = plan_from_repo();
         std::fs::write(root.join("notes.md"), "Release notes").unwrap();
         for target in &plan.targets {
             for (_, name) in bundles(&target.name, &plan.version) {
@@ -149,6 +145,15 @@ mod tests {
                 std::fs::write(dir.join(format!("{name}.sig")), &signature).unwrap();
             }
         }
+        signature
+    }
+
+    #[test]
+    fn manifest_keeps_downloads_pinned_to_the_release() {
+        let root = temp_root("updater");
+        let key = PublicKey::from_base64(KEY).unwrap();
+        let plan = plan_from_repo();
+        let signature = write_signed_bundles(&plan, &root);
         let manifest = manifest_with_key(&plan, &root, &key).unwrap();
         assert_eq!(manifest["version"], plan.version);
         assert_eq!(manifest["notes"], "Release notes");
@@ -167,6 +172,15 @@ mod tests {
             assert!(assets(&plan, &root)
                 .contains(&root.join(target).join(url.rsplit('/').next().unwrap())));
         }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn manifest_rejects_modified_or_unsigned_bundles() {
+        let root = temp_root("updater-invalid");
+        let key = PublicKey::from_base64(KEY).unwrap();
+        let plan = plan_from_repo();
+        write_signed_bundles(&plan, &root);
         let bundle = root
             .join("desktop-linux-x86_64")
             .join("dezoomify-desktop.AppImage");

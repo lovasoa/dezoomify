@@ -234,7 +234,6 @@ fn write_odd_sized_tiles(tiles: &std::path::Path, mixed: bool, icc: &[u8]) -> im
 
 #[test]
 fn odd_sized_and_mixed_codec_iiif_trees_roundtrip_through_the_reader() {
-    use image::ImageDecoder as _;
     let work = temp_dir("iiif-roundtrip");
     let icc = vec![42; 1024];
     for mixed in [false, true] {
@@ -267,35 +266,7 @@ fn odd_sized_and_mixed_codec_iiif_trees_roundtrip_through_the_reader() {
             std::fs::read(destination.join("512,512,1,1/1,/0/default.png")).unwrap(),
             std::fs::read(tiles.join("2_2.jpg")).unwrap(),
         );
-        let mut expected = image::RgbaImage::new(257, 257);
-        for (x, y, region, width, height) in [
-            (0, 0, "0,0,512,512", 256, 256),
-            (256, 0, "512,0,1,512", 1, 256),
-            (0, 256, "0,512,512,1", 256, 1),
-            (256, 256, "512,512,1,1", 1, 1),
-        ] {
-            let bytes =
-                std::fs::read(destination.join(format!("{region}/{width},{height}/0/default.png")))
-                    .unwrap();
-            assert_eq!(
-                image::codecs::png::PngDecoder::new(std::io::Cursor::new(&bytes))
-                    .unwrap()
-                    .icc_profile()
-                    .unwrap(),
-                Some(icc.clone()),
-            );
-            assert_eq!(
-                std::fs::read(destination.join(format!("{region}/{width},/0/default.png")))
-                    .unwrap(),
-                bytes
-            );
-            image::imageops::overlay(
-                &mut expected,
-                &image::load_from_memory(&bytes).unwrap().into_rgba8(),
-                x,
-                y,
-            );
-        }
+        let expected = read_reduced_iiif_image(&destination, &icc);
         let output = work.join(format!("roundtrip-{mixed}.png"));
         support::run_file(
             destination.join("info.json").to_str().unwrap(),
@@ -307,29 +278,7 @@ fn odd_sized_and_mixed_codec_iiif_trees_roundtrip_through_the_reader() {
         )
         .unwrap();
         assert_eq!(image::open(output).unwrap().into_rgba8(), expected);
-        let mut reference = original;
-        for side in [257, 129] {
-            reference = image::imageops::resize(
-                &reference,
-                side,
-                side,
-                image::imageops::FilterType::Triangle,
-            );
-        }
-        let overview = image::open(destination.join("full/129,/0/default.png"))
-            .unwrap()
-            .into_rgba8();
-        for (actual, expected) in overview
-            .get_pixel(128, 128)
-            .0
-            .into_iter()
-            .zip(reference.get_pixel(128, 128).0)
-        {
-            assert!(
-                actual.abs_diff(expected) <= 2,
-                "coarser level reused a public edge collision"
-            );
-        }
+        assert_iiif_overview(&destination, original);
         assert!(!destination.join(".pyramid").exists());
         fn files(path: &std::path::Path) -> Vec<std::path::PathBuf> {
             std::fs::read_dir(path)
@@ -355,6 +304,65 @@ fn odd_sized_and_mixed_codec_iiif_trees_roundtrip_through_the_reader() {
         );
     }
     std::fs::remove_dir_all(work).unwrap();
+}
+
+fn read_reduced_iiif_image(destination: &std::path::Path, icc: &[u8]) -> image::RgbaImage {
+    use image::ImageDecoder as _;
+    let mut expected = image::RgbaImage::new(257, 257);
+    for (x, y, region, width, height) in [
+        (0, 0, "0,0,512,512", 256, 256),
+        (256, 0, "512,0,1,512", 1, 256),
+        (0, 256, "0,512,512,1", 256, 1),
+        (256, 256, "512,512,1,1", 1, 1),
+    ] {
+        let bytes =
+            std::fs::read(destination.join(format!("{region}/{width},{height}/0/default.png")))
+                .unwrap();
+        assert_eq!(
+            image::codecs::png::PngDecoder::new(std::io::Cursor::new(&bytes))
+                .unwrap()
+                .icc_profile()
+                .unwrap()
+                .as_deref(),
+            Some(icc),
+        );
+        assert_eq!(
+            std::fs::read(destination.join(format!("{region}/{width},/0/default.png"))).unwrap(),
+            bytes
+        );
+        image::imageops::overlay(
+            &mut expected,
+            &image::load_from_memory(&bytes).unwrap().into_rgba8(),
+            x,
+            y,
+        );
+    }
+    expected
+}
+
+fn assert_iiif_overview(destination: &std::path::Path, mut reference: image::RgbaImage) {
+    for side in [257, 129] {
+        reference = image::imageops::resize(
+            &reference,
+            side,
+            side,
+            image::imageops::FilterType::Triangle,
+        );
+    }
+    let overview = image::open(destination.join("full/129,/0/default.png"))
+        .unwrap()
+        .into_rgba8();
+    for (actual, expected) in overview
+        .get_pixel(128, 128)
+        .0
+        .into_iter()
+        .zip(reference.get_pixel(128, 128).0)
+    {
+        assert!(
+            actual.abs_diff(expected) <= 2,
+            "coarser level reused a public edge collision"
+        );
+    }
 }
 
 fn assert_zif_tile_decoding(container: &[u8], extension: &str) {
@@ -532,7 +540,12 @@ fn zif_reuses_subsampled_jpeg_levels() {
     .unwrap();
     assert_eq!(result.instrumentation.pixel_decodes, 0);
     let container = std::fs::read(result.path).unwrap();
-    let metadata = zif_tiff::std::read_zif(std::io::Cursor::new(&container)).unwrap();
+    assert_subsampled_zif(&container, &bytes);
+    std::fs::remove_dir_all(work).unwrap();
+}
+
+fn assert_subsampled_zif(container: &[u8], bytes: &[u8]) {
+    let metadata = zif_tiff::std::read_zif(std::io::Cursor::new(container)).unwrap();
     assert_eq!(metadata.level_count(), 2);
     assert_eq!(
         (
@@ -551,12 +564,10 @@ fn zif_reuses_subsampled_jpeg_levels() {
             assert_eq!(&container[range.start as usize..range.end as usize], bytes);
         }
     }
-    std::fs::remove_dir_all(work).unwrap();
 }
 
 #[test]
 fn truncated_source_tiles_fail_with_their_uri() {
-    use dezoomify::model::Error;
     let work = temp_dir("iiif-truncated");
     let source = work.join("source.dzi");
     let tiles = work.join("source_files/5");
@@ -602,17 +613,22 @@ fn truncated_source_tiles_fail_with_their_uri() {
             })
             .unwrap();
             let error = support::run_host(&host).unwrap_err();
-            assert!(
-                matches!(&error, Error::TileFailed { tile: 1, attempts: 1, cause }
-                if matches!(&**cause, Error::Resource { request, source, .. }
-                    if request == bad.to_str().unwrap() && matches!(source.cause(), Error::DecodeFailed(_))))
-            );
+            assert_truncated_tile_error(&error, &bad);
             assert!(host.publication().is_none());
             assert!(!work.join(format!("out-{case}.{extension}")).exists());
             drop(host);
         }
     }
     std::fs::remove_dir_all(work).unwrap();
+}
+
+fn assert_truncated_tile_error(error: &dezoomify::model::Error, path: &std::path::Path) {
+    use dezoomify::model::Error;
+    assert!(
+        matches!(error, Error::TileFailed { tile: 1, attempts: 1, cause }
+        if matches!(&**cause, Error::Resource { request, source, .. }
+            if request == path.to_str().unwrap() && matches!(source.cause(), Error::DecodeFailed(_))))
+    );
 }
 
 #[test]

@@ -591,6 +591,23 @@ pub(crate) fn write_failed(
 mod tests {
     use super::*;
 
+    fn fail_io<W: Write + Seek>(step: &str, writer: &mut GuardedFile<'_, W>) {
+        match step {
+            "write" => assert!(matches!(
+                image::ImageEncoder::write_image(
+                    image::codecs::png::PngEncoder::new(writer),
+                    &[0; 4],
+                    1,
+                    1,
+                    image::ExtendedColorType::Rgba8,
+                ),
+                Err(image::ImageError::IoError(_))
+            )),
+            "seek" => assert!(writer.seek(std::io::SeekFrom::Start(0)).is_err()),
+            _ => assert!(writer.flush().is_err()),
+        }
+    }
+
     #[test]
     fn writer_preserves_io_errors_wrapped_by_codecs() {
         struct BrokenIo;
@@ -618,20 +635,7 @@ mod tests {
                 cancelled: &cancelled,
                 io_error: &mut staged.io_error,
             };
-            match step {
-                "write" => assert!(matches!(
-                    image::ImageEncoder::write_image(
-                        image::codecs::png::PngEncoder::new(&mut writer),
-                        &[0; 4],
-                        1,
-                        1,
-                        image::ExtendedColorType::Rgba8,
-                    ),
-                    Err(image::ImageError::IoError(_))
-                )),
-                "seek" => assert!(writer.seek(std::io::SeekFrom::Start(0)).is_err()),
-                _ => assert!(writer.flush().is_err()),
-            }
+            fail_io(step, &mut writer);
             assert!(
                 matches!(staged.check_error(), Err(Error::WriteFailed(detail)) if detail.detail.as_deref().unwrap().contains(step))
             );

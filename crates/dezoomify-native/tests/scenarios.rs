@@ -168,22 +168,27 @@ fn output_format_follows_the_destination_extension() {
 }
 
 #[test]
-fn output_destinations_validate_format_and_preserve_existing_content() {
+fn existing_directory_outputs_validate_format_and_preserve_content() {
     // An existing directory is always an iiif-dir destination.
-    let dir = std::env::temp_dir().join(format!("dz-infer-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    assert_eq!(output::infer_from_path(&dir), Ok(OutputFormat::IiifDir));
+    let work = tempfile::tempdir().unwrap();
+    let dir = work.path();
+    assert_eq!(output::infer_from_path(dir), Ok(OutputFormat::IiifDir));
     // An image extension never validates as a directory destination and a
     // directory never validates as a single file.
     assert!(
         output::validate_destination(&dir.join("x.png"), &OutputFormat::IiifDir, true).is_err()
     );
-    assert!(output::validate_destination(&dir, &OutputFormat::Png, true).is_err());
+    assert!(output::validate_destination(dir, &OutputFormat::Png, true).is_err());
     // A non-empty directory refuses without overwrite, like a file does.
     std::fs::write(dir.join("info.json"), b"{}").unwrap();
-    assert!(output::validate_destination(&dir, &OutputFormat::IiifDir, false).is_err());
-    assert!(output::validate_destination(&dir, &OutputFormat::IiifDir, true).is_err());
+    assert!(output::validate_destination(dir, &OutputFormat::IiifDir, false).is_err());
+    assert!(output::validate_destination(dir, &OutputFormat::IiifDir, true).is_err());
+}
+
+#[test]
+fn output_extensions_validate_the_selected_format() {
+    let work = tempfile::tempdir().unwrap();
+    let dir = work.path();
     // A `.zif` path validates as ZIF (never as single-image TIFF or PNG);
     // a `.iiif` path validates as a directory destination and never as a
     // single file.
@@ -207,12 +212,18 @@ fn output_destinations_validate_format_and_preserve_existing_content() {
     let iiif = dir.join("out.iiif");
     assert!(output::validate_destination(&iiif, &OutputFormat::IiifDir, false).is_ok());
     assert!(output::validate_destination(&iiif, &OutputFormat::Tiff, true).is_err());
+}
+
+#[test]
+fn existing_iiif_files_are_preserved_even_with_overwrite() {
+    let work = tempfile::tempdir().unwrap();
+    let dir = work.path();
+    let iiif = dir.join("out.iiif");
     // Existing tile output is preserved even when overwrite is requested.
     std::fs::write(&iiif, b"stale").unwrap();
     assert!(output::validate_destination(&iiif, &OutputFormat::IiifDir, false).is_err());
     assert!(output::validate_destination(&iiif, &OutputFormat::IiifDir, true).is_err());
     assert_eq!(std::fs::read(&iiif).unwrap(), b"stale");
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]

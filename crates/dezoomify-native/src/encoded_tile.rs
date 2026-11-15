@@ -53,18 +53,20 @@ pub(crate) fn jpeg_header(bytes: &[u8]) -> Option<JpegHeader> {
             return None;
         }
         let data = bytes.get(at + 2..at.checked_add(len)?)?;
-        if marker == 0xe0 && data.starts_with(b"JFIF\0") {
-            header.jfif = true;
-        }
-        if marker == 0xee && data.starts_with(b"Adobe") {
-            header.adobe_transform = data.get(11).copied();
-        }
-        if matches!(marker, 0xc0 | 0xc2) {
-            read_jpeg_frame(data, &mut header)?;
-        }
+        read_jpeg_segment(marker, data, &mut header)?;
         at += len;
     }
     None
+}
+
+fn read_jpeg_segment(marker: u8, data: &[u8], header: &mut JpegHeader) -> Option<()> {
+    match marker {
+        0xe0 if data.starts_with(b"JFIF\0") => header.jfif = true,
+        0xee if data.starts_with(b"Adobe") => header.adobe_transform = data.get(11).copied(),
+        0xc0 | 0xc2 => read_jpeg_frame(data, header)?,
+        _ => {}
+    }
+    Some(())
 }
 
 fn read_jpeg_frame(data: &[u8], header: &mut JpegHeader) -> Option<()> {

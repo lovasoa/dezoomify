@@ -9,7 +9,7 @@ use dezoomify::{
     Host, Job,
 };
 use dezoomify_native::{DocumentPage, JobOptions, NativeHost, OutputDocument};
-use std::{collections::VecDeque, sync::Arc};
+use std::{collections::VecDeque, ops::ControlFlow, sync::Arc};
 
 /// Events are synchronous notifications; image/retry answers arrive through Registration.
 pub trait SessionEvents {
@@ -225,37 +225,16 @@ impl Session<'_> {
                     .transpose()
                     .and_then(|page| self.download(&discovery, image, false, page)),
             };
-            match result {
-                Ok((result, _)) => {
-                    batch.items[position].state = if result.output.disposition
-                        == dezoomify::model::OutputDisposition::NativePrepared
-                    {
-                        DesktopBatchItemState::Prepared {
-                            output: result.output,
-                        }
-                    } else {
-                        DesktopBatchItemState::Saved { result }
-                    }
-                }
-                Err(error) if matches!(error.cause(), Error::Cancelled) => {
-                    batch.items[position].state = DesktopBatchItemState::Cancelled;
-                    batch.cancelled = true;
-                    break;
-                }
-                Err(error) => {
-                    self.registration.diagnostics.record(
-                        DiagnosticLevel::Error,
-                        "batch-item-failed",
-                        serde_json::json!({"id": id, "source": batch.items[position].source_url, "error": error}),
-                    );
-                    batch.items[position].state = DesktopBatchItemState::Failed {
-                        error: error.clone(),
-                    };
-                    if document.is_some() {
-                        batch.error = Some(error);
-                        break;
-                    }
-                }
+            if self
+                .finish_item(
+                    &mut batch,
+                    position,
+                    result.map(|(result, _)| result),
+                    document.is_some(),
+                )
+                .is_break()
+            {
+                break;
             }
             self.events.batch(&batch);
         }
@@ -265,6 +244,49 @@ impl Session<'_> {
         }
         self.events.batch(&batch);
         Ok(batch)
+    }
+
+    fn finish_item(
+        &self,
+        batch: &mut DesktopBatch,
+        position: usize,
+        result: Result<DesktopOutput, Error>,
+        stop_on_error: bool,
+    ) -> ControlFlow<()> {
+        let item = &mut batch.items[position];
+        match result {
+            Ok(result) => {
+                item.state = if result.output.disposition
+                    == dezoomify::model::OutputDisposition::NativePrepared
+                {
+                    DesktopBatchItemState::Prepared {
+                        output: result.output,
+                    }
+                } else {
+                    DesktopBatchItemState::Saved { result }
+                };
+            }
+            Err(error) if matches!(error.cause(), Error::Cancelled) => {
+                item.state = DesktopBatchItemState::Cancelled;
+                batch.cancelled = true;
+                return ControlFlow::Break(());
+            }
+            Err(error) => {
+                self.registration.diagnostics.record(
+                    DiagnosticLevel::Error,
+                    "batch-item-failed",
+                    serde_json::json!({"id": item.id, "source": item.source_url, "error": error}),
+                );
+                item.state = DesktopBatchItemState::Failed {
+                    error: error.clone(),
+                };
+                if stop_on_error {
+                    batch.error = Some(error);
+                    return ControlFlow::Break(());
+                }
+            }
+        }
+        ControlFlow::Continue(())
     }
 
     fn stop_pending(batch: &mut DesktopBatch) {
@@ -607,6 +629,58 @@ mod tests {
         );
     }
 
+    fn check_document_batch(source: &str, cancel: bool, expected: usize) {
+        let (server, _) = fixture();
+        let directory = temp_dir("desktop-pdf-batch");
+        let registration = Registration::new();
+        let mut events = events(&registration, vec![DesktopImageChoice::All]);
+        events.cancel_second = cancel;
+        let outputs = Arc::new(SavedOutputs::new(directory.join("references")));
+        let mut options = options(format!("{}/{source}", server.origin), &directory);
+        options.output = OutputTarget::AutoDir {
+            dir: directory,
+            format: dezoomify::model::OutputFormat::Pdf,
+        };
+        let DesktopResult::Batch { batch } = run_session(
+            options,
+            &registration,
+            Arc::clone(&outputs),
+            "job:pdf",
+            &events,
+        )
+        .unwrap() else {
+            panic!("batch result");
+        };
+        assert_eq!(batch.cancelled, cancel);
+        assert_eq!(batch.error.is_some(), source == "list.txt");
+        let shared = batch.saved_output.as_ref().unwrap();
+        assert_eq!(shared.filename, "dezoomify.pdf");
+        assert!(outputs.resolve(&shared.id).unwrap().is_file());
+        assert_prepared_pages(&batch, &events, expected);
+        if source == "list.txt" {
+            assert!(matches!(
+                batch.items.last().unwrap().state,
+                DesktopBatchItemState::Cancelled
+            ));
+        }
+    }
+
+    fn assert_prepared_pages(batch: &DesktopBatch, events: &Events<'_>, expected: usize) {
+        assert!(saved(batch).is_empty());
+        assert_eq!(
+            batch
+                .items
+                .iter()
+                .filter(|item| matches!(item.state, DesktopBatchItemState::Prepared { .. }))
+                .count(),
+            expected
+        );
+        assert!(events.snapshots.borrow().iter().any(|batch| batch
+            .items
+            .iter()
+            .any(|item| matches!(item.state, DesktopBatchItemState::Prepared { .. }))));
+    }
+
     #[test]
     fn document_batches_share_one_file_and_preserve_completed_pages_when_stopped() {
         for (source, cancel, expected) in [
@@ -614,52 +688,26 @@ mod tests {
             ("list.txt", false, 2),
             ("cancel.txt", true, 1),
         ] {
-            let (server, _) = fixture();
-            let directory = temp_dir("desktop-pdf-batch");
-            let registration = Registration::new();
-            let mut events = events(&registration, vec![DesktopImageChoice::All]);
-            events.cancel_second = cancel;
-            let outputs = Arc::new(SavedOutputs::new(directory.join("references")));
-            let mut options = options(format!("{}/{source}", server.origin), &directory);
-            options.output = OutputTarget::AutoDir {
-                dir: directory.clone(),
-                format: dezoomify::model::OutputFormat::Pdf,
-            };
-            let DesktopResult::Batch { batch } = run_session(
-                options,
-                &registration,
-                Arc::clone(&outputs),
-                "job:pdf",
-                &events,
-            )
-            .unwrap() else {
-                panic!("batch result");
-            };
-            assert_eq!(batch.cancelled, cancel);
-            assert_eq!(batch.error.is_some(), source == "list.txt");
-            let shared = batch.saved_output.as_ref().unwrap();
-            assert_eq!(shared.filename, "dezoomify.pdf");
-            assert!(outputs.resolve(&shared.id).unwrap().is_file());
-            assert!(saved(&batch).is_empty());
-            assert_eq!(
-                batch
-                    .items
-                    .iter()
-                    .filter(|item| matches!(item.state, DesktopBatchItemState::Prepared { .. }))
-                    .count(),
-                expected
-            );
-            assert!(events.snapshots.borrow().iter().any(|batch| batch
-                .items
-                .iter()
-                .any(|item| matches!(item.state, DesktopBatchItemState::Prepared { .. }))));
-            if source == "list.txt" {
-                assert!(matches!(
-                    batch.items.last().unwrap().state,
-                    DesktopBatchItemState::Cancelled
-                ));
-            }
+            check_document_batch(source, cancel, expected);
         }
+    }
+
+    fn assert_nested_batch_outputs(batch: &DesktopBatch) {
+        assert_eq!(batch.items.len(), 4);
+        assert_eq!(saved(batch).len(), 3);
+        assert_eq!(batch.items[0].title.as_deref(), Some("First painting"));
+        assert_eq!(
+            saved(batch)[0].saved_output.as_ref().unwrap().filename,
+            "First-painting.png"
+        );
+        assert!(matches!(
+            batch.items[2].state,
+            DesktopBatchItemState::Failed { .. }
+        ));
+        assert!(
+            matches!(batch.items[3].state, DesktopBatchItemState::Saved { .. }),
+            "later entries still download"
+        );
     }
 
     #[test]
@@ -680,13 +728,7 @@ mod tests {
             panic!("batch result");
         };
         assert!(!batch.cancelled);
-        assert_eq!(batch.items.len(), 4);
-        assert_eq!(saved(&batch).len(), 3);
-        assert_eq!(batch.items[0].title.as_deref(), Some("First painting"));
-        assert_eq!(
-            saved(&batch)[0].saved_output.as_ref().unwrap().filename,
-            "First-painting.png"
-        );
+        assert_nested_batch_outputs(&batch);
         assert!(
             events
                 .phases
@@ -694,14 +736,6 @@ mod tests {
                 .windows(2)
                 .any(|phases| phases == [ProgressPhase::Output, ProgressPhase::Discovery]),
             "a new entry clears the previous save phase"
-        );
-        assert!(matches!(
-            batch.items[2].state,
-            DesktopBatchItemState::Failed { .. }
-        ));
-        assert!(
-            matches!(batch.items[3].state, DesktopBatchItemState::Saved { .. }),
-            "later entries still download"
         );
         assert!(
             events.choices.borrow().is_empty(),

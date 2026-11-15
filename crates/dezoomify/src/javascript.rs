@@ -75,25 +75,45 @@ fn immediately_invoked(text: &str, end: usize) -> bool {
 
 // A concise arrow expression ends at its enclosing delimiter or statement end.
 fn expression_end(text: &str, start: usize) -> usize {
-    let (mut depth, mut quote, mut escaped) = (0u32, None, false);
+    let mut depth = 0u32;
+    let mut quote = QuoteState::default();
     for (offset, byte) in text.bytes().enumerate().skip(start) {
-        match quote {
-            Some(_) if escaped => escaped = false,
-            Some(_) if byte == b'\\' => escaped = true,
-            Some(delimiter) if byte == delimiter => quote = None,
-            None if matches!(byte, b'\'' | b'"' | b'`') => quote = Some(byte),
-            None if matches!(byte, b'(' | b'[' | b'{') => depth += 1,
-            None if matches!(byte, b')' | b']' | b'}') => {
+        if quote.consume(byte) {
+            continue;
+        }
+        match byte {
+            b'(' | b'[' | b'{' => depth += 1,
+            b')' | b']' | b'}' => {
                 if depth == 0 {
                     return offset;
                 }
                 depth -= 1;
             }
-            None if depth == 0 && matches!(byte, b';' | b',' | b'\n') => return offset,
+            b';' | b',' | b'\n' if depth == 0 => return offset,
             _ => {}
         }
     }
     text.len()
+}
+
+#[derive(Default)]
+struct QuoteState {
+    delimiter: Option<u8>,
+    escaped: bool,
+}
+
+impl QuoteState {
+    fn consume(&mut self, byte: u8) -> bool {
+        match self.delimiter {
+            Some(_) if self.escaped => self.escaped = false,
+            Some(_) if byte == b'\\' => self.escaped = true,
+            Some(delimiter) if byte == delimiter => self.delimiter = None,
+            None if matches!(byte, b'\'' | b'"' | b'`') => self.delimiter = Some(byte),
+            None => return false,
+            _ => {}
+        }
+        true
+    }
 }
 
 /// Literal string property; expressions are deliberately excluded.
@@ -136,20 +156,15 @@ pub(crate) fn captures<'a>(
     regex: &'a Regex,
     text: &'a str,
 ) -> impl Iterator<Item = regex::Captures<'a>> {
-    let (mut position, mut quote, mut escaped) = (0, None, false);
+    let mut position = 0;
+    let mut quote = QuoteState::default();
     regex.captures_iter(text).filter(move |capture| {
         let start = capture.get(0).unwrap().start();
         for &byte in &text.as_bytes()[position..start] {
-            match quote {
-                Some(_) if escaped => escaped = false,
-                Some(_) if byte == b'\\' => escaped = true,
-                Some(delimiter) if byte == delimiter => quote = None,
-                None if matches!(byte, b'\'' | b'"' | b'`') => quote = Some(byte),
-                _ => {}
-            }
+            quote.consume(byte);
         }
         position = start;
-        quote.is_none() && !text[..start].trim_end().ends_with(['.', '$'])
+        quote.delimiter.is_none() && !text[..start].trim_end().ends_with(['.', '$'])
     })
 }
 
@@ -183,15 +198,15 @@ pub(crate) fn capture_text<'a>(
 }
 
 pub(crate) fn body_at(text: &str, start: usize) -> Option<&str> {
-    let (mut depth, mut quote, mut escaped) = (1u32, None, false);
+    let mut depth = 1u32;
+    let mut quote = QuoteState::default();
     for (offset, byte) in text.bytes().enumerate().skip(start) {
-        match quote {
-            Some(_) if escaped => escaped = false,
-            Some(_) if byte == b'\\' => escaped = true,
-            Some(delimiter) if byte == delimiter => quote = None,
-            None if matches!(byte, b'\'' | b'"' | b'`') => quote = Some(byte),
-            None if byte == b'{' => depth += 1,
-            None if byte == b'}' => {
+        if quote.consume(byte) {
+            continue;
+        }
+        match byte {
+            b'{' => depth += 1,
+            b'}' => {
                 depth -= 1;
                 if depth == 0 {
                     return Some(&text[start..offset]);
