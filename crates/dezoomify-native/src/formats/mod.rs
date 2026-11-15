@@ -145,6 +145,7 @@ pub(crate) fn tile_writer(
     compression: u8,
     max_tiles: u32,
     page: Option<crate::DocumentPage>,
+    controls: &crate::Controls,
 ) -> Result<Box<dyn crate::tile_output::TileWriter>, Error> {
     Ok(match plan.format {
         OutputFormat::IiifDir => Box::new(iiif::IiifWriter::new(
@@ -165,6 +166,7 @@ pub(crate) fn tile_writer(
             compression,
             max_tiles,
             page,
+            controls.clone(),
         )?),
         _ => {
             return Err(Error::InvalidState(

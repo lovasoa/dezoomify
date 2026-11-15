@@ -88,6 +88,7 @@ impl OutputDocument {
             return Ok(None);
         }
         let cancelled = AtomicBool::new(false);
+        writer.set_controls(None);
         let staging = writer.finish(&cancelled)?;
         drop(writer);
         let (path, encoded_bytes) = output::publish(
@@ -118,7 +119,7 @@ impl DocumentPage {
         self.writer.lock().map_err(poisoned)
     }
     pub(crate) fn seal(&mut self, page: pdf_writer::Ref) -> Result<(), Error> {
-        self.lock()?.seal_page(page);
+        self.lock()?.seal_page(page)?;
         self.sealed = true;
         Ok(())
     }

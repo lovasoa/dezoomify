@@ -153,8 +153,8 @@ fn interrupted_documents_publish_only_complete_pages() {
     let mut document = OutputDocument::new(OutputTarget::File(output.clone()), false).unwrap();
     for (name, bytes, cancel) in [
         ("first", &first, false),
-        ("second", &second, false),
         ("last", &first, true),
+        ("second", &second, false),
     ] {
         let input = source(directory.path(), name, bytes);
         prepare_document_page(&mut document, &input, &output, cancel);

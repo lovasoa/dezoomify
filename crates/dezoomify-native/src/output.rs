@@ -452,7 +452,7 @@ impl<W> GuardedFile<'_, W> {
     fn check(&self) -> std::io::Result<()> {
         if self.cancelled.load(Ordering::SeqCst) {
             // write_all retries Interrupted, so use a terminal error kind.
-            Err(std::io::Error::other("output cancelled"))
+            Err(std::io::Error::other(Error::Cancelled))
         } else {
             Ok(())
         }
@@ -659,7 +659,14 @@ mod tests {
             let mut staged = StagedFile::new(&destination).unwrap();
             staged.writer(&cancelled).write_all(b"unpublished").unwrap();
             cancelled.store(true, Ordering::SeqCst);
-            assert!(staged.writer(&cancelled).write_all(b"more").is_err());
+            let error = staged.writer(&cancelled).write_all(b"more").unwrap_err();
+            assert_eq!(
+                error
+                    .get_ref()
+                    .and_then(|cause| cause.downcast_ref::<Error>())
+                    .map(Error::kind),
+                Some(Error::Cancelled.kind())
+            );
             assert!(matches!(
                 staged.publish(&destination, true, &cancelled),
                 Err(Error::Cancelled)
