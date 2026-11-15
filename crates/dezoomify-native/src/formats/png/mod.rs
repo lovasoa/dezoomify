@@ -70,9 +70,9 @@ pub fn encode(
     icc_profile: Option<&[u8]>,
     exif_metadata: Option<&[u8]>,
 ) -> Result<Vec<u8>, Error> {
-    let mut bytes = Vec::new();
+    let mut bytes = crate::buffers::Buffer::default();
     encode_to(&mut bytes, image, compression, icc_profile, exif_metadata)?;
-    Ok(bytes)
+    Ok(bytes.into_vec())
 }
 
 pub(crate) fn encode_to<W: std::io::Write>(
@@ -96,10 +96,16 @@ fn write_image<P: image::PixelWithColorType<Subpixel = u8>>(
     let mut encoder =
         image::codecs::png::PngEncoder::new_with_quality(writer, compression, FilterType::Adaptive);
     if let Some(profile) = icc_profile {
-        let _ = image::ImageEncoder::set_icc_profile(&mut encoder, profile.to_vec());
+        let _ = image::ImageEncoder::set_icc_profile(
+            &mut encoder,
+            crate::buffers::copy(profile).map_err(crate::buffers::allocation_error)?,
+        );
     }
     if let Some(exif) = exif_metadata {
-        let _ = image::ImageEncoder::set_exif_metadata(&mut encoder, exif.to_vec());
+        let _ = image::ImageEncoder::set_exif_metadata(
+            &mut encoder,
+            crate::buffers::copy(exif).map_err(crate::buffers::allocation_error)?,
+        );
     }
     image::ImageEncoder::write_image(
         encoder,
@@ -123,10 +129,13 @@ pub(crate) fn encode_rgb_to(
     icc: Option<&[u8]>,
     exif: Option<&[u8]>,
 ) -> Result<(), Error> {
-    let rgb = image::RgbImage::from_fn(pixels.width(), pixels.height(), |x, y| {
-        let p = pixels.get_pixel(x, y);
-        image::Rgb([p[0], p[1], p[2]])
-    });
+    let mut rgb = Vec::new();
+    rgb.try_reserve_exact(pixels.as_raw().len() / 4 * 3)
+        .map_err(crate::buffers::allocation_error)?;
+    for pixel in pixels.pixels() {
+        rgb.extend_from_slice(&pixel.0[..3]);
+    }
+    let rgb = image::RgbImage::from_raw(pixels.width(), pixels.height(), rgb).expect("RGB pixels");
     write_image(writer, &rgb, compression_for(compression), icc, exif)
 }
 

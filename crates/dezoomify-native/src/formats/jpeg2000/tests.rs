@@ -1,5 +1,3 @@
-use image::ImageError;
-
 use super::*;
 use crate::{
     imaging::load_image_with_metadata,
@@ -20,10 +18,6 @@ fn reads_reference_containers_codestreams_and_16_bit_gray() {
         for truncated in [&bytes[..30], &bytes[..bytes.len() - 1]] {
             assert!(load_image_with_metadata(truncated).is_err());
         }
-        assert!(matches!(
-            crate::imaging::load_image_with_limit(bytes, Some(100)),
-            Err(ImageError::Limits(_))
-        ));
     }
     let gray = load_image_with_metadata(include_bytes!("../../../tests/data/jpeg2000/gray16.j2k"))
         .unwrap()
@@ -69,7 +63,6 @@ async fn preserves_source_grid_overlap_edges_and_origin_profile() {
         Some(&grid()),
         OutputFormat::Jpeg2000,
         0,
-        8 << 20,
         Controls::default(),
     )
     .unwrap();
@@ -120,7 +113,6 @@ async fn encodes_before_acquisition_finishes_and_cleans_up_on_cancellation() {
         Some(&grid()),
         OutputFormat::Jpeg2000,
         0,
-        8 << 20,
         controls.clone(),
     )
     .unwrap();
@@ -158,7 +150,6 @@ async fn lossy_compression_encodes_within_tolerance() {
             Some(&grid()),
             OutputFormat::Jpeg2000,
             compression,
-            8 << 20,
             Controls::default(),
         )
         .unwrap();
@@ -227,10 +218,9 @@ async fn rejects_unsupported_grids_before_creating_staging() {
             width: 34,
             height: 22
         },
-        Some(&grid()),
+        None,
         OutputFormat::Jpeg2000,
         0,
-        1,
         Controls::default()
     )
     .is_err());

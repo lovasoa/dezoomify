@@ -1,7 +1,6 @@
 use super::IiifWriter;
 use crate::{
     codecs::{tile_metadata, NativeFormat},
-    tile_budget::memory_check,
     tile_pyramid::{Rect, TileBytes},
 };
 use dezoomify::model::{Error, Size};
@@ -78,10 +77,6 @@ impl IiifWriter {
         format: NativeFormat,
         cancelled: &AtomicBool,
     ) -> Result<PathBuf, Error> {
-        memory_check(
-            pixels.as_raw().len() as u64 + self.icc_profile.as_ref().map_or(0, Vec::len) as u64 * 3,
-            self.budget.saturating_sub(self.retained),
-        )?;
         let relative = tile_path(rect, scale, format, canvas, false);
         let public = self.staging.path.join(&relative);
         // Public edge routes can coincide across levels. Preserve their first
@@ -142,23 +137,14 @@ impl IiifWriter {
             let bytes = if let TileBytes::Memory(bytes) = &tile.bytes {
                 bytes.as_slice()
             } else if let TileBytes::File(path) = &tile.bytes {
-                let len = std::fs::metadata(path)
-                    .map_err(|e| crate::output::write_failed("tile stat failed", &e))?
-                    .len();
-                memory_check(self.retained + len, self.budget)?;
                 body = std::fs::read(path)
                     .map_err(|e| crate::output::write_failed("tile read failed", &e))?;
                 &body
             } else {
                 return Err(Error::Internal("unexpected IIIF tile storage".into()));
             };
-            let extra = if matches!(tile.bytes, TileBytes::Memory(_)) {
-                0
-            } else {
-                bytes.len() as u64
-            };
-            let budget = self.budget.saturating_sub(self.retained + extra);
-            if let (Some(icc), _) = tile_metadata(bytes, tile.format, budget)? {
+
+            if let (Some(icc), _) = tile_metadata(bytes, tile.format)? {
                 self.retained += icc.len() as u64;
                 self.icc_profile = Some(icc);
                 break;

@@ -4,6 +4,7 @@
 #![allow(clippy::result_large_err)]
 
 mod blob_store;
+mod buffers;
 pub mod cache;
 pub mod client;
 mod codecs;
@@ -20,7 +21,7 @@ pub mod output;
 mod pixel_pipe;
 mod pixel_store;
 mod raster;
-mod tile_budget;
+mod storage;
 mod tile_geometry;
 mod tile_output;
 mod tile_pyramid;

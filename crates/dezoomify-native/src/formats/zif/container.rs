@@ -3,7 +3,6 @@ use crate::{
     codecs::NativeFormat,
     tile_pyramid::{Rect, StoredTile, TileBytes},
 };
-use crate::{tile_budget::memory_check, tile_output::TileWriter};
 use dezoomify::model::{Error, Size};
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -75,7 +74,7 @@ impl ZifWriter {
         if cancelled.load(Ordering::SeqCst) {
             return Err(Error::Cancelled);
         }
-        memory_check(self.retained_bytes() + bytes.len() as u64 * 2, self.budget)?;
+
         let writer = self.writer.as_mut().expect("initialized ZIF writer");
         let batch = writer
             .put_tile_at_level(

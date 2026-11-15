@@ -1,7 +1,7 @@
 use dezoomify::model::Error;
 
-// Extract PNG ICC data with bounded inflation, without decoding pixels.
-pub(crate) fn icc_profile(bytes: &[u8], cap: u64) -> Result<Option<Vec<u8>>, Error> {
+// Extract PNG ICC data without decoding pixels.
+pub(crate) fn icc_profile(bytes: &[u8]) -> Result<Option<Vec<u8>>, Error> {
     if !bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
         return Ok(None);
     }
@@ -21,19 +21,12 @@ pub(crate) fn icc_profile(bytes: &[u8], cap: u64) -> Result<Option<Vec<u8>>, Err
             if data.get(start) != Some(&0) {
                 return Err(Error::DecodeFailed("invalid PNG ICC compression".into()));
             }
-            return fdeflate::decompress_to_vec_bounded(
-                &data[start + 1..],
-                usize::try_from(cap).unwrap_or(usize::MAX),
-            )
-            .map(Some)
-            .map_err(|error| match error {
-                fdeflate::BoundedDecompressionError::OutputTooLarge { .. } => {
-                    Error::ResourceLimit("PNG ICC metadata exceeds memory limit".into())
-                }
-                fdeflate::BoundedDecompressionError::DecompressionError { inner } => {
-                    Error::DecodeFailed(format!("PNG ICC inflation failed: {inner:?}").into())
-                }
-            });
+            let mut decoder = flate2::read::ZlibDecoder::new(&data[start + 1..]);
+            let mut output = crate::buffers::Buffer::default();
+            std::io::copy(&mut decoder, &mut output).map_err(|error| {
+                Error::DecodeFailed(format!("PNG ICC inflation failed: {error}").into())
+            })?;
+            return Ok(Some(output.into_vec()));
         }
         at += len + 12;
     }

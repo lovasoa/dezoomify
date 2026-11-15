@@ -15,30 +15,20 @@ pub(crate) struct Decoder {
     icc_profile: Option<Vec<u8>>,
 }
 impl Decoder {
-    pub(crate) fn new(bytes: &[u8], max_alloc: Option<u64>) -> ImageResult<Self> {
+    pub(crate) fn new(bytes: &[u8]) -> ImageResult<Self> {
         let format = openjp2::detect_format(bytes).map_err(decoding_error)?;
         let mut codec = openjp2::Decoder::new(format).map_err(decoding_error)?;
         codec.set_strict(true).map_err(decoding_error)?;
-        let budget = max_alloc.unwrap_or(1 << 30);
         codec
             .set_limits(
                 openjp2::DecodeLimits::new()
-                    // Allow fixed header overhead before our pixel preflight;
-                    // tiny caller budgets must still produce a typed limit.
-                    .max_mem_alloc(budget.max(1 << 20))
-                    .max_metadata_len(usize::try_from(budget).unwrap_or(usize::MAX)),
+                    .max_mem_alloc(u64::MAX)
+                    .max_metadata_len(usize::MAX),
             )
             .map_err(decoding_error)?;
-        let mut stream = Stream::from_bytes(bytes.to_vec());
+        let mut stream = Stream::from_bytes(crate::buffers::copy(bytes)?);
         let header = codec.read_header(&mut stream).map_err(decoding_error)?;
         let size = (header.width(), header.height());
-        let mut limits = image::Limits::default();
-        limits.max_alloc = max_alloc;
-        limits.reserve(
-            u64::from(size.0)
-                .saturating_mul(u64::from(size.1))
-                .saturating_mul(32),
-        )?;
         let core = header.into_core_image();
         if core.icc_profile_is_cielab {
             return Err(decoding_error("JPEG 2000 CIELab images are unsupported"));
@@ -60,7 +50,11 @@ impl ImageDecoder for Decoder {
         image::ColorType::Rgba8
     }
     fn icc_profile(&mut self) -> ImageResult<Option<Vec<u8>>> {
-        Ok(self.icc_profile.clone())
+        self.icc_profile
+            .as_deref()
+            .map(crate::buffers::copy)
+            .transpose()
+            .map_err(image::ImageError::from)
     }
     fn read_image(mut self, buf: &mut [u8]) -> ImageResult<()> {
         let core = self

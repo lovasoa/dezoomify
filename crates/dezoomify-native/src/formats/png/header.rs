@@ -68,15 +68,26 @@ pub(crate) fn check_structure(bytes: &[u8]) -> Result<(), dezoomify::model::Erro
 }
 
 /// Concatenate compressed scanlines without decoding pixels. Call after inspection.
-pub(crate) fn image_data(bytes: &[u8]) -> Option<Vec<u8>> {
+pub(crate) fn image_data(bytes: &[u8]) -> Result<Vec<u8>, dezoomify::model::Error> {
+    use dezoomify::model::Error;
     let mut payload = Vec::new();
+    payload
+        .try_reserve_exact(bytes.len())
+        .map_err(crate::buffers::allocation_error)?;
     let mut at = 8usize;
-    while let Some(chunk) = bytes.get(at..at.checked_add(8)?) {
-        let length = u32::from_be_bytes(chunk[..4].try_into().ok()?) as usize;
+    while let Some(chunk) = bytes.get(at..at.saturating_add(8)) {
+        let length = u32::from_be_bytes(chunk[..4].try_into().expect("chunk length")) as usize;
         if &chunk[4..] == b"IDAT" {
-            payload.extend_from_slice(bytes.get(at + 8..at + 8 + length)?);
+            payload.extend_from_slice(
+                bytes
+                    .get(at + 8..at + 8 + length)
+                    .ok_or_else(|| Error::DecodeFailed("truncated PNG data".into()))?,
+            );
         }
-        at = at.checked_add(length)?.checked_add(12)?;
+        at = at
+            .checked_add(length)
+            .and_then(|end| end.checked_add(12))
+            .ok_or_else(|| Error::DecodeFailed("PNG chunk overflow".into()))?;
     }
-    Some(payload)
+    Ok(payload)
 }

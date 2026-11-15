@@ -1,6 +1,4 @@
 use super::{failed, ZifWriter};
-use crate::tile_budget::memory_check;
-use crate::tile_output::TileWriter;
 use dezoomify::model::Error;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -70,12 +68,8 @@ impl ZifWriter {
         exif: Option<&[u8]>,
     ) -> Result<Vec<u8>, Error> {
         self.require_pixel_encoder()?;
-        let metadata_bytes = icc.map_or(0, <[u8]>::len) as u64 + exif.map_or(0, <[u8]>::len) as u64;
-        memory_check(
-            pixels.as_raw().len() as u64 * 3 + (64 << 10) + metadata_bytes.saturating_mul(4),
-            self.budget.saturating_sub(self.retained_bytes()),
-        )?;
-        let mut bytes = Vec::new();
+
+        let mut bytes = crate::buffers::Buffer::default();
         match self.profile.expect("initialized ZIF profile") {
             Profile::PngRgb => {
                 crate::formats::png::encode_rgb_to(
@@ -99,6 +93,6 @@ impl ZifWriter {
                 )?;
             }
         }
-        Ok(bytes)
+        Ok(bytes.into_vec())
     }
 }

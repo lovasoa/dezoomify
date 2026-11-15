@@ -9,7 +9,6 @@ use crate::{
     encoded_tile::EncodedTile,
     formats::pdf::images as pdf_images,
     output::{PreparedOutput, StagedOutput},
-    tile_budget::memory_check,
     tile_geometry::Rect,
     OutputTarget,
 };
@@ -30,7 +29,6 @@ pub(crate) struct PdfWriter {
     size: Size,
     infer_canvas: bool,
     grid: Option<OutputGrid>,
-    budget: u64,
     indexes: u64,
     compression: u8,
     decoded: u64,
@@ -41,7 +39,6 @@ impl PdfWriter {
     pub(crate) fn new(
         destination: &Path,
         plan: &OutputPlan,
-        budget: u64,
         compression: u8,
         max_tiles: u32,
         page: Option<DocumentPage>,
@@ -61,7 +58,6 @@ impl PdfWriter {
             Some(OutputDocument::new(
                 OutputTarget::File(destination.to_path_buf()),
                 true,
-                budget,
             )?)
         } else {
             None
@@ -71,7 +67,7 @@ impl PdfWriter {
             None => standalone.as_mut().expect("standalone document").page()?,
         };
         let indexes = u64::from(plan.tile_count) * 512 + page.lock()?.retained_bytes();
-        memory_check(indexes + (64 << 10), budget)?;
+
         Ok(Self {
             page,
             standalone,
@@ -82,7 +78,6 @@ impl PdfWriter {
             }),
             infer_canvas: plan.canvas.is_none(),
             grid: plan.grid.clone(),
-            budget: budget - indexes,
             indexes,
             compression,
             decoded: 0,
@@ -188,23 +183,6 @@ impl PdfWriter {
 }
 
 impl crate::tile_output::TileWriter for PdfWriter {
-    fn input_budget(&self) -> u64 {
-        self.budget
-    }
-
-    fn retained_bytes(&self) -> u64 {
-        self.indexes
-    }
-
-    fn hold_queued_bytes(&mut self, bytes: u64) -> Result<(), Error> {
-        let retained = 0;
-        crate::tile_budget::reserve_queued(&mut self.budget, retained, bytes)
-    }
-
-    fn release_probe_bytes(&mut self, bytes: u64) {
-        crate::tile_budget::release_reserved(&mut self.budget, bytes);
-    }
-
     fn peak_retained(&self) -> u64 {
         self.indexes
     }
@@ -229,7 +207,6 @@ impl crate::tile_output::TileWriter for PdfWriter {
         let image = pdf_images::write_tile(
             &mut *self.page.lock()?,
             &mut tile,
-            self.budget,
             self.compression,
             cancelled,
             &mut self.decoded,

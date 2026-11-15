@@ -24,11 +24,6 @@ impl RasterEncoder for Encoder {
         }
         Ok(Some(grid.clone()))
     }
-    fn workspace(&self, size: &Size, grid: Option<&OutputGrid>) -> u64 {
-        let cell = &grid.expect("validated tile grid").tile_size;
-        u64::from(cell.width.min(size.width)) * u64::from(cell.height.min(size.height)) * 64
-            + (1 << 20)
-    }
     fn encode(
         self: Box<Self>,
         staging: StagedFile,
@@ -100,7 +95,10 @@ impl RasterEncoder for Encoder {
             .map_err(encoding_error)?;
         let mut index = 0;
         loop {
-            let mut planar = Vec::with_capacity(first.rgba.len() / 4 * 3);
+            let mut planar = Vec::new();
+            planar
+                .try_reserve_exact(first.rgba.len() / 4 * 3)
+                .map_err(crate::buffers::allocation_error)?;
             for channel in 0..3 {
                 planar.extend(first.rgba.as_chunks::<4>().0.iter().map(|p| p[channel]));
             }
@@ -132,9 +130,9 @@ fn encoding_error(error: impl std::fmt::Display) -> Error {
 mod decoder;
 pub(crate) use decoder::Decoder;
 
-#[cfg(test)]
-mod tests;
-
 pub(crate) fn matches(bytes: &[u8]) -> bool {
     openjp2::detect_format(bytes).is_ok()
 }
+
+#[cfg(test)]
+mod tests;

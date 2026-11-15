@@ -1,7 +1,6 @@
-//! Encoded tile inspection, metadata normalization, and bounded pixel conversion.
+//! Encoded tile inspection, metadata normalization, and pixel conversion.
 use crate::codecs::NativeFormat;
 pub(crate) use crate::codecs::{inspect, tile_metadata};
-use crate::tile_budget::memory_check;
 use dezoomify::model::{Error, Size, TilePlacement};
 
 pub(crate) struct EncodedTile {
@@ -16,23 +15,13 @@ pub(crate) struct EncodedTile {
 }
 
 impl EncodedTile {
-    pub(crate) fn decode_pixels(
-        &self,
-        size: &Size,
-        budget: u64,
-    ) -> Result<image::RgbaImage, Error> {
-        let pixels = u64::from(self.size.width) * u64::from(self.size.height);
-        memory_check(self.bytes.len() as u64 + pixels * 16, budget)?;
-        let image = crate::codecs::decode(
-            &self.bytes,
-            self.format,
-            Some(budget.saturating_sub(self.bytes.len() as u64) / 2),
-        )
-        .map_err(crate::codecs::decode_error)?;
+    pub(crate) fn decode_pixels(&self, size: &Size) -> Result<image::RgbaImage, Error> {
+        let image =
+            crate::codecs::decode(&self.bytes, self.format).map_err(crate::codecs::decode_error)?;
         Ok(if *size == self.size {
             image
         } else {
-            image::imageops::crop_imm(&image, 0, 0, size.width, size.height).to_image()
+            crate::imaging::crop_pixels(&image, size)?
         })
     }
 }
@@ -54,7 +43,7 @@ mod tests {
             .unwrap(),
         ] {
             assert_eq!(
-                inspect(&bytes, 4096).unwrap().0,
+                inspect(&bytes).unwrap().0,
                 Size {
                     width: 8,
                     height: 8
@@ -62,14 +51,14 @@ mod tests {
             );
             for length in [bytes.len() / 2, bytes.len() - 16, bytes.len() - 1] {
                 assert!(matches!(
-                    inspect(&bytes[..length], 4096),
+                    inspect(&bytes[..length]),
                     Err(Error::DecodeFailed(_))
                 ));
             }
             let mut broken = bytes.clone();
             let length = if bytes.starts_with(b"\x89PNG") { 8 } else { 4 };
             broken[length..length + 2].fill(0xff);
-            assert!(inspect(&broken, 4096).is_err());
+            assert!(inspect(&broken).is_err());
         }
     }
 }

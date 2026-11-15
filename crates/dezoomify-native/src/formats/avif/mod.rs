@@ -1,6 +1,6 @@
 use super::{buffered_pixels, encoding_error, RasterWriter, StripEncoder};
 use crate::pixel_pipe::PixelPipe;
-use dezoomify::model::{Error, Size};
+use dezoomify::model::Error;
 use image::ImageEncoder;
 use std::sync::Arc;
 
@@ -9,10 +9,6 @@ pub(crate) struct Encoder {
 }
 
 impl StripEncoder for Encoder {
-    fn workspace(&self, size: &Size) -> u64 {
-        let pixels = u64::from(size.width) * u64::from(size.height);
-        pixels.saturating_mul(64).saturating_add(16 << 20)
-    }
     fn write(&self, output: &mut RasterWriter<'_>, pipe: &Arc<PixelPipe>) -> Result<(), Error> {
         let image = buffered_pixels(pipe)?;
         pipe.metadata()?;

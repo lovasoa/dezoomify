@@ -48,12 +48,7 @@ pub(crate) fn start(
     size: Size,
     controls: Controls,
 ) -> EncoderTask {
-    let cap = if format.codec().layout == OutputLayout::Buffered {
-        32 << 20
-    } else {
-        8 << 20
-    };
-    EncoderTask::start(path, size, None, format, 5, cap, controls).unwrap()
+    EncoderTask::start(path, size, None, format, 5, controls).unwrap()
 }
 pub(crate) async fn publish(task: EncoderTask, destination: &Path) -> Vec<u8> {
     task.pipe.finish(&[]).unwrap();

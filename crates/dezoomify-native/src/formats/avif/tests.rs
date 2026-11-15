@@ -22,7 +22,6 @@ async fn avif_quality_endpoints_preserve_dimensions_colors_and_alpha() {
             None,
             OutputFormat::Avif,
             compression,
-            32 << 20,
             Controls::default(),
         )
         .unwrap();

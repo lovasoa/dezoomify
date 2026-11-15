@@ -21,7 +21,7 @@ use std::{
     sync::Arc,
 };
 
-/// A worker-owned encoder negotiates its pixel regions and workspace before
+/// A worker-owned encoder negotiates its pixel regions before
 /// acquisition starts. Encoding consumes regions in order; metadata settlement
 /// and cancellation must complete before returning publishable staging.
 pub(crate) trait RasterEncoder: Send {
@@ -33,11 +33,6 @@ pub(crate) trait RasterEncoder: Send {
         _source: Option<&OutputGrid>,
     ) -> Result<Option<OutputGrid>, Error> {
         Ok(None)
-    }
-    /// Conservative preflight estimate, excluding disk staging and OS page cache.
-    /// `grid` must be the result of this encoder's negotiation above.
-    fn workspace(&self, _size: &Size, _grid: Option<&OutputGrid>) -> u64 {
-        0
     }
     fn encode(
         self: Box<Self>,
@@ -52,9 +47,6 @@ pub(crate) type RasterWriter<'a> = BufWriter<PipeWriter<GuardedFile<'a>>>;
 /// Full-width strips are consumed in order. Metadata may settle after the last
 /// strip; publication waits for `finish_metadata` and source settlement.
 pub(crate) trait StripEncoder: Send {
-    fn workspace(&self, _size: &Size) -> u64 {
-        0
-    }
     fn write(&self, output: &mut RasterWriter<'_>, pipe: &Arc<PixelPipe>) -> Result<(), Error>;
     fn finish_metadata(
         &self,
@@ -68,9 +60,6 @@ pub(crate) trait StripEncoder: Send {
 }
 
 impl<T: StripEncoder> RasterEncoder for T {
-    fn workspace(&self, size: &Size, _grid: Option<&OutputGrid>) -> u64 {
-        StripEncoder::workspace(self, size)
-    }
     fn encode(
         self: Box<Self>,
         mut staging: StagedFile,
@@ -119,7 +108,9 @@ fn buffered_pixels(pipe: &PixelPipe) -> Result<image::RgbaImage, Error> {
     let length = u64::from(pipe.size.width) * u64::from(pipe.size.height) * 4;
     let length = usize::try_from(length).map_err(encoding_error)?;
     let mut pixels = Vec::new();
-    pixels.try_reserve_exact(length).map_err(encoding_error)?;
+    pixels
+        .try_reserve_exact(length)
+        .map_err(crate::buffers::allocation_error)?;
     while let Some(strip) = pipe.receive()? {
         pixels.extend_from_slice(&strip.rgba);
         pipe.consumed_strip(&strip);
@@ -151,7 +142,6 @@ fn deflate_level(compression: u8) -> u32 {
 pub(crate) fn tile_writer(
     destination: &std::path::Path,
     plan: &dezoomify::model::OutputPlan,
-    budget: u64,
     compression: u8,
     max_tiles: u32,
     page: Option<crate::DocumentPage>,
@@ -160,21 +150,18 @@ pub(crate) fn tile_writer(
         OutputFormat::IiifDir => Box::new(iiif::IiifWriter::new(
             destination,
             plan,
-            budget,
             compression,
             max_tiles,
         )?),
         OutputFormat::Zif => Box::new(zif::ZifWriter::new(
             destination,
             plan,
-            budget,
             compression,
             max_tiles,
         )?),
         OutputFormat::Pdf => Box::new(pdf::PdfWriter::new(
             destination,
             plan,
-            budget,
             compression,
             max_tiles,
             page,

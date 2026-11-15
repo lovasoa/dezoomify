@@ -1,7 +1,6 @@
 use super::{tiles::tile_path, IiifWriter};
 use crate::{
     codecs::NativeFormat,
-    tile_budget::memory_check,
     tile_pyramid::{downsample, StoredTile, TileBytes, TileLevel},
 };
 use dezoomify::model::{Error, ReusedTile, Size};
@@ -51,8 +50,7 @@ impl IiifWriter {
             * (std::mem::size_of::<StoredTile>() + self.staging.path.as_os_str().len() + 128)
                 as u64;
         let growth = indexes.saturating_sub(self.index_bytes);
-        memory_check(self.retained + growth, self.budget)?;
-        self.budget -= growth;
+
         self.index_bytes += growth;
         self.read_settled_profile(cancelled)?;
         for index in 0..normalized.count()? {
@@ -74,12 +72,7 @@ impl IiifWriter {
                     bytes: TileBytes::File(path.clone()),
                 }
             } else {
-                let pixels = self.base.region(
-                    rect,
-                    self.budget.saturating_sub(self.retained),
-                    cancelled,
-                    &mut self.decoded_tiles,
-                )?;
+                let pixels = self.base.region(rect, cancelled, &mut self.decoded_tiles)?;
                 StoredTile {
                     rect,
                     size: Size {
@@ -149,14 +142,8 @@ impl IiifWriter {
                     return Err(Error::Cancelled);
                 }
                 let rect = next.rect(index);
-                let pixels = downsample(
-                    &level,
-                    &next.size,
-                    rect,
-                    self.budget.saturating_sub(self.retained),
-                    cancelled,
-                    &mut self.decoded_tiles,
-                )?;
+                let pixels =
+                    downsample(&level, &next.size, rect, cancelled, &mut self.decoded_tiles)?;
                 let path = self.encode_tile(rect, scale, &full_size, &pixels, format, cancelled)?;
                 next.tiles.insert(
                     index,

@@ -35,15 +35,23 @@ impl StripEncoder for Encoder {
         ] {
             directory.write_tag(tag, value).map_err(encoding_error)?;
         }
-        let mut offsets = Vec::with_capacity(pipe.size.height as usize);
-        let mut lengths = Vec::with_capacity(pipe.size.height as usize);
+        let mut offsets = Vec::new();
+        offsets
+            .try_reserve_exact(pipe.size.height as usize)
+            .map_err(crate::buffers::allocation_error)?;
+        let mut lengths = Vec::new();
+        lengths
+            .try_reserve_exact(pipe.size.height as usize)
+            .map_err(crate::buffers::allocation_error)?;
         let level = super::deflate_level(self.compression);
         while let Some(strip) = pipe.receive()? {
             for row in strip.rgba.chunks_exact(pipe.size.width as usize * 4) {
-                let mut compressed =
-                    flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::new(level));
+                let mut compressed = flate2::write::ZlibEncoder::new(
+                    crate::buffers::Buffer::default(),
+                    flate2::Compression::new(level),
+                );
                 compressed.write_all(row).map_err(encoding_error)?;
-                let bytes = compressed.finish().map_err(encoding_error)?;
+                let bytes = compressed.finish().map_err(encoding_error)?.into_vec();
                 offsets.push(
                     u32::try_from(
                         directory

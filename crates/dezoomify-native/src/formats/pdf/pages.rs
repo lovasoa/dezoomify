@@ -38,7 +38,7 @@ pub struct DocumentPage {
 impl OutputDocument {
     /// Validate the destination before acquisition. Automatic output names use
     /// the normal collision policy; the target must select PDF.
-    pub fn new(target: OutputTarget, overwrite: bool, budget: u64) -> Result<Self, Error> {
+    pub fn new(target: OutputTarget, overwrite: bool) -> Result<Self, Error> {
         let format = match &target {
             OutputTarget::File(path) => output::infer_from_path(path)?,
             OutputTarget::AutoDir { format, .. } => *format,
@@ -55,7 +55,7 @@ impl OutputDocument {
         }
         let destination = output::destination_for(&target, None, format);
         output::validate_destination(&destination, &format, overwrite)?;
-        let writer = PdfDocument::new(&destination, budget)?;
+        let writer = PdfDocument::new(&destination)?;
         Ok(Self {
             writer: Arc::new(Mutex::new(writer)),
             target,

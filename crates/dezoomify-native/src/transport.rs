@@ -535,7 +535,7 @@ async fn read_body_capped(
             });
         }
     }
-    let mut body = Vec::new();
+    let mut body = crate::buffers::Buffer::default();
     while let Some(chunk) = response.chunk().await.map_err(TransportError::from)? {
         let received = (body.len() as u64).saturating_add(chunk.len() as u64);
         if range_length.is_some_and(|length| received > length) {
@@ -549,7 +549,7 @@ async fn read_body_capped(
                 max_bytes: limits.max_bytes,
             });
         }
-        body.extend_from_slice(&chunk);
+        std::io::Write::write_all(&mut body, &chunk).map_err(crate::buffers::allocation_error)?;
     }
     if range_length.is_some_and(|length| body.len() as u64 != length) {
         return Err(range_response_error(
@@ -557,7 +557,7 @@ async fn read_body_capped(
             "byte range body length does not match the requested range",
         ));
     }
-    Ok(body)
+    Ok(body.into_vec())
 }
 
 fn parse_retry_after_ms(value: &str) -> Option<u64> {
@@ -633,10 +633,12 @@ fn fetch_local(
         file.seek(SeekFrom::Start(range.start))
             .map_err(local_error)?;
     }
-    let mut body = Vec::new();
-    file.take(range.map_or(limits.max_bytes.saturating_add(1), ByteRange::len))
-        .read_to_end(&mut body)
-        .map_err(local_error)?;
+    let mut body = crate::buffers::Buffer::default();
+    std::io::copy(
+        &mut file.take(range.map_or(limits.max_bytes.saturating_add(1), ByteRange::len)),
+        &mut body,
+    )
+    .map_err(local_error)?;
     if body.len() as u64 > limits.max_bytes {
         return Err(Error::SizeLimit {
             max_bytes: limits.max_bytes,
@@ -652,7 +654,7 @@ fn fetch_local(
         content_type: None,
         status: if range.is_some() { 206 } else { 200 },
         final_uri: uri.to_string(),
-        body,
+        body: body.into_vec(),
         retry_after_ms: None,
     })
 }

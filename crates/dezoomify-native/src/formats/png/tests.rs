@@ -9,7 +9,7 @@ use crate::{
 use dezoomify::model::{OutputFormat, Size};
 
 #[tokio::test]
-async fn reversed_tiles_encode_png_without_a_raster_memory_budget() {
+async fn reversed_tiles_encode_png() {
     let directory = directory();
     let destination = directory.join("reversed.png");
     let source = image::RgbaImage::from_fn(1031, 1037, |x, y| {
@@ -24,7 +24,6 @@ async fn reversed_tiles_encode_png_without_a_raster_memory_budget() {
         None,
         OutputFormat::Png,
         5,
-        1,
         Controls::default(),
     )
     .unwrap();

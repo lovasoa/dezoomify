@@ -8,12 +8,6 @@ use std::sync::atomic::AtomicBool;
 pub(crate) type SharedTileWriter = std::sync::Arc<std::sync::Mutex<Box<dyn TileWriter>>>;
 
 pub(crate) trait TileWriter: Send {
-    /// Remaining space for one encoded input, after retained output, container
-    /// indexes, and outstanding input/probe reservations have been withheld.
-    fn input_budget(&self) -> u64;
-    fn retained_bytes(&self) -> u64;
-    fn hold_queued_bytes(&mut self, bytes: u64) -> Result<(), Error>;
-    fn release_probe_bytes(&mut self, bytes: u64);
     fn peak_retained(&self) -> u64;
     fn place(&mut self, tile: EncodedTile, cancelled: &AtomicBool) -> Result<(), Error>;
     fn finish(

@@ -56,9 +56,9 @@ pub fn encode(
     quality: u8,
     icc_profile: Option<&[u8]>,
 ) -> Result<Vec<u8>, Error> {
-    let mut bytes = Vec::new();
+    let mut bytes = crate::buffers::Buffer::default();
     encode_to(&mut bytes, image, quality, icc_profile)?;
-    Ok(bytes)
+    Ok(bytes.into_vec())
 }
 
 pub(crate) fn encode_to<W: std::io::Write>(
@@ -76,7 +76,10 @@ pub(crate) fn encode_to<W: std::io::Write>(
     )?;
     let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(writer, quality);
     if let Some(profile) = icc_profile {
-        let _ = image::ImageEncoder::set_icc_profile(&mut encoder, profile.to_vec());
+        let _ = image::ImageEncoder::set_icc_profile(
+            &mut encoder,
+            crate::buffers::copy(profile).map_err(crate::buffers::allocation_error)?,
+        );
     }
     encoder.encode_image(&RgbView(image)).map_err(|e| {
         Error::EncodeFailed(

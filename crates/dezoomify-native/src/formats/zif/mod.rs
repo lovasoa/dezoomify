@@ -2,17 +2,16 @@
 mod container;
 mod profile;
 mod pyramid;
-use crate::tile_output::TileWriter;
+pub(crate) use profile::can_reuse;
+use profile::{profile, Profile};
+
 use crate::{
     codecs::tile_metadata,
     encoded_tile::EncodedTile,
     output::StagedFile,
-    tile_budget::memory_check,
     tile_pyramid::{Rect, StoredTile, TileBytes, TileLevel},
 };
 use dezoomify::model::{Error, OutputPlan, Point, ReusedTile, Size};
-pub(crate) use profile::can_reuse;
-use profile::{profile, Profile};
 use std::{collections::BTreeMap, path::Path, sync::atomic::AtomicBool};
 
 fn failed(error: impl std::fmt::Display) -> Error {
@@ -34,17 +33,27 @@ pub(crate) struct ZifWriter {
     writer: Option<zif_tiff::Writer>,
     profile: Option<Profile>,
     compression: u8,
-    budget: u64,
     retained: u64,
     peak_retained: u64,
     decoded: u64,
     metadata: BTreeMap<u32, TileMetadata>,
     infer_canvas: bool,
     max_tiles: u32,
-    index_bytes: u64,
 }
 
 impl ZifWriter {
+    pub(crate) fn retained_bytes(&self) -> u64 {
+        self.retained
+            + self
+                .metadata
+                .values()
+                .map(|(_, icc, exif)| {
+                    icc.as_ref().map_or(0, Vec::len) as u64
+                        + exif.as_ref().map_or(0, Vec::len) as u64
+                })
+                .sum::<u64>()
+    }
+
     fn accept_metadata(&mut self, index: u32, metadata: Option<TileMetadata>) {
         if let Some(metadata) = metadata {
             self.metadata.insert(index, metadata);
@@ -74,7 +83,6 @@ impl ZifWriter {
     pub(crate) fn new(
         destination: &Path,
         plan: &OutputPlan,
-        budget: u64,
         compression: u8,
         max_tiles: u32,
     ) -> Result<Self, Error> {
@@ -116,19 +124,6 @@ impl ZifWriter {
                 "ZIF output tile count exceeds max_tiles".into(),
             ));
         }
-        // Reserve container indexes, two simultaneous level maps, and input
-        // tile/metadata nodes. Payloads and conversion use only the remainder.
-        let mut dimensions = base.size.clone();
-        let mut output_count = u64::from(count);
-        while dimensions.width > base.cell.width || dimensions.height > base.cell.height {
-            dimensions.width = dimensions.width.div_ceil(2);
-            dimensions.height = dimensions.height.div_ceil(2);
-            output_count += u64::from(dimensions.width.div_ceil(base.cell.width))
-                * u64::from(dimensions.height.div_ceil(base.cell.height));
-        }
-        let index_bytes = output_count * 512;
-        let structural = index_bytes + u64::from(plan.tile_count) * 256;
-        memory_check(structural, budget)?;
         Ok(Self {
             staging: StagedFile::new(destination)?,
             base,
@@ -136,14 +131,12 @@ impl ZifWriter {
             writer: None,
             profile: None,
             compression,
-            budget: budget - structural,
             retained: 0,
             peak_retained: 0,
             decoded: 0,
             metadata: BTreeMap::new(),
             infer_canvas: plan.canvas.is_none(),
             max_tiles,
-            index_bytes,
         })
     }
 }
@@ -152,31 +145,6 @@ impl ZifWriter {
 mod tests;
 
 impl crate::tile_output::TileWriter for ZifWriter {
-    fn input_budget(&self) -> u64 {
-        self.budget.saturating_sub(self.retained_bytes())
-    }
-
-    fn retained_bytes(&self) -> u64 {
-        self.retained
-            + self
-                .metadata
-                .values()
-                .map(|(_, icc, exif)| {
-                    icc.as_ref().map_or(0, Vec::len) as u64
-                        + exif.as_ref().map_or(0, Vec::len) as u64
-                })
-                .sum::<u64>()
-    }
-
-    fn hold_queued_bytes(&mut self, bytes: u64) -> Result<(), Error> {
-        let retained = self.retained_bytes();
-        crate::tile_budget::reserve_queued(&mut self.budget, retained, bytes)
-    }
-
-    fn release_probe_bytes(&mut self, bytes: u64) {
-        crate::tile_budget::release_reserved(&mut self.budget, bytes);
-    }
-
     fn peak_retained(&self) -> u64 {
         self.peak_retained
     }
@@ -192,7 +160,7 @@ impl crate::tile_output::TileWriter for ZifWriter {
         }
         let mut rect = Rect::placed(&tile.placement, &tile.size, None);
         let mut inferred_size = self.base.size.clone();
-        let index_growth = if self.infer_canvas {
+        if self.infer_canvas {
             inferred_size.width = inferred_size.width.max(rect.x.saturating_add(rect.w));
             inferred_size.height = inferred_size.height.max(rect.y.saturating_add(rect.h));
             let count = inferred_size
@@ -205,14 +173,9 @@ impl crate::tile_output::TileWriter for ZifWriter {
                     "ZIF output tile count exceeds max_tiles".into(),
                 ));
             }
-            let index_bytes = u64::from(count) * 512;
-            let growth = index_bytes.saturating_sub(self.index_bytes);
-            memory_check(growth + self.retained_bytes(), self.budget)?;
-            growth
         } else {
             rect = rect.clipped(&self.base.size);
-            0
-        };
+        }
         if rect.w == 0 || rect.h == 0 {
             return Ok(());
         }
@@ -222,25 +185,10 @@ impl crate::tile_output::TileWriter for ZifWriter {
         } else {
             tile.id
         };
-        memory_check(
-            tile.bytes.len() as u64 + self.retained_bytes() + index_growth,
-            self.budget,
-        )?;
-        let metadata_cap = self
-            .budget
-            .saturating_sub(self.retained_bytes() + index_growth + tile.bytes.len() as u64);
-        let (icc, exif) = tile_metadata(&tile.bytes, tile.format, metadata_cap)?;
+
+        let (icc, exif) = tile_metadata(&tile.bytes, tile.format)?;
         let mut metadata = Some((tile.placement.position.clone(), icc, exif));
-        let metadata_bytes = metadata.as_ref().map_or(0, |(_, icc, exif)| {
-            icc.as_ref().map_or(0, Vec::len) as u64 + exif.as_ref().map_or(0, Vec::len) as u64
-        });
-        memory_check(
-            self.retained_bytes() + metadata_bytes + index_growth,
-            self.budget,
-        )?;
-        let conversion_budget = self
-            .budget
-            .saturating_sub(self.retained_bytes() + metadata_bytes + index_growth);
+
         let source_profile = profile(&tile.bytes);
         // Commit the codec only after the first tile is accepted. Failed
         // conversion must not force later reusable tiles through that codec.
@@ -269,13 +217,10 @@ impl crate::tile_output::TileWriter for ZifWriter {
             stored
         } else if self.base.regular && rect == self.base.rect(index) {
             self.decoded += 1;
-            let pixels = tile.decode_pixels(
-                &Size {
-                    width: rect.w,
-                    height: rect.h,
-                },
-                conversion_budget,
-            )?;
+            let pixels = tile.decode_pixels(&Size {
+                width: rect.w,
+                height: rect.h,
+            })?;
             if self.writer.is_none() {
                 self.initialize(selected, cancelled)?;
             }
@@ -300,7 +245,6 @@ impl crate::tile_output::TileWriter for ZifWriter {
                         width: rect.w,
                         height: rect.h,
                     },
-                    conversion_budget,
                     self.compression,
                 )?;
             }
@@ -308,7 +252,7 @@ impl crate::tile_output::TileWriter for ZifWriter {
             self.retained += tile.bytes.len() as u64;
             let retained = self.retained_bytes();
             self.peak_retained = self.peak_retained.max(retained);
-            memory_check(retained + index_growth, self.budget)?;
+
             StoredTile {
                 rect,
                 size: tile.size,
@@ -317,8 +261,6 @@ impl crate::tile_output::TileWriter for ZifWriter {
             }
         };
         self.base.size = inferred_size;
-        self.budget -= index_growth;
-        self.index_bytes += index_growth;
         self.base.tiles.insert(index, stored);
         Ok(())
     }

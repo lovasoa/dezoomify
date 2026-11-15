@@ -1,6 +1,5 @@
-//! Encoders read completed regions from disk while acquisition continues.
-//! Buffered codecs still allocate the complete RGBA image; disk staging only
-//! removes the need to retain out-of-order tiles in memory.
+//! Encoders consume completed regions while acquisition continues. Composition
+//! uses adaptive storage; buffered codecs still require the complete RGBA image.
 use crate::{host::Controls, output::StagedFile, pixel_pipe::PixelPipe};
 use dezoomify::model::{Error, OutputFormat, OutputGrid, Size};
 use std::{
@@ -24,7 +23,6 @@ impl EncoderTask {
         grid: Option<&OutputGrid>,
         format: OutputFormat,
         compression: u8,
-        memory_hint: u64,
         controls: Controls,
     ) -> Result<Self, Error> {
         if size.width == 0 || size.height == 0 {
@@ -33,7 +31,7 @@ impl EncoderTask {
         crate::imaging::check_dimensions(format, &size)?;
         let encoder = crate::formats::raster_encoder(format, compression)?;
         let grid = encoder.grid(&size, grid)?;
-        crate::tile_budget::memory_check(encoder.workspace(&size, grid.as_ref()), memory_hint)?;
+
         let directory = destination
             .parent()
             .filter(|p| !p.as_os_str().is_empty())

@@ -2,7 +2,6 @@ use super::{failed, profile, reusable_size, Profile, ZifWriter};
 use crate::{
     codecs::tile_metadata,
     encoded_tile::EncodedTile,
-    tile_output::TileWriter,
     tile_pyramid::{downsample, TileBytes, TileLevel},
 };
 use dezoomify::model::{Error, ReusedTile, Size};
@@ -65,22 +64,12 @@ impl ZifWriter {
             stored
         } else {
             self.require_pixel_encoder()?;
-            let budget = self.budget.saturating_sub(self.retained_bytes());
-            let (icc, exif) = tile_metadata(
-                &tile.bytes,
-                tile.format,
-                budget.saturating_sub(tile.bytes.len() as u64),
-            )?;
-            let metadata_bytes =
-                icc.as_ref().map_or(0, Vec::len) as u64 + exif.as_ref().map_or(0, Vec::len) as u64;
+            let (icc, exif) = tile_metadata(&tile.bytes, tile.format)?;
             self.decoded += 1;
-            let pixels = tile.decode_pixels(
-                &Size {
-                    width: rect.w,
-                    height: rect.h,
-                },
-                budget.saturating_sub(metadata_bytes.saturating_mul(4)),
-            )?;
+            let pixels = tile.decode_pixels(&Size {
+                width: rect.w,
+                height: rect.h,
+            })?;
             drop(tile);
             let bytes = self.encode_with_metadata(&pixels, icc.as_deref(), exif.as_deref())?;
             drop(pixels);
@@ -160,12 +149,7 @@ impl ZifWriter {
                 }
             } else {
                 self.require_pixel_encoder()?;
-                let pixels = self.base.region(
-                    rect,
-                    self.budget.saturating_sub(self.retained_bytes()),
-                    cancelled,
-                    &mut self.decoded,
-                )?;
+                let pixels = self.base.region(rect, cancelled, &mut self.decoded)?;
                 let bytes = self.encode(&pixels)?;
                 drop(pixels);
                 self.store(0, rect, &bytes, cancelled)?
@@ -222,14 +206,7 @@ impl ZifWriter {
                 }
                 self.require_pixel_encoder()?;
                 let rect = next.rect(index);
-                let pixels = downsample(
-                    &previous,
-                    &next.size,
-                    rect,
-                    self.budget.saturating_sub(self.retained_bytes()),
-                    cancelled,
-                    &mut self.decoded,
-                )?;
+                let pixels = downsample(&previous, &next.size, rect, cancelled, &mut self.decoded)?;
                 let bytes = self.encode(&pixels)?;
                 drop(pixels);
                 next.tiles
