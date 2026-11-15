@@ -31,40 +31,6 @@ pub(crate) enum TileWriter {
     Pdf(crate::pdf_output::PdfWriter),
 }
 impl TileWriter {
-    /// Remaining space for one encoded input, after retained output, container
-    /// indexes, and outstanding input/probe reservations have been withheld.
-    pub(crate) fn input_budget(&self) -> u64 {
-        match self {
-            Self::Iiif(writer) => writer.input_budget(),
-            Self::Zif(writer) => writer.input_budget(),
-            Self::Pdf(writer) => writer.input_budget(),
-        }
-    }
-
-    pub(crate) fn retained_bytes(&self) -> u64 {
-        match self {
-            Self::Iiif(writer) => writer.retained_bytes(),
-            Self::Zif(writer) => writer.retained_bytes(),
-            Self::Pdf(writer) => writer.retained_bytes(),
-        }
-    }
-
-    pub(crate) fn hold_queued_bytes(&mut self, bytes: u64) -> Result<(), Error> {
-        match self {
-            Self::Iiif(writer) => writer.hold_queued_bytes(bytes),
-            Self::Zif(writer) => writer.hold_queued_bytes(bytes),
-            Self::Pdf(writer) => writer.hold_queued_bytes(bytes),
-        }
-    }
-
-    pub(crate) fn release_probe_bytes(&mut self, bytes: u64) {
-        match self {
-            Self::Iiif(writer) => writer.release_probe_bytes(bytes),
-            Self::Zif(writer) => writer.release_probe_bytes(bytes),
-            Self::Pdf(writer) => writer.release_probe_bytes(bytes),
-        }
-    }
-
     pub(crate) fn peak_retained(&self) -> u64 {
         match self {
             Self::Iiif(writer) => writer.peak_retained(),
@@ -76,26 +42,20 @@ impl TileWriter {
     pub(crate) fn new(
         destination: &Path,
         plan: &OutputPlan,
-        budget: u64,
         compression: u8,
         max_tiles: u32,
         page: Option<crate::DocumentPage>,
     ) -> Result<Self, Error> {
         match plan.format {
-            dezoomify::model::OutputFormat::Pdf => crate::pdf_output::PdfWriter::new(
-                destination,
-                plan,
-                budget,
-                compression,
-                max_tiles,
-                page,
-            )
-            .map(Self::Pdf),
+            dezoomify::model::OutputFormat::Pdf => {
+                crate::pdf_output::PdfWriter::new(destination, plan, compression, max_tiles, page)
+                    .map(Self::Pdf)
+            }
             dezoomify::model::OutputFormat::IiifDir => {
-                IiifWriter::new(destination, plan, budget, compression, max_tiles).map(Self::Iiif)
+                IiifWriter::new(destination, plan, compression, max_tiles).map(Self::Iiif)
             }
             dezoomify::model::OutputFormat::Zif => {
-                crate::zif_output::ZifWriter::new(destination, plan, budget, compression, max_tiles)
+                crate::zif_output::ZifWriter::new(destination, plan, compression, max_tiles)
                     .map(Self::Zif)
             }
             _ => Err(Error::InvalidState(

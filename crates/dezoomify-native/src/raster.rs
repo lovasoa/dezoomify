@@ -1,6 +1,5 @@
-//! Encoders read completed regions from disk while acquisition continues.
-//! Buffered codecs still allocate the complete RGBA image; disk staging only
-//! removes the need to retain out-of-order tiles in memory.
+//! Encoders consume completed regions while acquisition continues. Composition
+//! uses adaptive storage; buffered codecs still require the complete RGBA image.
 use crate::{
     host::Controls,
     output::StagedFile,
@@ -22,7 +21,7 @@ pub(crate) struct EncoderTask {
     task: Option<tokio::task::JoinHandle<Result<StagedFile, Error>>>,
 }
 
-/// A worker-owned encoder negotiates its pixel regions and workspace before
+/// A worker-owned encoder negotiates its pixel regions before
 /// acquisition starts. Encoding consumes regions in order; metadata settlement
 /// and cancellation must complete before returning publishable staging.
 pub(crate) trait RasterEncoder: Send {
@@ -34,11 +33,6 @@ pub(crate) trait RasterEncoder: Send {
         _source: Option<&OutputGrid>,
     ) -> Result<Option<OutputGrid>, Error> {
         Ok(None)
-    }
-    /// Conservative preflight estimate, excluding disk staging and OS page cache.
-    /// `grid` must be the result of this encoder's negotiation above.
-    fn workspace(&self, _size: &Size, _grid: Option<&OutputGrid>) -> u64 {
-        0
     }
     fn encode(
         self: Box<Self>,
@@ -53,13 +47,6 @@ struct ImageEncoder {
     compression: u8,
 }
 impl RasterEncoder for ImageEncoder {
-    fn workspace(&self, size: &Size, _grid: Option<&OutputGrid>) -> u64 {
-        if self.format.codec().layout == OutputLayout::Buffered {
-            crate::imaging::buffered_workspace(self.format, size)
-        } else {
-            0
-        }
-    }
     fn encode(
         self: Box<Self>,
         staging: StagedFile,
@@ -87,7 +74,6 @@ impl EncoderTask {
         grid: Option<&OutputGrid>,
         format: OutputFormat,
         compression: u8,
-        memory_hint: u64,
         controls: Controls,
     ) -> Result<Self, Error> {
         if size.width == 0 || size.height == 0 {
@@ -96,7 +82,7 @@ impl EncoderTask {
         crate::imaging::check_dimensions(format, &size)?;
         let encoder = encoder(format, compression);
         let grid = encoder.grid(&size, grid)?;
-        crate::tile_budget::memory_check(encoder.workspace(&size, grid.as_ref()), memory_hint)?;
+
         let directory = destination
             .parent()
             .filter(|p| !p.as_os_str().is_empty())
@@ -253,17 +239,23 @@ fn encode(
                 ] {
                     directory.write_tag(tag, value).map_err(encoding_error)?;
                 }
-                let mut offsets = Vec::with_capacity(pipe.size.height as usize);
-                let mut lengths = Vec::with_capacity(pipe.size.height as usize);
+                let mut offsets = Vec::new();
+                offsets
+                    .try_reserve_exact(pipe.size.height as usize)
+                    .map_err(crate::buffers::allocation_error)?;
+                let mut lengths = Vec::new();
+                lengths
+                    .try_reserve_exact(pipe.size.height as usize)
+                    .map_err(crate::buffers::allocation_error)?;
                 let level = crate::imaging::tiff_compression_for(compression) as u32;
                 while let Some(strip) = pipe.receive()? {
                     for row in strip.rgba.chunks_exact(pipe.size.width as usize * 4) {
                         let mut compressed = flate2::write::ZlibEncoder::new(
-                            Vec::new(),
+                            crate::buffers::Buffer::default(),
                             flate2::Compression::new(level),
                         );
                         compressed.write_all(row).map_err(encoding_error)?;
-                        let bytes = compressed.finish().map_err(encoding_error)?;
+                        let bytes = compressed.finish().map_err(encoding_error)?.into_vec();
                         offsets.push(
                             u32::try_from(
                                 directory
@@ -294,7 +286,9 @@ fn encode(
                 let length = u64::from(pipe.size.width) * u64::from(pipe.size.height) * 4;
                 let length = usize::try_from(length).map_err(encoding_error)?;
                 let mut pixels = Vec::new();
-                pixels.try_reserve_exact(length).map_err(encoding_error)?;
+                pixels
+                    .try_reserve_exact(length)
+                    .map_err(crate::buffers::allocation_error)?;
                 while let Some(strip) = pipe.receive()? {
                     pixels.extend_from_slice(&strip.rgba);
                     pipe.consumed_strip(&strip);
@@ -511,12 +505,7 @@ mod tests {
         path
     }
     fn start(path: &Path, format: OutputFormat, size: Size, controls: Controls) -> EncoderTask {
-        let cap = if format.codec().layout == OutputLayout::Buffered {
-            32 << 20
-        } else {
-            8 << 20
-        };
-        EncoderTask::start(path, size, None, format, 5, cap, controls).unwrap()
+        EncoderTask::start(path, size, None, format, 5, controls).unwrap()
     }
     async fn publish(task: EncoderTask, destination: &Path) -> Vec<u8> {
         task.pipe.finish(&[]).unwrap();
@@ -539,7 +528,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn reversed_tiles_encode_png_without_a_raster_memory_budget() {
+    async fn reversed_tiles_encode_png() {
         let directory = directory();
         let destination = directory.join("reversed.png");
         let source = image::RgbaImage::from_fn(1031, 1037, |x, y| {
@@ -554,7 +543,6 @@ mod tests {
             None,
             OutputFormat::Png,
             5,
-            1,
             Controls::default(),
         )
         .unwrap();
@@ -792,7 +780,6 @@ mod tests {
                 None,
                 OutputFormat::Avif,
                 compression,
-                32 << 20,
                 Controls::default(),
             )
             .unwrap();

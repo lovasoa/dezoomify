@@ -17,7 +17,6 @@ pub(super) struct Stats {
     pub(super) input_bytes: u64,
     pub(super) peak_input_bytes: u64,
     pub(super) pixel_decodes: u64,
-    pub(super) retained_bytes: u64,
 }
 
 impl BlockingTasks {
@@ -101,9 +100,6 @@ impl BlockingTasks {
     }
     pub(super) fn record_decode(&self) {
         self.state.lock().expect("worker stats lock").pixel_decodes += 1;
-    }
-    pub(super) fn retain(&self, bytes: u64) {
-        self.state.lock().expect("worker stats lock").retained_bytes = bytes;
     }
 }
 

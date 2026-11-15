@@ -168,13 +168,7 @@ impl Session<'_> {
             .algorithm_options()
             .output
             .supports_pages()
-            .then(|| {
-                OutputDocument::new(
-                    self.options.output.clone(),
-                    self.options.overwrite,
-                    self.options.output_retain_cap,
-                )
-            })
+            .then(|| OutputDocument::new(self.options.output.clone(), self.options.overwrite))
             .transpose()?;
         let mut batch = DesktopBatch {
             items: Vec::new(),

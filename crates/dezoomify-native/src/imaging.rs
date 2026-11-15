@@ -1,4 +1,4 @@
-//! Image decoding, metadata, encoders, and memory limits.
+//! Image decoding, metadata, encoders, and format limits.
 use std::path::PathBuf;
 
 use dezoomify::model::{Error, LimitContext, LimitReason, OutputFormat, Size};
@@ -23,22 +23,12 @@ pub(crate) fn check_dimensions(
     Ok(())
 }
 
-/// Conservative preflight for codecs requiring a complete image, not an RSS limit.
-pub(crate) fn buffered_workspace(format: OutputFormat, size: &Size) -> u64 {
-    let pixels = u64::from(size.width) * u64::from(size.height);
-    let (per_pixel, fixed) = match format {
-        OutputFormat::Webp => (32, 128 << 10),
-        _ => (64, 16 << 20),
-    };
-    pixels.saturating_mul(per_pixel).saturating_add(fixed)
-}
-
 /// Default number of tile acquisitions in flight.
 pub const MAX_CONCURRENT: usize = 16;
 
 /// Bytes currently available to the process according to the operating
-/// system. The native Host samples this to guard buffered codecs and tiled output;
-/// availability can change after sampling. Returns zero if the system probe
+/// system. Temporary storage uses this to choose RAM or disk; availability can
+/// change after sampling. Returns zero if the system probe
 /// cannot be initialized.
 #[must_use]
 pub fn available_memory_bytes() -> u64 {
@@ -89,20 +79,40 @@ pub struct DecodedTile {
     pub exif_metadata: Option<Vec<u8>>,
 }
 
-#[cfg(test)]
-pub(crate) fn load_image_with_metadata(bytes: &[u8]) -> Result<DecodedTile, image::ImageError> {
-    load_image_with_limit(bytes, None)
+pub(crate) fn rgba_pixels(size: &Size) -> Result<image::RgbaImage, Error> {
+    let length = u64::from(size.width)
+        .checked_mul(u64::from(size.height))
+        .and_then(|pixels| pixels.checked_mul(4))
+        .ok_or_else(|| Error::ResourceLimit("pixel buffer size overflow".into()))?;
+    let pixels = crate::buffers::zeroed(length)
+        .map_err(|error| Error::ResourceLimit(format!("pixel allocation: {error}").into()))?;
+    image::RgbaImage::from_raw(size.width, size.height, pixels)
+        .ok_or_else(|| Error::InvalidState("invalid pixel buffer dimensions".into()))
 }
-pub(crate) fn load_image_with_limit(
-    bytes: &[u8],
-    max_alloc: Option<u64>,
-) -> Result<DecodedTile, image::ImageError> {
+
+pub(crate) fn crop_pixels(
+    image: &image::RgbaImage,
+    size: &Size,
+) -> Result<image::RgbaImage, Error> {
+    use image::GenericImage;
+    let mut pixels = rgba_pixels(size)?;
+    pixels
+        .copy_from(
+            &*image::imageops::crop_imm(image, 0, 0, size.width, size.height),
+            0,
+            0,
+        )
+        .map_err(|error| Error::DecodeFailed(error.to_string().into()))?;
+    Ok(pixels)
+}
+
+pub(crate) fn load_image_with_metadata(bytes: &[u8]) -> Result<DecodedTile, image::ImageError> {
     use image::ImageDecoder as _;
     let format = crate::codecs::detect(bytes)?;
-    let mut decoder = crate::codecs::decoder(bytes, format, max_alloc)?;
+    let mut decoder = crate::codecs::decoder(bytes, format)?;
     let icc_profile = decoder.icc_profile().unwrap_or(None);
     let exif_metadata = decoder.exif_metadata().unwrap_or(None);
-    let image = image::DynamicImage::from_decoder(decoder)?.into_rgba8();
+    let image = crate::codecs::decode_pixels(decoder)?;
     Ok(DecodedTile {
         image,
         icc_profile,
@@ -117,9 +127,9 @@ pub fn encode_png(
     icc_profile: Option<&[u8]>,
     exif_metadata: Option<&[u8]>,
 ) -> Result<Vec<u8>, Error> {
-    let mut bytes = Vec::new();
+    let mut bytes = crate::buffers::Buffer::default();
     encode_png_to(&mut bytes, image, compression, icc_profile, exif_metadata)?;
-    Ok(bytes)
+    Ok(bytes.into_vec())
 }
 
 pub(crate) fn encode_png_to<W: std::io::Write>(
@@ -133,10 +143,16 @@ pub(crate) fn encode_png_to<W: std::io::Write>(
     let mut encoder =
         image::codecs::png::PngEncoder::new_with_quality(writer, compression, FilterType::Adaptive);
     if let Some(profile) = icc_profile {
-        let _ = image::ImageEncoder::set_icc_profile(&mut encoder, profile.to_vec());
+        let _ = image::ImageEncoder::set_icc_profile(
+            &mut encoder,
+            crate::buffers::copy(profile).map_err(crate::buffers::allocation_error)?,
+        );
     }
     if let Some(exif) = exif_metadata {
-        let _ = image::ImageEncoder::set_exif_metadata(&mut encoder, exif.to_vec());
+        let _ = image::ImageEncoder::set_exif_metadata(
+            &mut encoder,
+            crate::buffers::copy(exif).map_err(crate::buffers::allocation_error)?,
+        );
     }
     image::ImageEncoder::write_image(
         encoder,
@@ -175,9 +191,9 @@ pub fn encode_jpeg(
     quality: u8,
     icc_profile: Option<&[u8]>,
 ) -> Result<Vec<u8>, Error> {
-    let mut bytes = Vec::new();
+    let mut bytes = crate::buffers::Buffer::default();
     encode_jpeg_to(&mut bytes, image, quality, icc_profile)?;
-    Ok(bytes)
+    Ok(bytes.into_vec())
 }
 
 pub(crate) fn encode_jpeg_to<W: std::io::Write>(
@@ -195,7 +211,10 @@ pub(crate) fn encode_jpeg_to<W: std::io::Write>(
     )?;
     let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(writer, quality);
     if let Some(profile) = icc_profile {
-        let _ = image::ImageEncoder::set_icc_profile(&mut encoder, profile.to_vec());
+        let _ = image::ImageEncoder::set_icc_profile(
+            &mut encoder,
+            crate::buffers::copy(profile).map_err(crate::buffers::allocation_error)?,
+        );
     }
     encoder.encode_image(&RgbView(image)).map_err(|e| {
         Error::EncodeFailed(
@@ -229,7 +248,10 @@ pub(crate) fn encode_buffered_to<W: std::io::Write + std::io::Seek>(
         OutputFormat::Webp => {
             let mut encoder = image::codecs::webp::WebPEncoder::new_lossless(writer);
             if let Some(profile) = icc_profile {
-                let _ = image::ImageEncoder::set_icc_profile(&mut encoder, profile.to_vec());
+                let _ = image::ImageEncoder::set_icc_profile(
+                    &mut encoder,
+                    crate::buffers::copy(profile).map_err(crate::buffers::allocation_error)?,
+                );
             }
             encode!(encoder)
         }

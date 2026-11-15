@@ -19,30 +19,20 @@ pub(crate) struct Decoder {
     icc_profile: Option<Vec<u8>>,
 }
 impl Decoder {
-    pub(crate) fn new(bytes: &[u8], max_alloc: Option<u64>) -> ImageResult<Self> {
+    pub(crate) fn new(bytes: &[u8]) -> ImageResult<Self> {
         let format = openjp2::detect_format(bytes).map_err(decoding_error)?;
         let mut codec = openjp2::Decoder::new(format).map_err(decoding_error)?;
         codec.set_strict(true).map_err(decoding_error)?;
-        let budget = max_alloc.unwrap_or(1 << 30);
         codec
             .set_limits(
                 openjp2::DecodeLimits::new()
-                    // Allow fixed header overhead before our pixel preflight;
-                    // tiny caller budgets must still produce a typed limit.
-                    .max_mem_alloc(budget.max(1 << 20))
-                    .max_metadata_len(usize::try_from(budget).unwrap_or(usize::MAX)),
+                    .max_mem_alloc(u64::MAX)
+                    .max_metadata_len(usize::MAX),
             )
             .map_err(decoding_error)?;
-        let mut stream = Stream::from_bytes(bytes.to_vec());
+        let mut stream = Stream::from_bytes(crate::buffers::copy(bytes)?);
         let header = codec.read_header(&mut stream).map_err(decoding_error)?;
         let size = (header.width(), header.height());
-        let mut limits = image::Limits::default();
-        limits.max_alloc = max_alloc;
-        limits.reserve(
-            u64::from(size.0)
-                .saturating_mul(u64::from(size.1))
-                .saturating_mul(32),
-        )?;
         let core = header.into_core_image();
         if core.icc_profile_is_cielab {
             return Err(decoding_error("JPEG 2000 CIELab images are unsupported"));
@@ -64,7 +54,11 @@ impl ImageDecoder for Decoder {
         image::ColorType::Rgba8
     }
     fn icc_profile(&mut self) -> ImageResult<Option<Vec<u8>>> {
-        Ok(self.icc_profile.clone())
+        self.icc_profile
+            .as_deref()
+            .map(crate::buffers::copy)
+            .transpose()
+            .map_err(image::ImageError::from)
     }
     fn read_image(mut self, buf: &mut [u8]) -> ImageResult<()> {
         let core = self
@@ -108,11 +102,6 @@ impl RasterEncoder for Encoder {
             ));
         }
         Ok(Some(grid.clone()))
-    }
-    fn workspace(&self, size: &Size, grid: Option<&OutputGrid>) -> u64 {
-        let cell = &grid.expect("validated tile grid").tile_size;
-        u64::from(cell.width.min(size.width)) * u64::from(cell.height.min(size.height)) * 64
-            + (1 << 20)
     }
     fn encode(
         self: Box<Self>,
@@ -185,7 +174,10 @@ impl RasterEncoder for Encoder {
             .map_err(encoding_error)?;
         let mut index = 0;
         loop {
-            let mut planar = Vec::with_capacity(first.rgba.len() / 4 * 3);
+            let mut planar = Vec::new();
+            planar
+                .try_reserve_exact(first.rgba.len() / 4 * 3)
+                .map_err(crate::buffers::allocation_error)?;
             for channel in 0..3 {
                 planar.extend(first.rgba.as_chunks::<4>().0.iter().map(|p| p[channel]));
             }
@@ -236,10 +228,6 @@ mod tests {
             for truncated in [&bytes[..30], &bytes[..bytes.len() - 1]] {
                 assert!(load_image_with_metadata(truncated).is_err());
             }
-            assert!(matches!(
-                crate::imaging::load_image_with_limit(bytes, Some(100)),
-                Err(ImageError::Limits(_))
-            ));
         }
         let gray = load_image_with_metadata(include_bytes!("../tests/data/jpeg2000/gray16.j2k"))
             .unwrap()
@@ -285,7 +273,6 @@ mod tests {
             Some(&grid()),
             OutputFormat::Jpeg2000,
             0,
-            8 << 20,
             Controls::default(),
         )
         .unwrap();
@@ -336,7 +323,6 @@ mod tests {
             Some(&grid()),
             OutputFormat::Jpeg2000,
             0,
-            8 << 20,
             controls.clone(),
         )
         .unwrap();
@@ -374,7 +360,6 @@ mod tests {
                 Some(&grid()),
                 OutputFormat::Jpeg2000,
                 compression,
-                8 << 20,
                 Controls::default(),
             )
             .unwrap();
@@ -443,10 +428,9 @@ mod tests {
                 width: 34,
                 height: 22
             },
-            Some(&grid()),
+            None,
             OutputFormat::Jpeg2000,
             0,
-            1,
             Controls::default()
         )
         .is_err());
