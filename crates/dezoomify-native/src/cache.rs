@@ -60,7 +60,7 @@ pub fn load(cache_dir: &Path, job: &str, request: &ResourceRequest) -> Option<Ve
         return None;
     }
     let dest = cache_dir.join(job).join(cache_key(request));
-    crate::buffers::read_file(&dest).ok()
+    std::fs::read(dest).ok()
 }
 
 /// Stable per-job cache namespace: the versioned digest of the input URL, so

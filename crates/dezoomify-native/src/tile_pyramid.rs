@@ -86,7 +86,7 @@ impl TileLevel {
             let bytes = match &tile.bytes {
                 TileBytes::Memory(bytes) => bytes.as_slice(),
                 TileBytes::File(path) => {
-                    body = crate::buffers::read_file(path)
+                    body = std::fs::read(path)
                         .map_err(|e| crate::output::write_failed("tile read failed", &e))?;
                     &body
                 }

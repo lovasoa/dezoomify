@@ -282,7 +282,7 @@ impl IiifWriter {
             let bytes = if let TileBytes::Memory(bytes) = &tile.bytes {
                 bytes.as_slice()
             } else if let TileBytes::File(path) = &tile.bytes {
-                body = crate::buffers::read_file(path)
+                body = std::fs::read(path)
                     .map_err(|e| crate::output::write_failed("tile read failed", &e))?;
                 &body
             } else {

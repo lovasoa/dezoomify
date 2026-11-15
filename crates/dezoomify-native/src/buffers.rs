@@ -1,13 +1,6 @@
 //! Fallible allocation for owned pixel buffers and growing encoder output.
 use std::io::{self, Write};
 
-pub(crate) fn read_file(path: &std::path::Path) -> io::Result<Vec<u8>> {
-    let mut file = std::fs::File::open(path)?;
-    let mut buffer = Buffer::default();
-    io::copy(&mut file, &mut buffer)?;
-    Ok(buffer.0)
-}
-
 pub(crate) fn allocation_error(error: impl std::fmt::Display) -> dezoomify::model::Error {
     dezoomify::model::Error::ResourceLimit(format!("buffer allocation: {error}").into())
 }
