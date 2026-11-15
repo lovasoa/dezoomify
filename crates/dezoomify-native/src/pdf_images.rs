@@ -3,7 +3,6 @@
 use crate::{
     encoded_tile::{jpeg_header, png_header, tile_metadata, EncodedTile},
     pdf_document::PdfDocument,
-    tile_budget::memory_check,
 };
 use dezoomify::model::{Error, Size};
 use flate2::{write::ZlibEncoder, Compression};
@@ -25,25 +24,13 @@ struct ImageData<'a> {
 pub(crate) fn write_tile(
     document: &mut PdfDocument,
     tile: &mut EncodedTile,
-    budget: u64,
     compression: u8,
     cancelled: &AtomicBool,
     decoded: &mut u64,
 ) -> Result<Ref, Error> {
-    memory_check(tile.bytes.len() as u64 * 3 + (64 << 10), budget)?;
     let probe_pixels = tile.probe_pixels.take();
-    let raw = reusable(tile);
-    let workspace = if raw.is_some() {
-        0
-    } else {
-        u64::from(tile.size.width) * u64::from(tile.size.height) * 16
-    };
-    memory_check(tile.bytes.len() as u64 * 3 + workspace + (64 << 10), budget)?;
-    let (icc, _) = tile_metadata(
-        &tile.bytes,
-        tile.format,
-        budget.saturating_sub(tile.bytes.len() as u64 * 3 + workspace),
-    )?;
+    let raw = reusable(tile)?;
+    let (icc, _) = tile_metadata(&tile.bytes, tile.format)?;
     let data = match raw {
         Some(data) => data,
         None => {
@@ -51,7 +38,7 @@ pub(crate) fn write_tile(
                 stored.read()?.image
             } else {
                 *decoded += 1;
-                tile.decode_pixels(&tile.size, budget)?
+                tile.decode_pixels(&tile.size)?
             };
             convert(&pixels, compression)?
         }
@@ -102,35 +89,47 @@ fn png_colors(bytes: &[u8]) -> Option<i32> {
         .then_some(if header.color == 0 { 1 } else { 3 })
 }
 
-fn reusable(tile: &EncodedTile) -> Option<ImageData<'_>> {
+fn reusable(tile: &EncodedTile) -> Result<Option<ImageData<'_>>, Error> {
     if let Some((colors, transform)) = jpeg_encoding(&tile.bytes) {
-        return Some(ImageData {
+        return Ok(Some(ImageData {
             bytes: Cow::Borrowed(&tile.bytes),
             colors,
             filter: Filter::DctDecode,
             predictor: false,
             transform,
             alpha: None,
-        });
+        }));
     }
-    let colors = png_colors(&tile.bytes)?;
+    let Some(colors) = png_colors(&tile.bytes) else {
+        return Ok(None);
+    };
     let mut payload = Vec::new();
+    payload
+        .try_reserve_exact(tile.bytes.len())
+        .map_err(crate::buffers::allocation_error)?;
     let mut at = 8usize;
-    while let Some(chunk) = tile.bytes.get(at..at.checked_add(8)?) {
-        let length = u32::from_be_bytes(chunk[..4].try_into().ok()?) as usize;
+    while let Some(chunk) = tile.bytes.get(at..at.saturating_add(8)) {
+        let length = u32::from_be_bytes(chunk[..4].try_into().expect("chunk length")) as usize;
         if &chunk[4..] == b"IDAT" {
-            payload.extend_from_slice(tile.bytes.get(at + 8..at + 8 + length)?);
+            payload.extend_from_slice(
+                tile.bytes
+                    .get(at + 8..at + 8 + length)
+                    .ok_or_else(|| Error::DecodeFailed("truncated PNG data".into()))?,
+            );
         }
-        at = at.checked_add(length)?.checked_add(12)?;
+        at = at
+            .checked_add(length)
+            .and_then(|end| end.checked_add(12))
+            .ok_or_else(|| Error::DecodeFailed("PNG chunk overflow".into()))?;
     }
-    Some(ImageData {
+    Ok(Some(ImageData {
         bytes: Cow::Owned(payload),
         colors,
         filter: Filter::FlateDecode,
         predictor: true,
         transform: None,
         alpha: None,
-    })
+    }))
 }
 
 fn convert(pixels: &image::RgbaImage, compression: u8) -> Result<ImageData<'static>, Error> {
@@ -139,11 +138,15 @@ fn convert(pixels: &image::RgbaImage, compression: u8) -> Result<ImageData<'stat
         20..=60 => 6,
         _ => 9,
     });
-    let mut rgb = ZlibEncoder::new(Vec::new(), level);
+    let mut rgb = ZlibEncoder::new(crate::buffers::Buffer::default(), level);
     let transparent = pixels.pixels().any(|pixel| pixel[3] != 255);
-    let mut alpha = transparent.then(|| ZlibEncoder::new(Vec::new(), level));
-    let mut row = Vec::with_capacity(pixels.width() as usize * 3);
-    let mut mask = Vec::with_capacity(pixels.width() as usize);
+    let mut alpha = transparent.then(|| ZlibEncoder::new(crate::buffers::Buffer::default(), level));
+    let mut row = Vec::new();
+    row.try_reserve_exact(pixels.width() as usize * 3)
+        .map_err(crate::buffers::allocation_error)?;
+    let mut mask = Vec::new();
+    mask.try_reserve_exact(pixels.width() as usize)
+        .map_err(crate::buffers::allocation_error)?;
     for pixels in pixels.rows() {
         row.clear();
         mask.clear();
@@ -157,10 +160,15 @@ fn convert(pixels: &image::RgbaImage, compression: u8) -> Result<ImageData<'stat
         }
     }
     let alpha = alpha
-        .map(|encoder| encoder.finish().map_err(encoding_failed))
+        .map(|encoder| {
+            encoder
+                .finish()
+                .map(crate::buffers::Buffer::into_vec)
+                .map_err(encoding_failed)
+        })
         .transpose()?;
     Ok(ImageData {
-        bytes: Cow::Owned(rgb.finish().map_err(encoding_failed)?),
+        bytes: Cow::Owned(rgb.finish().map_err(encoding_failed)?.into_vec()),
         colors: 3,
         filter: Filter::FlateDecode,
         predictor: false,

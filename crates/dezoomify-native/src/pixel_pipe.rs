@@ -1,9 +1,10 @@
-//! Disk-backed composition and ordered strip delivery. Pixels and coverage share
-//! rectangular blocks, so placement uses bulk I/O rather than per-row operations.
-//! Producers never wait for the encoder; unread blocks stay in the staging file.
+//! Composition and ordered strip delivery over adaptive temporary storage.
+//! Pixels and coverage share rectangular blocks. Producers never wait for the
+//! encoder; unread blocks remain in storage until consumed.
 use crate::{
     imaging::DecodedTile,
-    pixel_store::{discard, read_metadata, storage_error, store_metadata, MetadataLocation},
+    pixel_store::{read_metadata, storage_error, store_metadata, MetadataLocation},
+    storage::TemporaryStorage,
 };
 use dezoomify::model::{Error, OutputGrid, ReusedTile, Size, TilePlacement};
 use image::{
@@ -12,7 +13,6 @@ use image::{
 };
 use std::{
     collections::BTreeMap,
-    fs::File,
     io::{Read, Seek, SeekFrom, Write},
     path::Path,
     sync::{Arc, Condvar, Mutex},
@@ -38,7 +38,7 @@ struct Metadata {
     exif: MetadataLocation,
 }
 struct Producer {
-    file: File,
+    file: Arc<Mutex<TemporaryStorage>>,
     pending: BTreeMap<u32, u64>,
     next_region: u32,
     metadata: BTreeMap<u32, Metadata>,
@@ -53,10 +53,16 @@ impl Producer {
         decoded: &DecodedTile,
     ) -> Result<(), Error> {
         if decoded.icc_profile.is_some() || decoded.exif_metadata.is_some() {
-            let icc = store_metadata(&mut self.file, decoded.icc_profile.as_deref())
-                .map_err(storage_error)?;
-            let exif = store_metadata(&mut self.file, decoded.exif_metadata.as_deref())
-                .map_err(storage_error)?;
+            let icc = store_metadata(
+                &mut *self.file.lock().expect("pixel storage lock"),
+                decoded.icc_profile.as_deref(),
+            )
+            .map_err(storage_error)?;
+            let exif = store_metadata(
+                &mut *self.file.lock().expect("pixel storage lock"),
+                decoded.exif_metadata.as_deref(),
+            )
+            .map_err(storage_error)?;
             if placement.position.x == 0 && placement.position.y == 0 && self.next_region == 0 {
                 self.origin_icc = self.origin_icc.or(icc);
             }
@@ -89,7 +95,7 @@ pub(crate) struct PixelPipe {
     block: Size,
     block_bytes: usize,
     columns: u32,
-    reader: Mutex<File>,
+    reader: Arc<Mutex<TemporaryStorage>>,
     producer: Mutex<Producer>,
     queue: Mutex<Queue>,
     changed: Condvar,
@@ -106,6 +112,20 @@ impl PixelPipe {
         size: Size,
         directory: &Path,
         grid: Option<&OutputGrid>,
+    ) -> Result<Arc<Self>, Error> {
+        Self::with_memory_limit(
+            size,
+            directory,
+            grid,
+            crate::storage::memory_storage_limit(),
+        )
+    }
+
+    fn with_memory_limit(
+        size: Size,
+        directory: &Path,
+        grid: Option<&OutputGrid>,
+        memory_limit: u64,
     ) -> Result<Arc<Self>, Error> {
         let region = grid.map_or(
             Size {
@@ -129,21 +149,21 @@ impl PixelPipe {
         let count = region_columns
             .checked_mul(size.height.div_ceil(region.height))
             .ok_or_else(|| Error::ResourceLimit("output region count overflow".into()))?;
-        let pixels = block.width as usize * block.height as usize;
-        let block_bytes = pixels * 4 + pixels.div_ceil(8);
+        let pixels = u64::from(block.width) * u64::from(block.height);
+        let block_bytes = pixels
+            .checked_mul(4)
+            .and_then(|bytes| bytes.checked_add(pixels.div_ceil(8)))
+            .and_then(|bytes| usize::try_from(bytes).ok())
+            .ok_or_else(|| Error::ResourceLimit("pixel block size overflow".into()))?;
         let columns = size.width.div_ceil(block.width);
         let length = u64::from(columns)
             .checked_mul(u64::from(size.height.div_ceil(block.height)))
             .and_then(|n| n.checked_mul(block_bytes as u64))
             .ok_or_else(|| Error::InvalidState("raster dimensions overflow".into()))?;
-        std::fs::create_dir_all(directory).map_err(storage_error)?;
-        let file = tempfile::NamedTempFile::new_in(directory).map_err(storage_error)?;
-        // Reopen, rather than clone, to give the encoder an independent cursor.
-        // Unlink before writing so the handles own cleanup, including on crashes.
-        let reader = file.reopen().map_err(storage_error)?;
-        let (file, path) = file.into_parts();
-        path.close().map_err(storage_error)?;
-        file.set_len(length).map_err(storage_error)?;
+        let file = Arc::new(Mutex::new(
+            TemporaryStorage::with_memory_limit(directory, length, memory_limit)
+                .map_err(storage_error)?,
+        ));
         Ok(Arc::new(Self {
             size,
             region,
@@ -159,7 +179,7 @@ impl PixelPipe {
             block,
             block_bytes,
             columns,
-            reader: Mutex::new(reader),
+            reader: Arc::clone(&file),
             producer: Mutex::new(Producer {
                 file,
                 pending: BTreeMap::new(),
@@ -205,7 +225,7 @@ impl PixelPipe {
     pub(crate) fn late(&self) -> u64 {
         self.producer.lock().expect("pixel producer lock").late
     }
-    /// Placement does disk I/O and must run on a blocking worker. Contributions
+    /// Placement can do disk I/O and must run on a blocking worker. Contributions
     /// composite until whole-region handoff freezes the pixels. Later writes to
     /// frozen regions are discarded; conflicting overlaps have unspecified results.
     pub(crate) fn place(
@@ -227,7 +247,7 @@ impl PixelPipe {
         }
         let (source_x, source_y) = (placement.position.x, placement.position.y);
         let opaque = image.pixels().all(|p| p[3] == 255);
-        let mut bytes = vec![0; self.block_bytes];
+        let mut bytes = crate::buffers::zeroed(self.block_bytes as u64).map_err(storage_error)?;
         for band in y / self.block.height..(y + height).div_ceil(self.block.height) {
             if let Some(error) = self.error() {
                 return Err(error);
@@ -250,6 +270,7 @@ impl PixelPipe {
                 let mut covered = 0;
                 let offset = (u64::from(band) * u64::from(self.columns) + u64::from(column))
                     * self.block_bytes as u64;
+                let mut file = file.lock().expect("pixel storage lock");
                 file.seek(SeekFrom::Start(offset)).map_err(storage_error)?;
                 file.read_exact(&mut bytes).map_err(storage_error)?;
                 let (pixels, coverage) =
@@ -373,10 +394,13 @@ impl PixelPipe {
         ordered.sort_by_key(|(id, m)| mapping.get(&m.position).copied().unwrap_or(**id));
         let icc = ordered.iter().find_map(|(_, m)| m.icc);
         let exif = ordered.iter().find_map(|(_, m)| m.exif);
-        let metadata = (
-            read_metadata(&mut producer.file, icc).map_err(storage_error)?,
-            read_metadata(&mut producer.file, exif).map_err(storage_error)?,
-        );
+        let metadata = {
+            let mut file = producer.file.lock().expect("pixel storage lock");
+            (
+                read_metadata(&mut *file, icc).map_err(storage_error)?,
+                read_metadata(&mut *file, exif).map_err(storage_error)?,
+            )
+        };
         producer.metadata.clear();
         self.queue.lock().expect("strip queue lock").metadata = Some(metadata);
         self.changed.notify_all();
@@ -395,14 +419,23 @@ impl PixelPipe {
         if let Some(error) = &queue.failure {
             return Err(error.clone());
         }
-        Ok(queue.metadata.clone().expect("finished metadata"))
+        let (icc, exif) = queue.metadata.as_ref().expect("finished metadata");
+        let copy = |bytes: &Option<Vec<u8>>| {
+            bytes
+                .as_deref()
+                .map(crate::buffers::copy)
+                .transpose()
+                .map_err(crate::buffers::allocation_error)
+        };
+        Ok((copy(icc)?, copy(exif)?))
     }
     /// Read the first source tile's profile once the first region has frozen.
     /// Later tiles cannot change the container header. Call after receive_region.
     pub(crate) fn origin_profile(&self) -> Result<Option<Vec<u8>>, Error> {
-        let mut producer = self.producer.lock().expect("pixel producer lock");
+        let producer = self.producer.lock().expect("pixel producer lock");
         let location = producer.origin_icc;
-        read_metadata(&mut producer.file, location).map_err(storage_error)
+        let mut file = producer.file.lock().expect("pixel storage lock");
+        read_metadata(&mut *file, location).map_err(storage_error)
     }
     pub(crate) fn consumed_region(&self, region: &PixelRegion) {
         self.queue.lock().expect("strip queue lock").consumed +=
@@ -419,7 +452,7 @@ impl PixelPipe {
         }
     }
     /// Reads one immutable region. Waiting never holds the producer lock; unread
-    /// regions remain on disk, regardless of arrival order or encoder speed.
+    /// regions remain in storage, regardless of arrival order or encoder speed.
     pub(crate) fn receive_region(&self) -> Result<Option<PixelRegion>, Error> {
         let mut queue = self
             .changed
@@ -439,13 +472,12 @@ impl PixelPipe {
         let offset = (u64::from(rect.y / self.block.height) * u64::from(self.columns)
             + u64::from(rect.x / self.block.width))
             * self.block_bytes as u64;
-        let length = rect.w as usize * rect.h as usize * 4;
         let mut reader = self.reader.lock().expect("pixel reader lock");
-        let mut rgba = Vec::new();
-        rgba.try_reserve_exact(length).map_err(storage_error)?;
-        rgba.resize(length, 0);
-        let mut rgba = image::RgbaImage::from_raw(rect.w, rect.h, rgba).expect("region pixels");
-        let mut block = image::RgbaImage::new(self.block.width, self.block.height);
+        let mut rgba = crate::imaging::rgba_pixels(&Size {
+            width: rect.w,
+            height: rect.h,
+        })?;
+        let mut block = crate::imaging::rgba_pixels(&self.block)?;
         let blocks = rect.w.div_ceil(self.block.width);
         for column in 0..blocks {
             reader
@@ -459,7 +491,7 @@ impl PixelPipe {
             rgba.copy_from(&*crop_imm(&block, 0, 0, width, rect.h), left, 0)
                 .map_err(storage_error)?;
         }
-        discard(&reader, offset, u64::from(blocks) * self.block_bytes as u64);
+        reader.discard(offset, u64::from(blocks) * self.block_bytes as u64);
         Ok(Some(PixelRegion {
             rect,
             rgba: rgba.into_raw(),
@@ -618,6 +650,52 @@ pub(crate) mod tests {
             pipe.receive().unwrap().unwrap().rgba,
             [0, 0, 0, 0, 9, 8, 7, 255]
         );
+    }
+
+    #[test]
+    fn ram_and_disk_compose_out_of_order_tiles_and_settle_metadata() {
+        for limit in [0, u64::MAX] {
+            let directory = tempfile::tempdir().unwrap();
+            let scratch = directory.path().join("scratch");
+            let pipe = PixelPipe::with_memory_limit(
+                Size {
+                    width: 517,
+                    height: 131,
+                },
+                &scratch,
+                None,
+                limit,
+            )
+            .unwrap();
+            let source = image::RgbaImage::from_fn(517, 131, |x, y| {
+                image::Rgba([x as u8, y as u8, (x ^ y) as u8, 255])
+            });
+            for (id, x, width) in [(1, 257, 260), (0, 0, 257)] {
+                pipe.place(
+                    id,
+                    &placement(x, 0),
+                    DecodedTile {
+                        image: image::imageops::crop_imm(&source, x, 0, width, 131).to_image(),
+                        icc_profile: Some(vec![id as u8; 8]),
+                        exif_metadata: Some(vec![id as u8; 9]),
+                    },
+                )
+                .unwrap();
+            }
+            pipe.finish(&[]).unwrap();
+            let mut pixels = Vec::new();
+            while let Some(strip) = pipe.receive().unwrap() {
+                pixels.extend(strip.rgba);
+            }
+            assert_eq!(pixels, source.into_raw());
+            assert_eq!(
+                pipe.metadata().unwrap(),
+                (Some(vec![0; 8]), Some(vec![0; 9]))
+            );
+            if limit == u64::MAX {
+                assert!(!scratch.exists());
+            }
+        }
     }
     #[test]
     fn placement_can_finish_before_the_reader_starts() {

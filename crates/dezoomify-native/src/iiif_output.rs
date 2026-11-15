@@ -3,7 +3,6 @@ use crate::{
     codecs::{tile_metadata, NativeFormat},
     encoded_tile::EncodedTile,
     output::StagedDirectory,
-    tile_budget::memory_check,
     tile_pyramid::{downsample, Rect, StoredTile, TileBytes, TileLevel},
 };
 use dezoomify::model::{Error, OutputPlan, ReusedTile, Size};
@@ -42,7 +41,6 @@ fn tile_path(
 pub(crate) struct IiifWriter {
     staging: StagedDirectory,
     base: TileLevel,
-    budget: u64,
     compression: u8,
     pub(crate) decoded_tiles: u64,
     retained: u64,
@@ -54,21 +52,8 @@ pub(crate) struct IiifWriter {
 }
 
 impl IiifWriter {
-    pub(crate) fn input_budget(&self) -> u64 {
-        self.budget.saturating_sub(self.retained)
-    }
-
     pub(crate) fn retained_bytes(&self) -> u64 {
         self.retained + self.index_bytes
-    }
-
-    pub(crate) fn hold_queued_bytes(&mut self, bytes: u64) -> Result<(), Error> {
-        let retained = self.retained;
-        crate::tile_budget::reserve_queued(&mut self.budget, retained, bytes)
-    }
-
-    pub(crate) fn release_probe_bytes(&mut self, bytes: u64) {
-        crate::tile_budget::release_reserved(&mut self.budget, bytes);
     }
 
     pub(crate) fn peak_retained(&self) -> u64 {
@@ -78,7 +63,6 @@ impl IiifWriter {
     pub(crate) fn new(
         destination: &Path,
         plan: &OutputPlan,
-        budget: u64,
         compression: u8,
         max_tiles: u32,
     ) -> Result<Self, Error> {
@@ -105,7 +89,7 @@ impl IiifWriter {
         };
         let index_bytes = u64::from(plan.tile_count)
             * (std::mem::size_of::<StoredTile>() + destination.as_os_str().len() + 128) as u64;
-        memory_check(index_bytes, budget)?;
+
         Ok(Self {
             staging: StagedDirectory::new(destination)?,
             base: TileLevel {
@@ -117,7 +101,6 @@ impl IiifWriter {
                 tiles: BTreeMap::new(),
                 regular,
             },
-            budget: budget - index_bytes,
             compression,
             decoded_tiles: 0,
             retained: 0,
@@ -142,7 +125,7 @@ impl IiifWriter {
         if rect.w == 0 || rect.h == 0 {
             return Ok(());
         }
-        memory_check(self.retained + tile.bytes.len() as u64, self.budget)?;
+
         let index = if self.base.regular {
             (rect.y / self.base.cell.height) * self.base.size.width.div_ceil(self.base.cell.width)
                 + rect.x / self.base.cell.width
@@ -163,7 +146,6 @@ impl IiifWriter {
                     width: rect.w,
                     height: rect.h,
                 },
-                self.budget.saturating_sub(self.retained),
                 self.compression,
             )?;
             compatible = self.base.regular && rect == self.base.rect(index);
@@ -180,7 +162,7 @@ impl IiifWriter {
         } else {
             self.retained += tile.bytes.len() as u64;
             self.peak_retained = self.peak_retained.max(self.retained_bytes());
-            memory_check(self.retained, self.budget)?;
+
             TileBytes::Memory(tile.bytes)
         };
         if self.infer_canvas {
@@ -240,10 +222,6 @@ impl IiifWriter {
         format: NativeFormat,
         cancelled: &AtomicBool,
     ) -> Result<PathBuf, Error> {
-        memory_check(
-            pixels.as_raw().len() as u64 + self.icc_profile.as_ref().map_or(0, Vec::len) as u64 * 3,
-            self.budget.saturating_sub(self.retained),
-        )?;
         let relative = tile_path(rect, scale, format, canvas, false);
         let public = self.staging.path.join(&relative);
         // Public edge routes can coincide across levels. Preserve their first
@@ -304,23 +282,14 @@ impl IiifWriter {
             let bytes = if let TileBytes::Memory(bytes) = &tile.bytes {
                 bytes.as_slice()
             } else if let TileBytes::File(path) = &tile.bytes {
-                let len = std::fs::metadata(path)
-                    .map_err(|e| crate::output::write_failed("tile stat failed", &e))?
-                    .len();
-                memory_check(self.retained + len, self.budget)?;
-                body = std::fs::read(path)
+                body = crate::buffers::read_file(path)
                     .map_err(|e| crate::output::write_failed("tile read failed", &e))?;
                 &body
             } else {
                 return Err(Error::Internal("unexpected IIIF tile storage".into()));
             };
-            let extra = if matches!(tile.bytes, TileBytes::Memory(_)) {
-                0
-            } else {
-                bytes.len() as u64
-            };
-            let budget = self.budget.saturating_sub(self.retained + extra);
-            if let (Some(icc), _) = tile_metadata(bytes, tile.format, budget)? {
+
+            if let (Some(icc), _) = tile_metadata(bytes, tile.format)? {
                 self.retained += icc.len() as u64;
                 self.icc_profile = Some(icc);
                 break;
@@ -370,8 +339,7 @@ impl IiifWriter {
             * (std::mem::size_of::<StoredTile>() + self.staging.path.as_os_str().len() + 128)
                 as u64;
         let growth = indexes.saturating_sub(self.index_bytes);
-        memory_check(self.retained + growth, self.budget)?;
-        self.budget -= growth;
+
         self.index_bytes += growth;
         self.read_settled_profile(cancelled)?;
         for index in 0..normalized.count()? {
@@ -393,12 +361,7 @@ impl IiifWriter {
                     bytes: TileBytes::File(path.clone()),
                 }
             } else {
-                let pixels = self.base.region(
-                    rect,
-                    self.budget.saturating_sub(self.retained),
-                    cancelled,
-                    &mut self.decoded_tiles,
-                )?;
+                let pixels = self.base.region(rect, cancelled, &mut self.decoded_tiles)?;
                 StoredTile {
                     rect,
                     size: Size {
@@ -468,14 +431,8 @@ impl IiifWriter {
                     return Err(Error::Cancelled);
                 }
                 let rect = next.rect(index);
-                let pixels = downsample(
-                    &level,
-                    &next.size,
-                    rect,
-                    self.budget.saturating_sub(self.retained),
-                    cancelled,
-                    &mut self.decoded_tiles,
-                )?;
+                let pixels =
+                    downsample(&level, &next.size, rect, cancelled, &mut self.decoded_tiles)?;
                 let path = self.encode_tile(rect, scale, &full_size, &pixels, format, cancelled)?;
                 next.tiles.insert(
                     index,

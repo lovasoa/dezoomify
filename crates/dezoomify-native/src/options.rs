@@ -49,10 +49,6 @@ pub struct JobOptions {
     pub max_bytes: u64,
     /// Core-owned adaptive tile pacing; the native Host adds no throttle.
     pub pacing: Option<RequestPacing>,
-    /// RAM guard for buffered codecs and tiled-output conversion/indexes.
-    /// Streaming raster pixels use disk staging and do not consume this budget.
-    /// Defaults to 80% of available RAM; callers may supply a smaller cap.
-    pub output_retain_cap: u64,
 }
 
 impl Default for JobOptions {
@@ -80,7 +76,6 @@ impl Default for JobOptions {
             max_tiles: 1 << 20,
             max_bytes: 64 << 20,
             pacing: None,
-            output_retain_cap: crate::imaging::available_memory_bytes() / 5 * 4,
         }
     }
 }

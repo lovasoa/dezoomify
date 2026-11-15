@@ -1,13 +1,9 @@
-//! Streaming PDF object storage and final page tree. Payloads and cross-reference
-//! offsets live on disk; only the small page list remains until publication.
-use crate::{
-    output::{write_failed, StagedFile},
-    tile_budget::memory_check,
-};
+//! Streaming PDF object storage and final page tree. Cross-reference offsets
+//! use adaptive storage; payloads stream to the output staging file.
+use crate::output::{write_failed, StagedFile};
 use dezoomify::model::Error;
 use pdf_writer::{Chunk, Name, Ref};
 use std::{
-    fs::File,
     io::{BufWriter, Read, Seek, SeekFrom, Write},
     path::Path,
     sync::atomic::AtomicBool,
@@ -21,32 +17,33 @@ pub(crate) struct Checkpoint {
 
 pub(crate) struct PdfDocument {
     staging: Option<StagedFile>,
-    offsets: File,
+    offsets: crate::storage::TemporaryStorage,
     position: u64,
     next_id: i32,
     pages: Vec<Ref>,
-    budget: u64,
     pub(crate) active: bool,
     failure: Option<Error>,
 }
 
 impl PdfDocument {
-    pub(crate) fn new(destination: &Path, budget: u64) -> Result<Self, Error> {
+    pub(crate) fn new(destination: &Path) -> Result<Self, Error> {
         let mut staging = StagedFile::new(destination)?;
         let header = b"%PDF-1.7\n%\xe2\xe3\xcf\xd3\n";
         staging
             .writer(&AtomicBool::new(false))
             .write_all(header)
             .map_err(|e| write_failed("PDF header failed", &e))?;
-        let offsets = tempfile::tempfile_in(staging.path().parent().expect("staging parent"))
-            .map_err(|e| write_failed("PDF index creation failed", &e))?;
+        let offsets = crate::storage::TemporaryStorage::new(
+            staging.path().parent().expect("staging parent"),
+            0,
+        )
+        .map_err(|e| write_failed("PDF index creation failed", &e))?;
         Ok(Self {
             staging: Some(staging),
             offsets,
             position: header.len() as u64,
             next_id: 3,
             pages: Vec::new(),
-            budget,
             active: false,
             failure: None,
         })
@@ -66,7 +63,10 @@ impl PdfDocument {
                 "document already has an active page or has finished".into(),
             ));
         }
-        memory_check(self.retained_bytes() + 128, self.budget)?;
+
+        self.pages
+            .try_reserve_exact(1)
+            .map_err(|error| Error::ResourceLimit(error.to_string().into()))?;
         self.active = true;
         Ok(Checkpoint {
             position: self.position,
