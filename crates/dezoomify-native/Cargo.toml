@@ -28,7 +28,7 @@ zif-tiff = "0.3.0"
 png = "0.18.1"
 flate2 = "1"
 openjp2 = { version = "0.7.2", default-features = false, features = ["image"] }
-pdf-writer = { git = "https://github.com/dezoomify/pdf-writer", rev = "0c2c8bb4ae4b70bfa53596aff6c601686c579a46", default-features = false }
+pdf-writer = { git = "https://github.com/dezoomify/pdf-writer", rev = "10fe729d58ee39700b2480301730f8fb8ece991f", default-features = false }
 
 [target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
 rustix = { version = "1", features = ["fs"] }

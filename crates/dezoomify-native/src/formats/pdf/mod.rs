@@ -42,7 +42,6 @@ impl PdfWriter {
         compression: u8,
         max_tiles: u32,
         page: Option<DocumentPage>,
-        controls: crate::Controls,
     ) -> Result<Self, Error> {
         if plan
             .canvas
@@ -68,7 +67,6 @@ impl PdfWriter {
             None => standalone.as_mut().expect("standalone document").page()?,
         };
         let indexes = u64::from(plan.tile_count) * 512 + page.lock()?.retained_bytes();
-        page.lock()?.set_controls(Some(controls));
 
         Ok(Self {
             page,

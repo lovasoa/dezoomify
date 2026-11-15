@@ -918,7 +918,6 @@ impl Host for NativeHost<'_> {
                 self.options.compression,
                 self.options.max_tiles as u32,
                 self.document_page.borrow_mut().take(),
-                &self.controls,
             )?;
             let controls = self.controls.clone();
             let writer = self

@@ -212,16 +212,6 @@ impl StagedFile {
         self.io_error.clone().map_or(Ok(()), Err)
     }
 
-    /// Roll back an incomplete document page only after its workers have settled.
-    /// A previous disk failure remains terminal and prevents publication.
-    pub(crate) fn truncate(&mut self, length: u64) -> Result<(), Error> {
-        self.check_error()?;
-        let file = self.file.as_mut().expect("unpublished staging file");
-        file.set_len(length)
-            .and_then(|()| file.seek(std::io::SeekFrom::Start(length)).map(|_| ()))
-            .map_err(|e| write_failed("output rollback failed", &e))
-    }
-
     pub(crate) fn publish(
         &mut self,
         destination: &Path,
@@ -452,7 +442,7 @@ impl<W> GuardedFile<'_, W> {
     fn check(&self) -> std::io::Result<()> {
         if self.cancelled.load(Ordering::SeqCst) {
             // write_all retries Interrupted, so use a terminal error kind.
-            Err(std::io::Error::other(Error::Cancelled))
+            Err(std::io::Error::other("output cancelled"))
         } else {
             Ok(())
         }
@@ -659,14 +649,7 @@ mod tests {
             let mut staged = StagedFile::new(&destination).unwrap();
             staged.writer(&cancelled).write_all(b"unpublished").unwrap();
             cancelled.store(true, Ordering::SeqCst);
-            let error = staged.writer(&cancelled).write_all(b"more").unwrap_err();
-            assert_eq!(
-                error
-                    .get_ref()
-                    .and_then(|cause| cause.downcast_ref::<Error>())
-                    .map(Error::kind),
-                Some(Error::Cancelled.kind())
-            );
+            assert!(staged.writer(&cancelled).write_all(b"more").is_err());
             assert!(matches!(
                 staged.publish(&destination, true, &cancelled),
                 Err(Error::Cancelled)

@@ -3732,7 +3732,7 @@ checksum = "35fb2e5f958ec131621fdd531e9fc186ed768cbe395337403ae56c17a74c68ec"
 [[package]]
 name = "pdf-writer"
 version = "0.15.0"
-source = "git+https://github.com/dezoomify/pdf-writer?rev=0c2c8bb4ae4b70bfa53596aff6c601686c579a46#0c2c8bb4ae4b70bfa53596aff6c601686c579a46"
+source = "git+https://github.com/dezoomify/pdf-writer?rev=10fe729d58ee39700b2480301730f8fb8ece991f#10fe729d58ee39700b2480301730f8fb8ece991f"
 dependencies = [
  "bitflags 2.13.2",
  "itoa",
