@@ -190,7 +190,7 @@ async fn prepare_plan(
         TileSource::Positioned(source) => (TileSource::Positioned(source.clone()), Vec::new()),
     };
     let base_count = source.count().ok_or_else(empty_plan)?;
-    let lower = reusable_levels(options.output, &source, image);
+    let lower = options.output.reusable_levels(&source, image);
     let total = base_count + lower.iter().map(core::tile_plan::Grid::count).sum::<u64>();
     if total == 0 {
         return Err(empty_plan());
@@ -225,44 +225,6 @@ async fn prepare_plan(
         base_count,
         total,
     })
-}
-
-fn reusable_levels(
-    output: OutputFormat,
-    source: &TileSource,
-    image: &core::ResolvedImage,
-) -> Vec<core::tile_plan::Grid> {
-    // ZIF can reuse the source pyramid without asking a pixel encoder to
-    // reproduce its codec or JPEG sampling. Keep requests lazy and preserve
-    // the selected level as the full-size output.
-    let mut lower = Vec::new();
-    if output == OutputFormat::Zif
-        && let TileSource::Grid(base) = source
-        && base.overlap() == Vec2d::default()
-        && base.tile_size().x == base.tile_size().y
-        && base.tile_size().x.is_multiple_of(16)
-    {
-        let mut dimensions = base.image_size();
-        while dimensions.x > base.tile_size().x || dimensions.y > base.tile_size().y {
-            dimensions = Vec2d {
-                x: dimensions.x.div_ceil(2),
-                y: dimensions.y.div_ceil(2),
-            };
-            if let Some(grid) = image.levels.iter().find_map(|level| match &level.source {
-                TileSource::Grid(grid)
-                    if grid.image_size() == dimensions
-                        && grid.tile_size() == base.tile_size()
-                        && grid.overlap() == Vec2d::default() =>
-                {
-                    Some(grid.clone())
-                }
-                _ => None,
-            }) {
-                lower.push(grid);
-            }
-        }
-    }
-    lower
 }
 
 async fn acquire_plan(

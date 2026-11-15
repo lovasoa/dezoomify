@@ -1,8 +1,9 @@
 //! PDF image eligibility and tile-local lossless fallback. Shared inspection and
 //! decoding live in encoded_tile; this module owns PDF filters and color spaces.
 use crate::{
-    encoded_tile::{jpeg_header, png_header, tile_metadata, EncodedTile},
-    pdf_document::PdfDocument,
+    encoded_tile::{tile_metadata, EncodedTile},
+    formats::pdf::document::PdfDocument,
+    formats::{jpeg::header as jpeg_header, png::header as png_header},
     tile_budget::memory_check,
 };
 use dezoomify::model::{Error, Size};
@@ -114,15 +115,7 @@ fn reusable(tile: &EncodedTile) -> Option<ImageData<'_>> {
         });
     }
     let colors = png_colors(&tile.bytes)?;
-    let mut payload = Vec::new();
-    let mut at = 8usize;
-    while let Some(chunk) = tile.bytes.get(at..at.checked_add(8)?) {
-        let length = u32::from_be_bytes(chunk[..4].try_into().ok()?) as usize;
-        if &chunk[4..] == b"IDAT" {
-            payload.extend_from_slice(tile.bytes.get(at + 8..at + 8 + length)?);
-        }
-        at = at.checked_add(length)?.checked_add(12)?;
-    }
+    let payload = crate::formats::png::image_data(&tile.bytes)?;
     Some(ImageData {
         bytes: Cow::Owned(payload),
         colors,
@@ -134,11 +127,7 @@ fn reusable(tile: &EncodedTile) -> Option<ImageData<'_>> {
 }
 
 fn convert(pixels: &image::RgbaImage, compression: u8) -> Result<ImageData<'static>, Error> {
-    let level = Compression::new(match compression {
-        0..=19 => 1,
-        20..=60 => 6,
-        _ => 9,
-    });
+    let level = Compression::new(super::super::deflate_level(compression));
     let mut rgb = ZlibEncoder::new(Vec::new(), level);
     let transparent = pixels.pixels().any(|pixel| pixel[3] != 255);
     let mut alpha = transparent.then(|| ZlibEncoder::new(Vec::new(), level));

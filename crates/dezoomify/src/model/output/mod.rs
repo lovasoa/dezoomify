@@ -1,0 +1,9 @@
+pub(super) mod avif;
+pub(super) mod iiif;
+pub(super) mod jpeg;
+pub(super) mod jpeg2000;
+pub(super) mod pdf;
+pub(super) mod png;
+pub(super) mod tiff;
+pub(super) mod webp;
+pub(super) mod zif;

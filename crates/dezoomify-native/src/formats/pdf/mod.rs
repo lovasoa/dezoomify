@@ -1,10 +1,14 @@
 //! One PDF page: stream tile image objects, retain bounded placements, then seal
 //! the page in plan order. Document ownership and publication live elsewhere.
+pub(crate) mod document;
+pub(crate) mod images;
+pub mod pages;
+
 use crate::{
     document::{DocumentPage, OutputDocument},
     encoded_tile::EncodedTile,
+    formats::pdf::images as pdf_images,
     output::{PreparedOutput, StagedOutput},
-    pdf_images,
     tile_budget::memory_check,
     tile_geometry::Rect,
     OutputTarget,
@@ -84,67 +88,6 @@ impl PdfWriter {
             decoded: 0,
             max_tiles,
         })
-    }
-
-    pub(crate) fn retained_bytes(&self) -> u64 {
-        self.indexes
-    }
-    pub(crate) fn peak_retained(&self) -> u64 {
-        self.indexes
-    }
-    pub(crate) fn input_budget(&self) -> u64 {
-        self.budget
-    }
-    pub(crate) fn hold_queued_bytes(&mut self, bytes: u64) -> Result<(), Error> {
-        let retained = 0;
-        crate::tile_budget::reserve_queued(&mut self.budget, retained, bytes)
-    }
-    pub(crate) fn release_probe_bytes(&mut self, bytes: u64) {
-        crate::tile_budget::release_reserved(&mut self.budget, bytes);
-    }
-
-    pub(crate) fn place(
-        &mut self,
-        mut tile: EncodedTile,
-        cancelled: &AtomicBool,
-    ) -> Result<(), Error> {
-        if self.tiles.contains_key(&tile.id) {
-            return Ok(());
-        }
-        if self.tiles.len() >= self.max_tiles as usize {
-            return Err(Error::ResourceLimit(
-                "PDF tile count exceeds max_tiles".into(),
-            ));
-        }
-        let rect = Rect::placed(
-            &tile.placement,
-            &tile.size,
-            (!self.infer_canvas).then_some(&self.size),
-        );
-        if rect.w == 0 || rect.h == 0 {
-            return Ok(());
-        }
-        let image = pdf_images::write_tile(
-            &mut *self.page.lock()?,
-            &mut tile,
-            self.budget,
-            self.compression,
-            cancelled,
-            &mut self.decoded,
-        )?;
-        if self.infer_canvas {
-            self.size.width = self.size.width.max(rect.x.saturating_add(rect.w));
-            self.size.height = self.size.height.max(rect.y.saturating_add(rect.h));
-        }
-        self.tiles.insert(
-            tile.id,
-            PlacedImage {
-                image,
-                rect,
-                size: tile.size,
-            },
-        );
-        Ok(())
     }
 
     pub(crate) fn finish(
@@ -242,4 +185,79 @@ impl PdfWriter {
         document.write(id, &chunk, cancelled)?;
         Ok(id)
     }
+}
+
+impl crate::tile_output::TileWriter for PdfWriter {
+    fn input_budget(&self) -> u64 {
+        self.budget
+    }
+
+    fn retained_bytes(&self) -> u64 {
+        self.indexes
+    }
+
+    fn hold_queued_bytes(&mut self, bytes: u64) -> Result<(), Error> {
+        let retained = 0;
+        crate::tile_budget::reserve_queued(&mut self.budget, retained, bytes)
+    }
+
+    fn release_probe_bytes(&mut self, bytes: u64) {
+        crate::tile_budget::release_reserved(&mut self.budget, bytes);
+    }
+
+    fn peak_retained(&self) -> u64 {
+        self.indexes
+    }
+
+    fn place(&mut self, mut tile: EncodedTile, cancelled: &AtomicBool) -> Result<(), Error> {
+        if self.tiles.contains_key(&tile.id) {
+            return Ok(());
+        }
+        if self.tiles.len() >= self.max_tiles as usize {
+            return Err(Error::ResourceLimit(
+                "PDF tile count exceeds max_tiles".into(),
+            ));
+        }
+        let rect = Rect::placed(
+            &tile.placement,
+            &tile.size,
+            (!self.infer_canvas).then_some(&self.size),
+        );
+        if rect.w == 0 || rect.h == 0 {
+            return Ok(());
+        }
+        let image = pdf_images::write_tile(
+            &mut *self.page.lock()?,
+            &mut tile,
+            self.budget,
+            self.compression,
+            cancelled,
+            &mut self.decoded,
+        )?;
+        if self.infer_canvas {
+            self.size.width = self.size.width.max(rect.x.saturating_add(rect.w));
+            self.size.height = self.size.height.max(rect.y.saturating_add(rect.h));
+        }
+        self.tiles.insert(
+            tile.id,
+            PlacedImage {
+                image,
+                rect,
+                size: tile.size,
+            },
+        );
+        Ok(())
+    }
+
+    fn finish(
+        self: Box<Self>,
+        reused: &[ReusedTile],
+        cancelled: &AtomicBool,
+    ) -> Result<crate::output::PreparedOutput, Error> {
+        PdfWriter::finish(*self, reused, cancelled)
+    }
+}
+
+pub(crate) fn probe_needs_preparation(tile: &EncodedTile, _extent: &Size) -> bool {
+    !images::can_reuse(tile)
 }

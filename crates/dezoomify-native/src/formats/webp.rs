@@ -1,0 +1,35 @@
+use super::{buffered_pixels, encoding_error, RasterWriter, StripEncoder};
+use crate::pixel_pipe::PixelPipe;
+use dezoomify::model::{Error, Size};
+use image::ImageEncoder;
+use std::sync::Arc;
+
+pub(crate) struct Encoder;
+
+impl StripEncoder for Encoder {
+    fn workspace(&self, size: &Size) -> u64 {
+        let pixels = u64::from(size.width) * u64::from(size.height);
+        pixels.saturating_mul(32).saturating_add(128 << 10)
+    }
+    fn write(&self, output: &mut RasterWriter<'_>, pipe: &Arc<PixelPipe>) -> Result<(), Error> {
+        let image = buffered_pixels(pipe)?;
+        let (icc, _) = pipe.metadata()?;
+        let mut encoder = image::codecs::webp::WebPEncoder::new_lossless(output);
+        if let Some(profile) = icc {
+            let _ = encoder.set_icc_profile(profile);
+        }
+        encoder
+            .write_image(
+                image.as_raw(),
+                image.width(),
+                image.height(),
+                image::ExtendedColorType::Rgba8,
+            )
+            .map_err(|error| {
+                encoding_error(format!(
+                    "webp encode failed: {}",
+                    dezoomify::model::chain_text(&error)
+                ))
+            })
+    }
+}
