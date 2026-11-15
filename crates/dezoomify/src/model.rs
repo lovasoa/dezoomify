@@ -310,32 +310,37 @@ pub fn output_options() -> Vec<OutputOption> {
         .collect()
 }
 
-mod output;
-
 // Identities remain here because they define the cross-language boundary.
 macro_rules! output_codecs {
-    ($($variant:ident => ($id:literal, $module:ident)),* $(,)?) => {
-        #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-        #[serde(rename_all = "kebab-case")]
-        #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
-        pub enum OutputFormat { $(#[serde(rename = $id)] $variant),* }
-
-        impl Default for OutputFormat { fn default() -> Self { Self::Png } }
+    ($($(#[$attribute:meta])* $variant:ident => $module:ident $(($id:literal))?),* $(,)?) => {
+        mod output {
+            $(pub(super) mod $module;)*
+        }
 
         #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
         #[serde(rename_all = "kebab-case")]
         #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
-        pub enum OutputPreference { #[default] Auto, $(#[serde(rename = $id)] $variant),* }
+        pub enum OutputFormat { $($(#[$attribute])* $(#[serde(rename = $id)])? $variant),* }
+
+        #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+        #[serde(rename_all = "kebab-case")]
+        #[cfg_attr(feature = "typescript", derive(tsify::Tsify))]
+        pub enum OutputPreference { #[default] Auto, $($(#[serde(rename = $id)])? $variant),* }
 
         impl OutputPreference {
             pub const fn format(self) -> Option<OutputFormat> {
-                match self { Self::Auto => None, $(Self::$variant => Some(OutputFormat::$variant)),* }
+                match self {
+                    Self::Auto => None,
+                    $(Self::$variant => Some(OutputFormat::$variant)),*
+                }
             }
         }
 
         impl From<OutputFormat> for OutputPreference {
             fn from(format: OutputFormat) -> Self {
-                match format { $(OutputFormat::$variant => Self::$variant),* }
+                match format {
+                    $(OutputFormat::$variant => Self::$variant),*
+                }
             }
         }
 
@@ -343,44 +348,63 @@ macro_rules! output_codecs {
 
         impl OutputFormat {
             pub const fn as_str(self) -> &'static str {
-                match self { $(Self::$variant => $id),* }
+                match self {
+                    $(Self::$variant => output_codecs!(@name $module $(, $id)?)),*
+                }
             }
             pub fn codec(self) -> &'static OutputCodec {
-                match self { $(Self::$variant => &output::$module::CODEC),* }
-            }
-            pub fn extension(self) -> &'static str { self.codec().extensions[0] }
-            pub fn is_directory(self) -> bool {
-                matches!(self.codec().layout, OutputLayout::Directory)
-            }
-            /// Encoded tiles can join this output without a full raster canvas.
-            pub fn uses_encoded_tiles(self) -> bool {
-                matches!(self.codec().layout, OutputLayout::Pyramid | OutputLayout::Directory | OutputLayout::Document)
-            }
-            /// Several independently acquired images can share one output file.
-            pub fn supports_pages(self) -> bool {
-                matches!(self.codec().layout, OutputLayout::Document)
-            }
-            pub fn from_extension(extension: &str) -> Option<Self> {
-                OUTPUT_CODECS.iter().find(|codec| codec.extensions.contains(&extension))
-                    .map(|codec| codec.format)
+                match self {
+                    $(Self::$variant => &output::$module::CODEC),*
+                }
             }
         }
     };
+    (@name $module:ident) => { stringify!($module) };
+    (@name $module:ident, $id:literal) => { $id };
 }
 
 output_codecs! {
-    Png => ("png", png),
-    Jpeg => ("jpeg", jpeg),
-    Tiff => ("tiff", tiff),
-    Webp => ("webp", webp),
-    Jpeg2000 => ("jpeg2000", jpeg2000),
-    Avif => ("avif", avif),
-    Zif => ("zif", zif),
-    IiifDir => ("iiif-dir", iiif),
-    Pdf => ("pdf", pdf),
+    #[default]
+    Png => png,
+    Jpeg => jpeg,
+    Tiff => tiff,
+    Webp => webp,
+    Jpeg2000 => jpeg2000,
+    Avif => avif,
+    Zif => zif,
+    IiifDir => iiif("iiif-dir"),
+    Pdf => pdf,
 }
 
 impl OutputFormat {
+    pub fn extension(self) -> &'static str {
+        self.codec().extensions[0]
+    }
+
+    pub fn is_directory(self) -> bool {
+        matches!(self.codec().layout, OutputLayout::Directory)
+    }
+
+    /// Encoded tiles can join this output without a full raster canvas.
+    pub fn uses_encoded_tiles(self) -> bool {
+        matches!(
+            self.codec().layout,
+            OutputLayout::Pyramid | OutputLayout::Directory | OutputLayout::Document
+        )
+    }
+
+    /// Several independently acquired images can share one output file.
+    pub fn supports_pages(self) -> bool {
+        matches!(self.codec().layout, OutputLayout::Document)
+    }
+
+    pub fn from_extension(extension: &str) -> Option<Self> {
+        OUTPUT_CODECS
+            .iter()
+            .find(|codec| codec.extensions.contains(&extension))
+            .map(|codec| codec.format)
+    }
+
     pub(crate) fn reusable_levels(
         self,
         source: &crate::core::TileSource,
@@ -1791,6 +1815,32 @@ pub fn has_secret_params(url: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn output_names_round_trip_through_both_public_enums() {
+        for codec in OUTPUT_CODECS {
+            let format = codec.format;
+            let value = serde_json::Value::String(format.as_str().into());
+            assert_eq!(serde_json::to_value(format).unwrap(), value);
+            assert_eq!(
+                serde_json::from_value::<OutputFormat>(value.clone()).unwrap(),
+                format
+            );
+            let preference = OutputPreference::from(format);
+            assert_eq!(preference.format(), Some(format));
+            assert_eq!(serde_json::to_value(preference).unwrap(), value);
+            assert_eq!(
+                serde_json::from_value::<OutputPreference>(value).unwrap(),
+                preference
+            );
+        }
+        assert_eq!(OutputFormat::Jpeg2000.as_str(), "jpeg2000");
+        assert_eq!(OutputFormat::IiifDir.as_str(), "iiif-dir");
+        assert_eq!(
+            serde_json::to_value(OutputPreference::Auto).unwrap(),
+            "auto"
+        );
+    }
 
     #[test]
     fn compression_estimates_follow_encoder_mapping() {
