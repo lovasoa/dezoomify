@@ -65,7 +65,7 @@ impl PdfDocument {
         }
 
         self.pages
-            .try_reserve_exact(1)
+            .try_reserve(1)
             .map_err(|error| Error::ResourceLimit(error.to_string().into()))?;
         self.active = true;
         Ok(Checkpoint {

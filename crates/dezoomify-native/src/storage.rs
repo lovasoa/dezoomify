@@ -42,7 +42,7 @@ impl Storage for MemoryStorage {
         let length = usize::try_from(length).map_err(io::Error::other)?;
         let bytes = self.0.get_mut();
         bytes
-            .try_reserve_exact(length.saturating_sub(bytes.len()))
+            .try_reserve(length.saturating_sub(bytes.len()))
             .map_err(io::Error::other)?;
         bytes.resize(length, 0);
         Ok(())

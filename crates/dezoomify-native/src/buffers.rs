@@ -39,15 +39,11 @@ impl Buffer {
 
 impl Write for Buffer {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-        if bytes.len() > self.0.capacity() - self.0.len() {
-            // Grow geometrically, but retry with only the required capacity.
-            let extra = bytes.len().max(self.0.capacity());
-            if self.0.try_reserve_exact(extra).is_err() {
-                self.0
-                    .try_reserve_exact(bytes.len())
-                    .map_err(|error| io::Error::new(io::ErrorKind::OutOfMemory, error))?;
-            }
-        }
+        // If amortized growth fails, try without spare capacity before failing.
+        self.0
+            .try_reserve(bytes.len())
+            .or_else(|_| self.0.try_reserve_exact(bytes.len()))
+            .map_err(|error| io::Error::new(io::ErrorKind::OutOfMemory, error))?;
         self.0.extend_from_slice(bytes);
         Ok(bytes.len())
     }
