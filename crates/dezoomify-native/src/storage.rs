@@ -102,14 +102,15 @@ impl Storage for DiskStorage {
     }
 }
 
-/// RAM-to-disk selection threshold in bytes, leaving room for concurrent tile
-/// decoding and encoder workspace. This does not limit job memory. A failed
-/// memory probe selects disk for any nonempty store.
-pub(crate) fn memory_storage_limit() -> u64 {
-    (crate::imaging::available_memory_bytes() / 16).min(64 << 20)
+/// Composition's RAM-to-disk threshold in bytes: the larger of 80% of available
+/// memory and available memory minus 2 GiB. This does not limit job memory.
+/// A failed memory probe selects disk for any nonempty composition.
+pub(crate) fn memory_storage_limit(available: u64) -> u64 {
+    let eighty_percent = available - available.div_ceil(5);
+    eighty_percent.max(available.saturating_sub(2 << 30))
 }
 
-/// Seekable temporary bytes for composition, probe spools, and PDF indexes.
+/// Seekable temporary bytes for image composition.
 /// Once a store spills to disk, it remains there until dropped.
 pub(crate) struct TemporaryStorage {
     storage: Box<dyn Storage>,
@@ -118,11 +119,6 @@ pub(crate) struct TemporaryStorage {
 }
 
 impl TemporaryStorage {
-    /// Create zero-filled storage with automatic RAM or disk selection.
-    pub(crate) fn new(directory: &Path, length: u64) -> io::Result<Self> {
-        Self::with_memory_limit(directory, length, memory_storage_limit())
-    }
-
     /// Create `length` zero-filled bytes. `limit` is the maximum logical length
     /// kept in RAM, not an allocation limit: exceeding it or failing a RAM
     /// reservation selects disk. The directory is used only when disk is needed.
@@ -205,6 +201,21 @@ mod tests {
     use super::*;
 
     #[test]
+    fn composition_memory_threshold_keeps_the_smaller_reserve() {
+        for (available, expected) in [
+            (0, 0),
+            (100, 80),
+            (1 << 30, (1 << 30) * 4 / 5),
+            (2 << 30, (2 << 30) * 4 / 5),
+            (10 << 30, 8 << 30),
+            (16 << 30, 14 << 30),
+            (u64::MAX, u64::MAX - (2 << 30)),
+        ] {
+            assert_eq!(memory_storage_limit(available), expected);
+        }
+    }
+
+    #[test]
     fn ram_needs_no_scratch_directory() {
         let directory = tempfile::tempdir().unwrap();
         let scratch = directory.path().join("unused");
@@ -219,7 +230,7 @@ mod tests {
     }
 
     #[test]
-    fn spilling_preserves_sparse_pixels_cursor_and_appended_metadata() {
+    fn spilling_preserves_sparse_pixels_cursor_and_growth() {
         for limit in [0, 8, 128] {
             let directory = tempfile::tempdir().unwrap();
             let mut storage =
@@ -229,13 +240,13 @@ mod tests {
             storage.seek(SeekFrom::Start(12)).unwrap();
             storage.write_all(b"pixels").unwrap();
             assert_eq!(storage.seek(SeekFrom::End(0)).unwrap(), 18);
-            storage.write_all(b"metadata").unwrap();
+            storage.write_all(b"more pixels").unwrap();
             storage.seek(SeekFrom::Start(4)).unwrap();
             storage.write_all(b"X").unwrap();
             storage.rewind().unwrap();
             let mut bytes = Vec::new();
             storage.read_to_end(&mut bytes).unwrap();
-            assert_eq!(bytes, b"\0\0abX\0\0\0\0\0\0\0pixelsmetadata");
+            assert_eq!(bytes, b"\0\0abX\0\0\0\0\0\0\0pixelsmore pixels");
             drop(storage);
             assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 0);
         }

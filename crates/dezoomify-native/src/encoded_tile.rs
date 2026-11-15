@@ -10,11 +10,28 @@ pub(crate) struct EncodedTile {
     pub bytes: Vec<u8>,
     pub size: Size,
     pub format: NativeFormat,
-    /// Full stored raster for a decoded document probe. Metadata remains in bytes.
-    pub probe_pixels: Option<crate::pixel_store::StoredPixels>,
+    /// Full raster for a decoded document probe. Metadata remains in bytes.
+    pub probe_pixels: Option<image::RgbaImage>,
 }
 
 impl EncodedTile {
+    pub(crate) fn retained_bytes(&self) -> u64 {
+        std::mem::size_of::<Self>() as u64
+            + self.bytes.len() as u64
+            + self
+                .probe_pixels
+                .as_ref()
+                .map_or(0, |pixels| pixels.as_raw().len() as u64)
+            + self.request.as_ref().map_or(0, |request| {
+                request.uri.len() as u64
+                    + request
+                        .headers
+                        .iter()
+                        .map(|header| (header.name.len() + header.value.len()) as u64 + 64)
+                        .sum::<u64>()
+            })
+    }
+
     pub(crate) fn decode_pixels(&self, size: &Size) -> Result<image::RgbaImage, Error> {
         let image =
             crate::codecs::decode(&self.bytes, self.format).map_err(crate::codecs::decode_error)?;

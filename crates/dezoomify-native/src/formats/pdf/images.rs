@@ -21,7 +21,7 @@ struct ImageData<'a> {
 
 /// Write a complete tile image before returning its reference. No image buffers
 /// survive this call. Consume any stored probe pixels; count only fresh decoding,
-/// including failures. Stored pixels carry no metadata and retain the full raster.
+/// including failures. Probe pixels carry no metadata and retain the full raster.
 pub(crate) fn write_tile(
     document: &mut PdfDocument,
     tile: &mut EncodedTile,
@@ -35,8 +35,8 @@ pub(crate) fn write_tile(
     let data = match raw {
         Some(data) => data,
         None => {
-            let pixels = if let Some(stored) = probe_pixels {
-                stored.read()?.image
+            let pixels = if let Some(pixels) = probe_pixels {
+                pixels
             } else {
                 *decoded += 1;
                 tile.decode_pixels(&tile.size)?
@@ -120,18 +120,20 @@ fn convert(pixels: &image::RgbaImage, compression: u8) -> Result<ImageData<'stat
     let mut rgb = ZlibEncoder::new(crate::buffers::Buffer::default(), level);
     let transparent = pixels.pixels().any(|pixel| pixel[3] != 255);
     let mut alpha = transparent.then(|| ZlibEncoder::new(crate::buffers::Buffer::default(), level));
-    let mut row = Vec::new();
-    row.try_reserve_exact(pixels.width() as usize * 3)
-        .map_err(crate::buffers::allocation_error)?;
-    let mut mask = Vec::new();
-    mask.try_reserve_exact(pixels.width() as usize)
-        .map_err(crate::buffers::allocation_error)?;
+    let mut row = Vec::with_capacity(pixels.width() as usize * 3);
+    let mut mask = Vec::with_capacity(if transparent {
+        pixels.width() as usize
+    } else {
+        0
+    });
     for pixels in pixels.rows() {
         row.clear();
         mask.clear();
         for pixel in pixels {
             row.extend_from_slice(&pixel.0[..3]);
-            mask.push(pixel[3]);
+            if transparent {
+                mask.push(pixel[3]);
+            }
         }
         rgb.write_all(&row).map_err(encoding_failed)?;
         if let Some(alpha) = &mut alpha {
