@@ -1,7 +1,7 @@
-//! One native multi-page PDF transaction. Page hosts own acquisition and
+//! One native multi-page PDF. Page hosts own acquisition and
 //! settlement; the caller closes the document after their workers have stopped.
 use crate::{
-    formats::pdf::document::{Checkpoint, PdfDocument},
+    formats::pdf::document::PdfDocument,
     output::{self, StagedOutput},
     OutputTarget,
 };
@@ -28,10 +28,9 @@ pub struct DocumentPublication {
 }
 
 /// Exclusive page lease. Move it into one fresh NativeHost; dropping an
-/// unsealed lease rolls back that image. Never finalize while a host owns it.
+/// unsealed lease leaves its objects unused. Never finalize while a host owns it.
 pub struct DocumentPage {
     pub(crate) writer: Arc<Mutex<PdfDocument>>,
-    checkpoint: Checkpoint,
     sealed: bool,
 }
 
@@ -65,10 +64,9 @@ impl OutputDocument {
 
     /// Acquire one page; the previous page host must have settled first.
     pub fn page(&mut self) -> Result<DocumentPage, Error> {
-        let checkpoint = self.writer.lock().map_err(poisoned)?.begin_page()?;
+        self.writer.lock().map_err(poisoned)?.begin_page()?;
         Ok(DocumentPage {
             writer: Arc::clone(&self.writer),
-            checkpoint,
             sealed: false,
         })
     }
@@ -128,7 +126,7 @@ impl Drop for DocumentPage {
     fn drop(&mut self) {
         if !self.sealed {
             if let Ok(mut writer) = self.writer.lock() {
-                writer.rollback(self.checkpoint);
+                writer.active = false;
             }
         }
     }

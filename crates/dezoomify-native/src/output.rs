@@ -212,16 +212,6 @@ impl StagedFile {
         self.io_error.clone().map_or(Ok(()), Err)
     }
 
-    /// Roll back an incomplete document page only after its workers have settled.
-    /// A previous disk failure remains terminal and prevents publication.
-    pub(crate) fn truncate(&mut self, length: u64) -> Result<(), Error> {
-        self.check_error()?;
-        let file = self.file.as_mut().expect("unpublished staging file");
-        file.set_len(length)
-            .and_then(|()| file.seek(std::io::SeekFrom::Start(length)).map(|_| ()))
-            .map_err(|e| write_failed("output rollback failed", &e))
-    }
-
     pub(crate) fn publish(
         &mut self,
         destination: &Path,

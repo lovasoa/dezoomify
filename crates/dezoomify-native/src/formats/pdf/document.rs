@@ -1,5 +1,5 @@
-//! Streaming PDF object storage and final page tree. Cross-reference offsets
-//! stay in memory; payloads stream to the output staging file.
+//! Streaming PDF object storage and final page tree. Objects from incomplete
+//! pages remain unused in the file; only sealed pages enter the page tree.
 use crate::output::{write_failed, StagedFile};
 use dezoomify::model::Error;
 use pdf_writer::{Chunk, Name, Ref};
@@ -9,12 +9,6 @@ use std::{
     sync::atomic::AtomicBool,
 };
 
-#[derive(Clone, Copy)]
-pub(crate) struct Checkpoint {
-    position: u64,
-    next_id: i32,
-}
-
 pub(crate) struct PdfDocument {
     staging: Option<StagedFile>,
     offsets: Vec<u64>,
@@ -22,7 +16,6 @@ pub(crate) struct PdfDocument {
     next_id: i32,
     pages: Vec<Ref>,
     pub(crate) active: bool,
-    failure: Option<Error>,
 }
 
 impl PdfDocument {
@@ -40,7 +33,6 @@ impl PdfDocument {
             next_id: 3,
             pages: Vec::new(),
             active: false,
-            failure: None,
         })
     }
 
@@ -51,8 +43,7 @@ impl PdfDocument {
         self.pages.len()
     }
 
-    pub(crate) fn begin_page(&mut self) -> Result<Checkpoint, Error> {
-        self.check()?;
+    pub(crate) fn begin_page(&mut self) -> Result<(), Error> {
         if self.active || self.staging.is_none() {
             return Err(Error::InvalidState(
                 "document already has an active page or has finished".into(),
@@ -60,25 +51,7 @@ impl PdfDocument {
         }
 
         self.active = true;
-        Ok(Checkpoint {
-            position: self.position,
-            next_id: self.next_id,
-        })
-    }
-
-    pub(crate) fn rollback(&mut self, checkpoint: Checkpoint) {
-        let result = self
-            .staging
-            .as_mut()
-            .expect("active document")
-            .truncate(checkpoint.position);
-        if let Err(error) = result {
-            self.failure = Some(error);
-        }
-        self.position = checkpoint.position;
-        self.next_id = checkpoint.next_id;
-        self.offsets.truncate(checkpoint.next_id as usize);
-        self.active = false;
+        Ok(())
     }
 
     pub(crate) fn seal_page(&mut self, page: Ref) {
@@ -94,10 +67,6 @@ impl PdfDocument {
         Ok(Ref::new(id))
     }
 
-    fn check(&self) -> Result<(), Error> {
-        self.failure.clone().map_or(Ok(()), Err)
-    }
-
     fn record_offset(&mut self, id: Ref) {
         let index = id.get() as usize;
         if self.offsets.len() <= index {
@@ -108,35 +77,38 @@ impl PdfDocument {
 
     /// Each chunk must contain exactly this one indirect object. IDs are allocated
     /// by this document; callers release the chunk immediately after writing it.
+    /// Cancellation takes effect between objects to preserve a valid PDF suffix.
     pub(crate) fn write(
         &mut self,
         id: Ref,
         chunk: &Chunk,
         cancelled: &AtomicBool,
     ) -> Result<(), Error> {
-        self.check()?;
+        if cancelled.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(Error::Cancelled);
+        }
         self.record_offset(id);
         let staging = self.staging.as_mut().expect("unpublished PDF");
         let result = (|| {
-            let mut writer = staging.writer(cancelled);
+            let uncancelled = AtomicBool::new(false);
+            let mut writer = staging.writer(&uncancelled);
             for bytes in chunk.as_bytes().chunks(64 << 10) {
                 writer.write_all(bytes)?;
             }
             Ok::<_, std::io::Error>(())
         })();
         staging.check_error()?;
+        result.map_err(|e| write_failed("PDF object write failed", &e))?;
+        self.position += chunk.len() as u64;
         if cancelled.load(std::sync::atomic::Ordering::SeqCst) {
             return Err(Error::Cancelled);
         }
-        result.map_err(|e| write_failed("PDF object write failed", &e))?;
-        self.position += chunk.len() as u64;
         Ok(())
     }
 
-    /// Finish only after the active page has sealed or rolled back. The caller
+    /// Finish only after the active page host has settled. The caller
     /// chooses whether cancellation should preserve already completed pages.
     pub(crate) fn finish(&mut self, cancelled: &AtomicBool) -> Result<StagedFile, Error> {
-        self.check()?;
         if self.active || self.pages.is_empty() || self.staging.is_none() {
             return Err(Error::InvalidState(
                 "document has an active page, no complete pages, or has finished".into(),
@@ -169,9 +141,9 @@ impl PdfDocument {
             write!(writer, "{} 0 obj\n<< /Type /XRef /Size {size} /Root 1 0 R /W [1 8 2] /Length {} >>\nstream\n", id.get(), size * 11)?;
             writer.write_all(&[0, 0, 0, 0, 0, 0, 0, 0, 0, 255, 255])?;
             for offset in &self.offsets[1..size as usize] {
-                writer.write_all(&[1])?;
+                writer.write_all(&[u8::from(*offset != 0)])?;
                 writer.write_all(&offset.to_be_bytes())?;
-                writer.write_all(&[0, 0])?;
+                writer.write_all(if *offset == 0 { &[255, 255] } else { &[0, 0] })?;
             }
             write!(writer, "\nendstream\nendobj\nstartxref\n{start}\n%%EOF\n")?;
             writer.flush()
@@ -181,5 +153,40 @@ impl PdfDocument {
             return Err(Error::Cancelled);
         }
         result.map_err(|e| write_failed("PDF cross-reference write failed", &e))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cancellation_before_an_object_still_allows_clean_finalization() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut document = PdfDocument::new(&directory.path().join("pages.pdf")).unwrap();
+        let cancelled = AtomicBool::new(false);
+        document.begin_page().unwrap();
+        let page = document.alloc().unwrap();
+        let mut chunk = Chunk::new();
+        chunk
+            .page(page)
+            .parent(Ref::new(2))
+            .media_box(pdf_writer::Rect::new(0.0, 0.0, 16.0, 16.0))
+            .resources();
+        document.write(page, &chunk, &cancelled).unwrap();
+        document.seal_page(page);
+        document.begin_page().unwrap();
+        let image = document.alloc().unwrap();
+        let mut chunk = Chunk::new();
+        chunk.stream(image, &[42; 128 << 10]);
+        cancelled.store(true, std::sync::atomic::Ordering::SeqCst);
+        assert!(matches!(
+            document.write(image, &chunk, &cancelled),
+            Err(Error::Cancelled)
+        ));
+        document.active = false;
+        let staging = document.finish(&AtomicBool::new(false)).unwrap();
+        let pdf = hayro_syntax::Pdf::new(std::fs::read(staging.path()).unwrap()).unwrap();
+        assert_eq!(pdf.pages().len(), 1);
     }
 }

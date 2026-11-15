@@ -1,5 +1,5 @@
 //! Independent rendering requires Poppler; run through `cargo xtask test pdf`.
-use dezoomify_native::{JobOptions, NativeHost, OutputTarget};
+use dezoomify_native::{JobOptions, NativeHost, OutputDocument, OutputTarget};
 use std::{
     path::{Path, PathBuf},
     process::Command,
@@ -106,4 +106,53 @@ fn rendered_pages_preserve_orientation_padding_overlap_and_transparency() {
             );
         }
     }
+}
+
+#[test]
+#[ignore = "requires Poppler; run cargo xtask test pdf"]
+fn interrupted_document_renders_without_repair() {
+    let directory = tempfile::tempdir().unwrap();
+    let output = directory.path().join("partial.pdf");
+    let mut document = OutputDocument::new(OutputTarget::File(output.clone()), false).unwrap();
+    for incomplete in [false, true] {
+        let source = directory
+            .path()
+            .join(if incomplete { "incomplete" } else { "complete" });
+        let (input, _) = fixture(&source, false);
+        if incomplete {
+            std::fs::remove_file(source.join("image_files/6/2_1.png")).unwrap();
+        }
+        let host = NativeHost::new(JobOptions {
+            input_url: input.to_string_lossy().into(),
+            output: OutputTarget::File(output.clone()),
+            largest: true,
+            max_concurrent: 1,
+            cache_dir: Some(source.join("cache")),
+            ..Default::default()
+        })
+        .unwrap()
+        .with_document_page(document.page().unwrap())
+        .unwrap();
+        let result = host.transport.block_on(dezoomify::dezoomify(
+            host.inputs(),
+            host.algorithm_options(),
+            &host,
+        ));
+        assert_eq!(result.is_err(), incomplete);
+    }
+    assert_eq!(document.finish().unwrap().unwrap().pages, 1);
+    let rendered = Command::new("pdftoppm")
+        .args(["-png", "-r", "72", "-singlefile"])
+        .arg(output)
+        .arg(directory.path().join("rendered"))
+        .output()
+        .unwrap();
+    assert!(rendered.status.success(), "{rendered:?}");
+    assert!(rendered.stderr.is_empty(), "{rendered:?}");
+    assert_eq!(
+        image::open(directory.path().join("rendered.png"))
+            .unwrap()
+            .width(),
+        33
+    );
 }
