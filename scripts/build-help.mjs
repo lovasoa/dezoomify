@@ -230,7 +230,7 @@ ${bodyHtml}
         <a href="../index.html">Dezoomify</a>
         <a href="../privacy.html">Privacy</a>
         <a href="../terms.html">Terms</a>
-        <a href="https://github.com/lovasoa/dezoomify" target="_blank" rel="noopener">Open Source (GPL)</a>
+        <a href="https://github.com/dezoomify/dezoomify" target="_blank" rel="noopener">Open Source (GPL)</a>
         <a href="https://github.com/sponsors/lovasoa/" target="_blank" rel="noopener">Donate</a>
       </div>
     </footer>

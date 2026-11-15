@@ -28,7 +28,7 @@ test("every generated page exists with chrome, topics, and no legacy doc links",
     const h1s = [...html.matchAll(/<h1 id="[^"]*">/g)].length;
     assert.equal(h1s, 1, `${stem}.html has exactly one h1 (marker line dropped)`);
     for (const legacy of [
-      "github.com/lovasoa/dezoomify/wiki",
+      "github.com/dezoomify/dezoomify/wiki",
       "dezoomify-rs.ophir.dev",
       "lovasoa.github.io",
       "ophir.alwaysdata.net",

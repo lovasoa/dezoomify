@@ -216,7 +216,7 @@ test("static accessibility contract: failed view layers guidance with named reco
   const parsed = new URL(href);
   assert.equal(
     `${parsed.origin}${parsed.pathname}`,
-    "https://github.com/lovasoa/dezoomify/issues/new",
+    "https://github.com/dezoomify/dezoomify/issues/new",
   );
   const body = parsed.searchParams.get("body") || "";
   assert.ok(

@@ -569,7 +569,7 @@ mod test {
 
     #[test]
     fn parse_xml_mobile() {
-        // See https://github.com/lovasoa/dezoomify-rs/issues/58
+        // See https://github.com/dezoomify/dezoomify-rs/issues/58
         let parsed = KrpanoMetadata::from_str(
             r#"
         <krpano>
@@ -595,7 +595,7 @@ mod test {
 
     #[test]
     fn parse_xml_with_scene() {
-        // See https://github.com/lovasoa/dezoomify-rs/issues/100#issuecomment-767048175
+        // See https://github.com/dezoomify/dezoomify-rs/issues/100#issuecomment-767048175
         let parsed = KrpanoMetadata::from_str(r#"<krpano version="1.18">
         <scene name="scene_Color">
             <image type="CYLINDER" hfov="1.00" vfov="1.291661" voffset="0.00" multires="true" tilesize="512">
@@ -668,7 +668,7 @@ mod test {
 
     #[test]
     fn parse_factum_arte() {
-        // See https://github.com/lovasoa/dezoomify-rs/issues/100#issuecomment-767048175
+        // See https://github.com/dezoomify/dezoomify-rs/issues/100#issuecomment-767048175
         let bytes = std::fs::read(
             "../../testdata/scenarios/rs-core/formats/payloads/krpano/krpano_scenes.xml",
         )

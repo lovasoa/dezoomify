@@ -778,7 +778,7 @@ fn test_tiles() {
 #[test]
 fn test_tiles_max_area_filter() {
     // Predefined tile size (1024x1024) is over maxArea (262144 = 512x512).
-    // See https://github.com/lovasoa/dezoomify-rs/issues/107#issuecomment-862225501
+    // See https://github.com/dezoomify/dezoomify-rs/issues/107#issuecomment-862225501
     let data =
         br#"{"width": 1024, "height": 1024, "tiles": [{ "width": 1024, "scaleFactors": [1] }], "profile": [{ "maxArea": 262144 }]}"#;
     let levels = levels("http://ophir.dev/info.json", data).unwrap();

@@ -8,17 +8,17 @@ _Dezoomify_ extracts full high-resolution images from online zoomable image inte
 It works with several zoomable image tools, from several different websites (see the list below).
 It takes as input the URL of a a zoomable image and gives as output an image that you can download (by right-clicking on it, and choosing *Save Image as...*).
 
-In order to find the URL of the zoomable that dezoomify requires, you can install the [**dezoomify browser extension**](https://github.com/lovasoa/dezoomify-extension/#dezoomify-extension). Alternatively, you can also try to [find the zoomable image URL yourself](https://github.com/lovasoa/dezoomify/wiki/Dezoomify-FAQ).
+In order to find the URL of the zoomable that dezoomify requires, you can install the [**dezoomify browser extension**](https://github.com/dezoomify/dezoomify-extension/#dezoomify-extension). Alternatively, you can also try to [find the zoomable image URL yourself](https://github.com/dezoomify/dezoomify/wiki/Dezoomify-FAQ).
 
 ## Try it
 If you are not interested in the source code and just want to assemble tiles of (dezoomify) a zoomify-powered image, go there : [**unzoomify an image**](https://dezoomify.ophir.dev/legacy/)
 
 ## Troubleshooting
 #### FAQ
-If you have problems while downloading an image, then read the **[FAQ](https://github.com/lovasoa/dezoomify/wiki/Dezoomify-FAQ)**.
+If you have problems while downloading an image, then read the **[FAQ](https://github.com/dezoomify/dezoomify/wiki/Dezoomify-FAQ)**.
 #### Reporting issues
 Your bug reports and feature requests are welcome!
-Please go the the [Github issue page of the project](https://github.com/lovasoa/dezoomify/issues),
+Please go the the [Github issue page of the project](https://github.com/dezoomify/dezoomify/issues),
 and explain your problem.
 Please be clear, and give the URL of the page containing the image dezoomify
 failed to process.
@@ -28,7 +28,7 @@ The following formats are supported by dezoomify:
 
 * [Zoomify](http://www.zoomify.com/) : Most common zoomable image format. *dezoomify* used to support only this, hence the name.
 * [Deep Zoom](http://en.wikipedia.org/wiki/Deep_Zoom) : Zoomable image format created by Microsoft.
-* [Arts & Culture](https://artsandculture.google.com/) (formerly Google Art Project): a cooperation between google and several international museums. [More info about the controversy around this dezoomer.](https://github.com/lovasoa/dezoomify/issues/435).
+* [Arts & Culture](https://artsandculture.google.com/) (formerly Google Art Project): a cooperation between google and several international museums. [More info about the controversy around this dezoomer.](https://github.com/dezoomify/dezoomify/issues/435).
 * [IIIF](https://iiif.io): The International Image Interoperability Framework, used on many websites, including [Austrian National Library](https://www.onb.ac.at/), [National Gallery](https://www.nationalgallery.org.uk/), [National Library of Israel](https://www.nli.org.il/), and [National Library of Scotland](https://www.nls.uk/).
 * [Museo Nacional del Prado](https://www.museodelprado.es/): artwork pages using Prado's OpenSeadragon image viewer.
 * [XLimage](http://www.centrica.it/products/xlimage-2/), a zoomable image format developed by an Italian company.
@@ -80,7 +80,7 @@ The most prominent supported websites with live compatibility tests include :
 
 
 Dezoomify also has a
-[generic dezoomer](https://github.com/lovasoa/dezoomify/wiki/Generic-dezoomer-tutorial).
+[generic dezoomer](https://github.com/dezoomify/dezoomify/wiki/Generic-dezoomer-tutorial).
 If the zoomable image format is simple enough, you just have to enter a pattern of tile
 URL, and dezoomify will be able to work with it.
 

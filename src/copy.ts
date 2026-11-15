@@ -13,7 +13,7 @@ export function localizeWebsite(document: Document): void {
     [".help-link", "page.nav.help", "title"],
     ['a[href="https://github.com/sponsors/lovasoa/"]', "page.nav.donate"],
     [".donate", "page.nav.donateTitle", "title"],
-    ['.dz-footer-links a[href="https://github.com/lovasoa/dezoomify"]', "page.footer.source"],
+    ['.dz-footer-links a[href="https://github.com/dezoomify/dezoomify"]', "page.footer.source"],
     ['.dz-footer-links a[href="./help/troubleshooting.html"]', "page.footer.faq"],
     ['.dz-footer-links a[href="./privacy.html"]', "page.footer.privacy"],
     ['.dz-footer-links a[href="./terms.html"]', "page.footer.terms"],

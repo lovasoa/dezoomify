@@ -478,7 +478,7 @@ test("desktop guidance downloads directly without leaving the website", async ({
     apiRequests++;
     return route.abort();
   });
-  const installerUrl = "https://github.com/lovasoa/dezoomify/releases/latest/download/dezoomify-desktop.exe";
+  const installerUrl = "https://github.com/dezoomify/dezoomify/releases/latest/download/dezoomify-desktop.exe";
   await page.route(installerUrl, (route) => route.fulfill({
     contentType: "application/octet-stream",
     headers: { "content-disposition": 'attachment; filename="dezoomify-test.exe"' },

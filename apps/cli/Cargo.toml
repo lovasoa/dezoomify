@@ -4,7 +4,7 @@ version.workspace = true
 edition = "2021"
 license = "GPL-3.0-or-later"
 description = "Command-line app composing the native runtime."
-repository = "https://github.com/lovasoa/dezoomify"
+repository = "https://github.com/dezoomify/dezoomify"
 
 [[bin]]
 name = "dezoomify-cli"

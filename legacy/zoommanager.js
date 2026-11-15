@@ -98,10 +98,10 @@ UI.error = function (errmsg) {
 			var url = new URL("invalid://invalid?source=" + urltxt);
 		}
 		document.getElementById("gh-search").href =
-			"https://github.com/lovasoa/dezoomify/issues?q=" +
+			"https://github.com/dezoomify/dezoomify/issues?q=" +
 			encodeURIComponent(url.host);
 		document.getElementById("gh-open-issue").href =
-			"https://github.com/lovasoa/dezoomify/issues/new" +
+			"https://github.com/dezoomify/dezoomify/issues/new" +
 			"?labels=" + "new%20site%20support" +
 			"&title=" + encodeURIComponent(url.host) +
 			"&body=" + encodeURIComponent(
@@ -459,7 +459,7 @@ ZoomManager.getFile = function (url, params, callback) {
 			var msg = "Our server has received too many requests, and our provider is blocking new requests. " +
 				"You can donate on https://github.com/sponsors/lovasoa to participate to the hosting fees. " +
 				"Once we collect over 5$/month overall, we will switch to a paid plan of the provider, allowing more requests to go through every day. " +
-				"For more details, see https://github.com/lovasoa/dezoomify/issues/337#issuecomment-773498488.";
+				"For more details, see https://github.com/dezoomify/dezoomify/issues/337#issuecomment-773498488.";
 			return onerror(msg);
 		}
 

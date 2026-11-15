@@ -16,7 +16,7 @@ The imported fixtures retain their original grants:
 | `formats/fzp/`, native/desktop/website fixtures, local web reproductions | locally authored synthetic data | GPL-3.0-or-later |
 
 The complete original per-file source paths and grants remain in the
-[historical registry](https://github.com/lovasoa/dezoomify/blob/6bc8706eba0cef1dbc63069f0e7bd4f54fbd9f26/testdata/scenarios/manifest.json).
+[historical registry](https://github.com/dezoomify/dezoomify/blob/6bc8706eba0cef1dbc63069f0e7bd4f54fbd9f26/testdata/scenarios/manifest.json).
 The Google Arts HTML files retain the original signing token layout and title
 fields after removing unrelated site content; krpano retains every scene and
 image. Second Canvas metadata/viewers are synthetic (2026-09-11); FZP inputs are

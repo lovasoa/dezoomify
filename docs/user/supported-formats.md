@@ -47,4 +47,4 @@ The fastest check is to try it. If it fails, the
 [troubleshooting guide](./troubleshooting.md) and
 [finding the image address](./finding-the-image-address.md) cover the common
 cases. Sites that need a brand-new recipe can be requested by
-[opening an issue](https://github.com/lovasoa/dezoomify/issues).
+[opening an issue](https://github.com/dezoomify/dezoomify/issues).

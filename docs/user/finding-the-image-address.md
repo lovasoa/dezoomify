@@ -59,7 +59,7 @@ On the command line, the same trick applies with the
 [generic format](./supported-formats.md#generic).
 
 If none of this works, the site may use a viewer that needs a new recipe;
-[open an issue](https://github.com/lovasoa/dezoomify/issues) with the
+[open an issue](https://github.com/dezoomify/dezoomify/issues) with the
 site's address and someone can add support for it.
 
 ## Next steps

@@ -10,7 +10,7 @@ viewer and assembles its tiles into a picture you can save.
   and [Firefox](https://addons.mozilla.org/en-US/firefox/addon/dezoomify/):**
   finds hidden image addresses and uses your source-page login.
   [Guide](docs/user/browser-extension.md).
-- **[Desktop app](https://github.com/lovasoa/dezoomify/releases/latest):**
+- **[Desktop app](https://github.com/dezoomify/dezoomify/releases/latest):**
   Windows, macOS, and Linux; larger images, local files, more output formats,
   and cached tiles for interrupted saves. [Installation and use](apps/desktop/desktop-app.md).
 - **[Command-line tool](docs/user/command-line.md):** native saving for scripts,
@@ -27,7 +27,7 @@ limits. For missing images, access refusals, and interrupted saves, see
 [troubleshooting](docs/user/troubleshooting.md) or
 [find the image address manually](docs/user/finding-the-image-address.md).
 
-Before [reporting a problem](https://github.com/lovasoa/dezoomify/issues),
+Before [reporting a problem](https://github.com/dezoomify/dezoomify/issues),
 search existing issues for the site. Include the viewing page, the address you
 gave Dezoomify, the app, and its error or diagnostic report. Review reports for
 sensitive addresses before sharing.

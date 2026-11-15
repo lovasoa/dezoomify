@@ -154,7 +154,7 @@ mod tests {
 
     #[test]
     fn test_parse_html_wildflower() {
-        // See: https://github.com/lovasoa/dezoomify-rs/issues/5
+        // See: https://github.com/dezoomify/dezoomify-rs/issues/5
         let info: PageInfo = parse_html_file("page_source_wildflower.html");
         let base_url =
             "https://lh5.ggpht.com/D0sqZ0sJbzoQeYFoySoXLJqgLMfXhi8-gGVGRqD_UEYUqkqk9Eqdxx5NNaw";
@@ -164,7 +164,7 @@ mod tests {
 
     #[test]
     fn test_parse_html_newformat() {
-        // See: https://github.com/lovasoa/dezoomify-rs/issues/11
+        // See: https://github.com/dezoomify/dezoomify-rs/issues/11
         let info: PageInfo = parse_html_file("page_source_newformat.html");
         let base_url =
             "https://lh6.ggpht.com/V4etPVsk7ooKgotTWex4Cat1uaXYEYV9yaan76p1PMZTikOxZvc6QRAArifFStw";
@@ -174,7 +174,7 @@ mod tests {
 
     #[test]
     fn test_parse_html_2021_06_30() {
-        // See: https://github.com/lovasoa/dezoomify/issues/556
+        // See: https://github.com/dezoomify/dezoomify/issues/556
         let info: PageInfo = parse_html_file("page_source_2021-06-30.html");
         let base_url = "https://lh3.googleusercontent.com/uHsSuY7ZkqoUY5xOkiRO2THfT7i9yLT9TXjlxr4IufwA3eO33QvjWDmWkldtINkh";
         assert_eq!(info.base_url, base_url);
@@ -183,7 +183,7 @@ mod tests {
 
     #[test]
     fn test_parse_html_null() {
-        // See: https://github.com/lovasoa/dezoomify/issues/315
+        // See: https://github.com/dezoomify/dezoomify/issues/315
         let info: PageInfo = parse_html_file("page_source_null.html");
         let base_url =
             "https://lh6.ggpht.com/lzVeTLZkOLzaRoI6WjNRYfNhu4I20a7L_Eko7DBb1iHR8YjzErIGRTmt6A";

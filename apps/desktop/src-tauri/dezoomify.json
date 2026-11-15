@@ -51,7 +51,7 @@
   ],
   "updater": {
     "allowlist": [
-      "https://github.com/lovasoa/dezoomify/releases/latest/download/latest.json"
+      "https://github.com/dezoomify/dezoomify/releases/latest/download/latest.json"
     ],
     "channel": "latest",
     "enabled": true,

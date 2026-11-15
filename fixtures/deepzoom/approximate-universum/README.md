@@ -6,4 +6,4 @@ IIP-shaped Deep Zoom metadata. Sources:
 [Inside Bruegel](https://data.insidebruegel.net/meta/2386e22b75412f6f7ed93b0a0ade2552.json)
 and [The Digital Tunis Cartoons](https://data.tuniscartoons.org/vermeyen/meta/ffc804e7e514c3b19b053b3450b050d0.json).
 The [standalone viewer's manifest](https://tools2.universumdigitalis.com/viewer/data/manifest.json)
-documents the configurable URL templates. See [issue #1310](https://github.com/lovasoa/dezoomify/issues/1310).
+documents the configurable URL templates. See [issue #1310](https://github.com/dezoomify/dezoomify/issues/1310).
