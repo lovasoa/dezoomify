@@ -21,9 +21,8 @@ async function tileResponse(route) {
   if (url.pathname.startsWith("/failure/"))
     return route.fulfill({ status: 503, body: "tile failure" });
   if (
-    url.pathname.startsWith("/inherited/") ||
-    (url.pathname.startsWith("/authenticated/") &&
-      route.request().headers().authorization !== "Bearer fixture")
+    url.pathname.startsWith("/authenticated/") &&
+    route.request().headers().authorization !== "Bearer fixture"
   )
     return route.fulfill({ status: 401, body: "Authentication required" });
   if (url.pathname.startsWith("/img/")) return route.fulfill({ status: 404, body: "" });
@@ -121,10 +120,8 @@ async function checkObservation(page, runtime, mode) {
     JSON.stringify(result.diagnostics),
   );
   const live = result.inputs.filter((input) => input.kind === "observed-viewer");
-  if (["authenticated", "inherited"].includes(mode)) assert.equal(live.length, 1);
-  if (
-    ["custom", "expando", "global", "multi", "ajax", "authenticated", "inherited"].includes(mode)
-  ) {
+  if (mode === "authenticated") assert.equal(live.length, 1);
+  if (["custom", "expando", "global", "multi", "ajax", "authenticated"].includes(mode)) {
     for (const input of live) await acquireTiles(page, input);
   }
   for (const input of live) {
@@ -217,7 +214,6 @@ for (const runtime of seadragonVersions) {
       "zoomify",
       "image",
       "authenticated",
-      "inherited",
     );
   }
   // These releases cover the two supported AJAX loader contracts (GET and POST).
