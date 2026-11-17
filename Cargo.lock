@@ -1197,10 +1197,10 @@ dependencies = [
  "dezoomify",
  "dezoomify-fixture-server",
  "flate2",
+ "generic-pdf-writer",
  "hayro-syntax",
  "image",
  "openjp2",
- "pdf-writer",
  "png",
  "reqwest",
  "rustix",
@@ -1861,6 +1861,18 @@ checksum = "85649ca51fd72272d7821adaf274ad91c288277713d9c18820d8499a7ff69e9a"
 dependencies = [
  "typenum",
  "version_check",
+]
+
+[[package]]
+name = "generic-pdf-writer"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0b474f1287e15c2fe8e4a1203b6009e460dc9f44fbe637db1e616c7d49c9b886"
+dependencies = [
+ "bitflags 2.13.2",
+ "itoa",
+ "memchr",
+ "ryu",
 ]
 
 [[package]]
@@ -3728,18 +3740,6 @@ name = "pastey"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "35fb2e5f958ec131621fdd531e9fc186ed768cbe395337403ae56c17a74c68ec"
-
-[[package]]
-name = "pdf-writer"
-version = "0.15.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f5e456864a7a304047bff84977dc6fb162bd956475d40ba50b2dcecaada7f753"
-dependencies = [
- "bitflags 2.13.2",
- "itoa",
- "memchr",
- "ryu",
-]
 
 [[package]]
 name = "percent-encoding"

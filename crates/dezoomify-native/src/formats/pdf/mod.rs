@@ -13,7 +13,7 @@ use crate::{
     OutputTarget,
 };
 use dezoomify::model::{Error, OutputGrid, OutputPlan, ReusedTile, Size};
-use pdf_writer::{Chunk, Content, Finish, Name, Ref};
+use pdf_writer::{Content, Finish, Name, Ref};
 use std::{collections::BTreeMap, path::Path, sync::atomic::AtomicBool};
 
 struct PlacedImage {
@@ -126,7 +126,7 @@ impl PdfWriter {
                 tile.rect
                     .intersection(Rect::grid_cell(grid, &self.size, index))
             });
-            let mut content = Content::new();
+            let mut content = Content::new(crate::buffers::Buffer::default());
             content
                 .save_state()
                 .transform([scale, 0.0, 0.0, scale, 0.0, 0.0]);
@@ -151,33 +151,36 @@ impl PdfWriter {
                 .x_object(Name(format!("T{}", tile.image.get()).as_bytes()))
                 .restore_state();
             let id = document.alloc()?;
-            let mut chunk = Chunk::new();
-            chunk.stream(id, &content.finish());
-            document.write(id, &chunk, cancelled)?;
+            let content = content.finish().map_err(|error| {
+                Error::EncodeFailed(format!("PDF content failed: {error}").into())
+            })?;
+            document.write(cancelled, |pdf| {
+                pdf.stream(id, &content.into_vec());
+            })?;
             contents.push(id);
         }
         let id = document.alloc()?;
-        let mut chunk = Chunk::new();
-        let mut page = chunk.page(id);
-        page.parent(Ref::new(2)).media_box(pdf_writer::Rect::new(
-            0.0,
-            0.0,
-            self.size.width as f32 * scale,
-            self.size.height as f32 * scale,
-        ));
-        page.insert(Name(b"Contents")).array().items(contents);
-        let mut resources = page.resources();
-        let mut images = resources.x_objects();
-        for tile in tiles.values() {
-            images.pair(
-                Name(format!("T{}", tile.image.get()).as_bytes()),
-                tile.image,
-            );
-        }
-        images.finish();
-        resources.finish();
-        page.finish();
-        document.write(id, &chunk, cancelled)?;
+        document.write(cancelled, |pdf| {
+            let mut page = pdf.page(id);
+            page.parent(Ref::new(2)).media_box(pdf_writer::Rect::new(
+                0.0,
+                0.0,
+                self.size.width as f32 * scale,
+                self.size.height as f32 * scale,
+            ));
+            page.insert(Name(b"Contents")).array().items(contents);
+            let mut resources = page.resources();
+            let mut images = resources.x_objects();
+            for tile in tiles.values() {
+                images.pair(
+                    Name(format!("T{}", tile.image.get()).as_bytes()),
+                    tile.image,
+                );
+            }
+            images.finish();
+            resources.finish();
+            page.finish();
+        })?;
         Ok(id)
     }
 }

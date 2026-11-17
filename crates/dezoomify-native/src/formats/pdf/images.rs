@@ -7,7 +7,7 @@ use crate::{
 };
 use dezoomify::model::{Error, Size};
 use flate2::{write::ZlibEncoder, Compression};
-use pdf_writer::{Chunk, Filter, Finish, Name, Ref};
+use pdf_writer::{Filter, Finish, Name, Ref};
 use std::{borrow::Cow, io::Write, sync::atomic::AtomicBool};
 
 struct ImageData<'a> {
@@ -171,9 +171,9 @@ fn write_profile(
         return Ok(None);
     };
     let id = document.alloc()?;
-    let mut chunk = Chunk::new();
-    chunk.icc_profile(id, profile).n(colors);
-    document.write(id, &chunk, cancelled)?;
+    document.write(cancelled, |pdf| {
+        pdf.icc_profile(id, profile).n(colors);
+    })?;
     Ok(Some(id))
 }
 
@@ -193,41 +193,41 @@ fn write_image(
     i32::try_from(data.bytes.len())
         .map_err(|_| Error::ResourceLimit("PDF tile stream length exceeded".into()))?;
     let id = document.alloc()?;
-    let mut chunk = Chunk::with_capacity(data.bytes.len() + 512);
-    let mut image = chunk.image_xobject(id, &data.bytes);
-    image
-        .width(width)
-        .height(height)
-        .bits_per_component(8)
-        .filter(data.filter);
-    if let Some(profile) = profile {
-        image.color_space().icc_based(profile);
-    } else {
-        image.color_space_name(Name(if data.colors == 1 {
-            b"DeviceGray"
+    document.write(cancelled, |pdf| {
+        let mut image = pdf.image_xobject(id, &data.bytes);
+        image
+            .width(width)
+            .height(height)
+            .bits_per_component(8)
+            .filter(data.filter);
+        if let Some(profile) = profile {
+            image.color_space().icc_based(profile);
         } else {
-            b"DeviceRGB"
-        }));
-    }
-    if let Some(alpha) = alpha {
-        image.s_mask(alpha);
-    }
-    if data.predictor {
-        image
-            .insert(Name(b"DecodeParms"))
-            .dict()
-            .pair(Name(b"Predictor"), 15)
-            .pair(Name(b"Colors"), data.colors)
-            .pair(Name(b"BitsPerComponent"), 8)
-            .pair(Name(b"Columns"), width);
-    } else if let Some(transform) = data.transform {
-        image
-            .insert(Name(b"DecodeParms"))
-            .dict()
-            .pair(Name(b"ColorTransform"), transform);
-    }
-    image.finish();
-    document.write(id, &chunk, cancelled)?;
+            image.color_space_name(Name(if data.colors == 1 {
+                b"DeviceGray"
+            } else {
+                b"DeviceRGB"
+            }));
+        }
+        if let Some(alpha) = alpha {
+            image.s_mask(alpha);
+        }
+        if data.predictor {
+            image
+                .insert(Name(b"DecodeParms"))
+                .dict()
+                .pair(Name(b"Predictor"), 15)
+                .pair(Name(b"Colors"), data.colors)
+                .pair(Name(b"BitsPerComponent"), 8)
+                .pair(Name(b"Columns"), width);
+        } else if let Some(transform) = data.transform {
+            image
+                .insert(Name(b"DecodeParms"))
+                .dict()
+                .pair(Name(b"ColorTransform"), transform);
+        }
+        image.finish();
+    })?;
     Ok(id)
 }
 
