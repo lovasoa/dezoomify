@@ -200,6 +200,55 @@ function expectedImages(runtime, mode) {
   return mode === "multi" ? 2 : 1;
 }
 
+for (const overlap of [0, 1])
+  test(`older OpenSeadragon JPEG tile with overlap ${overlap}`, async ({ page, loadModule }) => {
+    const runtime = seadragonVersions.find(({ version }) => version === "5.0.1");
+    const size = 256 + overlap;
+    const jpeg = await sharp({
+      create: { width: size, height: size, channels: 3, background: "#175797" },
+    })
+      .jpeg()
+      .toBuffer();
+    await page.route("https://viewer.fixture.test/**", (route) =>
+      route.request().isNavigationRequest() ||
+      route.request().headers().authorization !== "Bearer fixture"
+        ? tileResponse(route)
+        : route.fulfill({ contentType: "image/jpeg", body: jpeg }),
+    );
+    await page.goto("https://viewer.fixture.test/");
+    await page.addScriptTag({ content: seadragonLibrary(runtime) });
+    await page.evaluate(createSeadragonViewer, { runtime, mode: "authenticated", overlap });
+    await loadModule(page);
+    const [original, cropped] = await page.evaluate(async (size) => {
+      const {
+        inputs: [input],
+        handles,
+      } = await ViewerScanner.scanViewers();
+      try {
+        const request = {
+          handle: input.viewer.handle,
+          source_url: input.url,
+          level: 10,
+          column: 0,
+          row: 0,
+        };
+        return await Promise.all(
+          [size, size - 1].map(async (width) => {
+            const tile = await ViewerScanner.readViewerTile(request, { width, height: size });
+            if (!tile.ok || !tile.buffer) throw new Error(JSON.stringify(tile));
+            return [...new Uint8Array(tile.buffer)];
+          }),
+        );
+      } finally {
+        ViewerScanner.releaseViewerTiles(handles);
+      }
+    }, size);
+    if (!overlap) assert.deepEqual(Buffer.from(original), jpeg);
+    else assert.equal((await sharp(Buffer.from(original)).metadata()).format, "png");
+    const { width, height, format } = await sharp(Buffer.from(cropped)).metadata();
+    assert.deepEqual({ width, height, format }, { width: size - 1, height: size, format: "png" });
+  });
+
 for (const runtime of seadragonVersions) {
   const modes = ["global", "closure", "custom"];
   if (runtime === seadragonVersions.at(-1)) {

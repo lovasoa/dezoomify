@@ -34,6 +34,8 @@ export interface ViewerDrawable {
   /** Borrowed drawables belong to the viewer's cache. Transferred bitmaps are
    * closed after encoding, including failed or cancelled reads. */
   ownership: "borrowed" | "transferred";
+  /** Original JPEG for this drawable, usable when no crop is needed. */
+  originalJpeg?: Blob;
 }
 export type ViewerTile = ViewerDrawable | { url: string };
 export type ViewerLoader = (

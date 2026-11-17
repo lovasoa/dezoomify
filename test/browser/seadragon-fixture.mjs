@@ -30,7 +30,7 @@ export function seadragonLibrary(runtime) {
 }
 
 /** Runs in the page; keep the viewer in a closure except for the chosen path. */
-export async function createSeadragonViewer({ runtime, mode }) {
+export async function createSeadragonViewer({ runtime, mode, overlap = 1 }) {
   const library = runtime.classic ? window.Seadragon : window.OpenSeadragon;
   function fixtureSource() {
     if (mode === "image") return { type: "image", url: `${location.origin}/image/original.png` };
@@ -58,7 +58,7 @@ export async function createSeadragonViewer({ runtime, mode }) {
         : mode === "query"
           ? `${location.origin}/imageproxy.aspx?&filename=objectimages/image_files/`
           : `${location.origin}/tiles/`;
-    return new library.DziTileSource(513, 385, 256, 1, base, "png");
+    return new library.DziTileSource(513, 385, 256, overlap, base, "png");
   }
   const source = fixtureSource();
   const element = document.getElementById("viewer");

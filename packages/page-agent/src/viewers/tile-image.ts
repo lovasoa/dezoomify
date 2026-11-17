@@ -26,6 +26,8 @@ export async function imageBlob(tile: ViewerDrawable, extent: Size): Promise<Blo
     )
       throw new Error("viewer returned an invalid tile size");
     if (width * height > 16 * 1024 * 1024) throw new SizeLimitError(64 * 1024 * 1024);
+    if (tile.originalJpeg && width === extent.width && height === extent.height)
+      return tile.originalJpeg;
     const canvas = document.createElement("canvas");
     canvas.width = extent.width;
     canvas.height = extent.height;
