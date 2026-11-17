@@ -3,9 +3,7 @@ import {
   HttpError,
   isJobError,
   NetworkError,
-  readResponseBytes,
   retryAfterMs,
-  SOURCE_FETCH_BYTE_LIMIT,
   unknownDetail,
 } from "@dezoomify/browser-runtime";
 import type { Error as JobError } from "@dezoomify/wasm-bindings";
@@ -21,12 +19,6 @@ interface TileSource {
 
 interface ImageLoader {
   addJob(options: Record<string, unknown>): void;
-}
-
-interface TileRequest {
-  src: string;
-  postData: unknown;
-  ajaxHeaders: Record<string, string>;
 }
 
 interface TiledImage {
@@ -61,8 +53,8 @@ function loadFailure(error: unknown, response: unknown, url: string): JobError {
   return new NetworkError(unknownDetail(error), { transport: "browser-session" }, { cause: error });
 }
 
-/** Resolve ordinary image URLs lazily and read standard AJAX GETs as encoded
- * bytes. Other requests keep the viewer's version-specific loader and retry policy.
+/** Resolve ordinary image URLs lazily; custom downloaders and AJAX sources keep
+ * the viewer's loader, including its version-specific job API and retry policy.
  * Cancellation bounds the extension's wait; it does not clear the viewer's queue.
  * No OpenSeadragon global is needed: bundled viewers often hide their namespace.
  */
@@ -81,13 +73,6 @@ export async function loadOpenSeadragonTile(
   const src = typeof url === "function" ? url.call(tile) : url;
   const resolved = await resolveImage(native, image, src, signal);
   if (resolved) return resolved;
-  const request = {
-    src,
-    postData: native.getTilePostData?.(level, x, y),
-    ajaxHeaders: { ...image.ajaxHeaders, ...native.getTileAjaxHeaders?.(level, x, y) },
-  };
-  const encoded = await resolveAjax(native, image, request, signal);
-  if (encoded) return encoded;
   const loader = image._imageLoader ?? image.imageLoader ?? image.drawer?.imageLoader;
   const legacyDrawer = image.drawer;
   if (!loader && !legacyDrawer?.loadImage)
@@ -108,8 +93,10 @@ export async function loadOpenSeadragonTile(
     loader.addJob({
       source,
       tile,
-      ...request,
+      src,
+      postData: native.getTilePostData?.(level, x, y),
       loadWithAjax: image.loadTilesWithAjax,
+      ajaxHeaders: { ...image.ajaxHeaders, ...native.getTileAjaxHeaders?.(level, x, y) },
       // A viewer can display a tainted image; downloading requires readable pixels.
       crossOriginPolicy: image.crossOriginPolicy || "Anonymous",
       ajaxWithCredentials: image.ajaxWithCredentials,
@@ -117,39 +104,6 @@ export async function loadOpenSeadragonTile(
     });
   });
   return { image: data, ownership: "transferred" };
-}
-
-async function resolveAjax(
-  source: TileSource,
-  image: TiledImage,
-  request: TileRequest,
-  signal: AbortSignal,
-): Promise<ViewerTile | undefined> {
-  if (!image.loadTilesWithAjax || request.postData != null || !usesDefaultDownload(source))
-    return undefined;
-  const url = new URL(request.src, document.baseURI);
-  if (url.protocol !== "http:" && url.protocol !== "https:") return undefined;
-  try {
-    const response = await fetch(url, {
-      // OpenSeadragon treats a falsy tile header as clearing the item header.
-      headers: Object.fromEntries(Object.entries(request.ajaxHeaders).filter(([, value]) => value)),
-      credentials: image.ajaxWithCredentials ? "include" : "same-origin",
-      signal,
-    });
-    if (!response.ok) {
-      void response.body?.cancel().catch(() => {});
-      throw new HttpError({
-        status: response.status,
-        transport: "browser-session",
-        request: (response.url || url.href).slice(0, 2048),
-        retry_after_ms: retryAfterMs(response.headers.get("Retry-After")),
-      });
-    }
-    const bytes = await readResponseBytes(response, SOURCE_FETCH_BYTE_LIMIT, signal);
-    return { bytes: bytes.buffer };
-  } catch (error) {
-    throw loadFailure(error, undefined, url.href);
-  }
 }
 
 /** Find the library's base TileSource through its geometry API, even when its

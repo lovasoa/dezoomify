@@ -35,13 +35,7 @@ export interface ViewerDrawable {
    * closed after encoding, including failed or cancelled reads. */
   ownership: "borrowed" | "transferred";
 }
-export type ViewerTile =
-  | ViewerDrawable
-  | { url: string }
-  | {
-      /** Encoded bytes transfer ownership to the session. */
-      bytes: ArrayBuffer;
-    };
+export type ViewerTile = ViewerDrawable | { url: string };
 export type ViewerLoader = (
   level: number,
   column: number,
@@ -78,9 +72,10 @@ export function registerViewer(
         return { ok: true, url: result.url };
       }
       operation = "encoding";
-      const buffer = await tileBytes(result, extent);
+      const blob = await imageBlob(result, extent);
       lifetime.signal.throwIfAborted();
-      return { ok: true, buffer };
+      if (blob.size > SOURCE_FETCH_BYTE_LIMIT) throw new SizeLimitError(SOURCE_FETCH_BYTE_LIMIT);
+      return { ok: true, buffer: await blob.arrayBuffer() };
     } catch (cause) {
       const error = lifetime.signal.aborted
         ? new CancelledError()
@@ -93,20 +88,6 @@ export function registerViewer(
       return { ok: false, error: errorPayload(error) };
     }
   }
-}
-
-async function tileBytes(
-  tile: ViewerDrawable | { bytes: ArrayBuffer },
-  extent: Size,
-): Promise<ArrayBuffer> {
-  if ("bytes" in tile) {
-    if (tile.bytes.byteLength > SOURCE_FETCH_BYTE_LIMIT)
-      throw new SizeLimitError(SOURCE_FETCH_BYTE_LIMIT);
-    return tile.bytes;
-  }
-  const blob = await imageBlob(tile, extent);
-  if (blob.size > SOURCE_FETCH_BYTE_LIMIT) throw new SizeLimitError(SOURCE_FETCH_BYTE_LIMIT);
-  return blob.arrayBuffer();
 }
 
 /** Direct helpers for page-side tests and the message listener.
