@@ -7,6 +7,7 @@ import {
   unknownDetail,
 } from "@dezoomify/browser-runtime";
 import type { Error as JobError } from "@dezoomify/wasm-bindings";
+import { PageObject } from "../viewers/page-object.ts";
 import type { ViewerTile } from "../viewers/session.ts";
 
 interface TileSource {
@@ -115,7 +116,22 @@ function usesDefaultDownload(source: TileSource): boolean {
       base = prototype;
     prototype = Object.getPrototypeOf(prototype);
   }
-  return base !== undefined && source.downloadTileStart === base.downloadTileStart;
+  return (
+    base !== undefined &&
+    PageObject.from(source)?.method("downloadTileStart") ===
+      PageObject.from(base)?.method("downloadTileStart")
+  );
+}
+
+/** Detached URLs cannot preserve session settings or a custom downloader. */
+export function usesDefaultTileLoading(source: object, item: object): boolean {
+  const image = PageObject.from(item);
+  return (
+    !image?.truthy("loadTilesWithAjax") &&
+    !image?.truthy("ajaxWithCredentials") &&
+    !image?.matches("crossOriginPolicy", "use-credentials") &&
+    usesDefaultDownload(source as TileSource)
+  );
 }
 
 async function resolveImage(
@@ -124,13 +140,7 @@ async function resolveImage(
   src: string,
   signal: AbortSignal,
 ): Promise<ViewerTile | undefined> {
-  if (
-    image.loadTilesWithAjax ||
-    image.ajaxWithCredentials ||
-    image.crossOriginPolicy === "use-credentials" ||
-    !usesDefaultDownload(source)
-  )
-    return undefined;
+  if (!usesDefaultTileLoading(source, image)) return undefined;
   const url = new URL(src, document.baseURI);
   if (url.protocol === "http:" || url.protocol === "https:") return { url: url.href };
   if (url.protocol !== "blob:") return undefined;

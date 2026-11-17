@@ -5,6 +5,7 @@ import { scanLimits } from "../viewers/scan-state.ts";
 import { viewerImage } from "../viewers/source.ts";
 import { readTileSource } from "./metadata.ts";
 import { openTileSource } from "./session.ts";
+import { usesDefaultTileLoading } from "./tile-loader.ts";
 
 /** OpenSeadragon 1.x keeps one source on the viewer; 2.x+ keeps sources on
  * world items. Keep each source paired with the object that owns its loader. */
@@ -45,6 +46,8 @@ function sourceImage(source: PageObject, owner: PageObject): ViewerImage {
   return viewerImage(
     source.identity,
     () => openTileSource(source.identity, owner.identity),
-    (context, base) => projectMetadata(readTileSource(source, base), context),
+    usesDefaultTileLoading(source.identity, owner.identity)
+      ? (context, base) => projectMetadata(readTileSource(source, base), context)
+      : undefined,
   );
 }

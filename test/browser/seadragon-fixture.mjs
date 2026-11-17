@@ -52,11 +52,21 @@ export async function createSeadragonViewer({ runtime, mode }) {
         tilesUrl: `${location.origin}/zoomify/`,
         fileFormat: "jpg",
       });
-    const base =
-      mode === "query"
+    const base = ["authenticated", "inherited"].includes(mode)
+      ? `${location.origin}/${mode}/`
+      : mode === "query"
         ? `${location.origin}/imageproxy.aspx?&filename=objectimages/image_files/`
         : `${location.origin}/tiles/`;
-    return new library.DziTileSource(513, 385, 256, 1, base, "png");
+    const source = new library.DziTileSource(513, 385, 256, 1, base, "png");
+    if (mode === "inherited") {
+      const inherited = Object.create(Object.getPrototypeOf(source));
+      inherited.downloadTileStart = function (job) {
+        job.src = job.src.replace("/inherited/", "/custom/");
+        library.TileSource.prototype.downloadTileStart.call(this, job);
+      };
+      Object.setPrototypeOf(source, inherited);
+    }
+    return source;
   }
   const source = fixtureSource();
   const element = document.getElementById("viewer");
@@ -68,8 +78,12 @@ export async function createSeadragonViewer({ runtime, mode }) {
         tileSources: source,
         showNavigationControl: false,
         blendTime: 0,
-        loadTilesWithAjax: mode === "ajax",
-        ajaxHeaders: { "X-Viewer": "viewer", "X-Override": "viewer" },
+        loadTilesWithAjax: ["ajax", "authenticated"].includes(mode),
+        ajaxHeaders: {
+          "X-Viewer": "viewer",
+          "X-Override": "viewer",
+          ...(mode === "authenticated" ? { Authorization: "Bearer fixture" } : {}),
+        },
       });
   await new Promise((resolve) => {
     if (runtime.classic) {
