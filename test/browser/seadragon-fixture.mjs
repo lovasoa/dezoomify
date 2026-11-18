@@ -53,9 +53,11 @@ export async function createSeadragonViewer({ runtime, mode }) {
         fileFormat: "jpg",
       });
     const base =
-      mode === "query"
-        ? `${location.origin}/imageproxy.aspx?&filename=objectimages/image_files/`
-        : `${location.origin}/tiles/`;
+      mode === "authenticated"
+        ? `${location.origin}/authenticated/`
+        : mode === "query"
+          ? `${location.origin}/imageproxy.aspx?&filename=objectimages/image_files/`
+          : `${location.origin}/tiles/`;
     return new library.DziTileSource(513, 385, 256, 1, base, "png");
   }
   const source = fixtureSource();
@@ -68,8 +70,12 @@ export async function createSeadragonViewer({ runtime, mode }) {
         tileSources: source,
         showNavigationControl: false,
         blendTime: 0,
-        loadTilesWithAjax: mode === "ajax",
-        ajaxHeaders: { "X-Viewer": "viewer", "X-Override": "viewer" },
+        loadTilesWithAjax: ["ajax", "authenticated"].includes(mode),
+        ajaxHeaders: {
+          "X-Viewer": "viewer",
+          "X-Override": "viewer",
+          ...(mode === "authenticated" ? { Authorization: "Bearer fixture" } : {}),
+        },
       });
   await new Promise((resolve) => {
     if (runtime.classic) {

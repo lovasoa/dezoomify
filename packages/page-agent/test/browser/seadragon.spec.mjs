@@ -20,6 +20,11 @@ async function tileResponse(route) {
     });
   if (url.pathname.startsWith("/failure/"))
     return route.fulfill({ status: 503, body: "tile failure" });
+  if (
+    url.pathname.startsWith("/authenticated/") &&
+    route.request().headers().authorization !== "Bearer fixture"
+  )
+    return route.fulfill({ status: 401, body: "Authentication required" });
   if (url.pathname.startsWith("/img/")) return route.fulfill({ status: 404, body: "" });
   if (/^\/(iiif|zoomify|image)\//.test(url.pathname))
     return route.fulfill({ contentType: "image/png", body: ordinaryTile });
@@ -28,7 +33,7 @@ async function tileResponse(route) {
       ? `/tiles/${url.searchParams.get("filename").replace("objectimages/image_files/", "")}`
       : url.pathname;
   const match = tilePath.match(
-    /^\/(?:tiles|second|custom|bounds|ajax|multi)\/(\d+)\/(\d+)_(\d+)\.png$/,
+    /^\/(?:tiles|second|custom|bounds|ajax|multi|authenticated)\/(\d+)\/(\d+)_(\d+)\.png$/,
   );
   if (!match) throw new Error(`Unexpected fixture request: ${url}`);
   const [, level, x, y] = match.map(Number);
@@ -115,7 +120,8 @@ async function checkObservation(page, runtime, mode) {
     JSON.stringify(result.diagnostics),
   );
   const live = result.inputs.filter((input) => input.kind === "observed-viewer");
-  if (["custom", "expando", "global", "multi", "ajax"].includes(mode)) {
+  if (mode === "authenticated") assert.equal(live.length, 1);
+  if (["custom", "expando", "global", "multi", "ajax", "authenticated"].includes(mode)) {
     for (const input of live) await acquireTiles(page, input);
   }
   for (const input of live) {
@@ -207,6 +213,7 @@ for (const runtime of seadragonVersions) {
       "iiif",
       "zoomify",
       "image",
+      "authenticated",
     );
   }
   // These releases cover the two supported AJAX loader contracts (GET and POST).

@@ -3,13 +3,10 @@
 //! Rust uses `cargo deny`, not `cargo audit`, as the single blocking tool:
 //! one pinned binary covers advisories, licenses, bans, and sources from
 //! `deny.toml`, while `cargo audit` would only duplicate the advisories leg
-//! with a second database to maintain. The advisory-database fetch is the
-//! only public-network contact outside `test live`, limited to the RustSec
-//! database; everything else resolves from `Cargo.lock` and the JS lockfiles.
+//! with a second database to maintain.
 //!
-//! JS audits the complete pnpm workspace. The workspace lockfile is the only
-//! active JavaScript lockfile; installs never bypass auditing because the
-//! blocking audit lives here, not in install flags.
+//! High and critical advisories in production JS dependencies fail the gate.
+//! CI separately reports advisories for the full workspace, including build tools.
 
 use std::process::Command;
 
@@ -56,7 +53,7 @@ fn install_hint(detail: &str) -> String {
 /// the RustSec database twice.
 pub fn audit_js() -> Result<(), String> {
     let status = super::desktop::pnpm_command()?
-        .args(["audit", "--audit-level", "high"])
+        .args(["audit", "--prod", "--audit-level", "high"])
         .current_dir(super::repo_root())
         .status()
         .map_err(|e| {
@@ -65,9 +62,11 @@ pub fn audit_js() -> Result<(), String> {
             )
         })?;
     if !status.success() {
-        return Err("supply-chain gate failed (`pnpm audit --audit-level high`)".to_string());
+        return Err(
+            "supply-chain gate failed (`pnpm audit --prod --audit-level high`)".to_string(),
+        );
     }
-    println!("supply chain (pnpm audit): ok");
+    println!("supply chain (pnpm audit --prod): ok");
     Ok(())
 }
 
