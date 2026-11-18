@@ -17,5 +17,6 @@ export * from "./preview.ts";
 export * from "./response-body.ts";
 export * from "./tile-decode.ts";
 export * from "./tile-draw.ts";
+export * from "./tile-pixels.ts";
 export * from "./tile-policy.ts";
 export * from "./web-fetch.ts";

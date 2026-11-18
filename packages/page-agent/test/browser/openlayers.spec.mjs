@@ -107,15 +107,8 @@ for (const runtime of ["ol6", "ol"]) {
           for (let attempt = 0; attempt < 2; attempt++) {
             const edge = await ViewerScanner.readViewerTile(edgeRequest, { width, height });
             if (!edge.ok) throw new Error(JSON.stringify(edge));
-            const image = await createImageBitmap(new Blob([edge.buffer]));
-            dimensions.push([image.width, image.height]);
-            const canvas = document.createElement("canvas");
-            canvas.width = image.width;
-            canvas.height = image.height;
-            const context = canvas.getContext("2d");
-            context.drawImage(image, 0, 0);
-            samples.push([...context.getImageData(0, 0, 1, 1).data]);
-            image.close();
+            dimensions.push([edge.width, edge.height]);
+            samples.push([...new Uint8Array(edge.buffer, 0, 4)]);
           }
           corpusSuspendLoading();
           const pending = ViewerScanner.readViewerTile(request, extent);

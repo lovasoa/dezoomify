@@ -90,18 +90,24 @@ async function acquireTile(page, sourceUrl, source, grid, column, row) {
     { source, sourceUrl, grid, column, row, width, height },
   );
   assert.equal(result.ok, true, JSON.stringify(result));
-  const bytes = result.url
-    ? Buffer.from(
-        await page.evaluate(
-          async (url) => [...new Uint8Array(await (await fetch(url)).arrayBuffer())],
-          result.url,
-        ),
-      )
-    : Buffer.from(result.buffer);
-  const decoded = await sharp(bytes).raw().toBuffer({ resolveWithObject: true });
-  assert.deepEqual([decoded.info.width, decoded.info.height], [width, height]);
-  for (let offset = 0; offset < decoded.data.length; offset += 4)
-    assert.deepEqual([...decoded.data.subarray(offset, offset + 4)], [23, 87, 151, 255]);
+  let pixels;
+  if (result.url) {
+    const bytes = await page.evaluate(
+      async (url) => [...new Uint8Array(await (await fetch(url)).arrayBuffer())],
+      result.url,
+    );
+    const { data, info } = await sharp(Buffer.from(bytes))
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    assert.deepEqual([info.width, info.height], [width, height]);
+    pixels = data;
+  } else {
+    assert.deepEqual([result.width, result.height], [width, height]);
+    pixels = Buffer.from(result.buffer);
+  }
+  assert.equal(pixels.length, width * height * 4);
+  for (let offset = 0; offset < pixels.length; offset += 4)
+    assert.deepEqual([...pixels.subarray(offset, offset + 4)], [23, 87, 151, 255]);
 }
 
 async function checkObservation(page, runtime, mode) {
@@ -200,13 +206,23 @@ function expectedImages(runtime, mode) {
   return mode === "multi" ? 2 : 1;
 }
 
-for (const overlap of [0, 1])
-  test(`older OpenSeadragon JPEG tile with overlap ${overlap}`, async ({ page, loadModule }) => {
-    const runtime = seadragonVersions.find(({ version }) => version === "5.0.1");
-    const size = 256 + overlap;
+for (const version of ["5.0.1", "6.1.1"])
+  test(`OpenSeadragon ${version}: cropped authenticated JPEG pixels`, async ({
+    page,
+    loadModule,
+  }) => {
+    const runtime = seadragonVersions.find((entry) => entry.version === version);
+    const size = 257;
     const jpeg = await sharp({
       create: { width: size, height: size, channels: 3, background: "#175797" },
     })
+      .composite([
+        {
+          input: { create: { width: 32, height: size, channels: 3, background: "white" } },
+          left: size - 32,
+          top: 0,
+        },
+      ])
       .jpeg()
       .toBuffer();
     await page.route("https://viewer.fixture.test/**", (route) =>
@@ -217,9 +233,9 @@ for (const overlap of [0, 1])
     );
     await page.goto("https://viewer.fixture.test/");
     await page.addScriptTag({ content: seadragonLibrary(runtime) });
-    await page.evaluate(createSeadragonViewer, { runtime, mode: "authenticated", overlap });
+    await page.evaluate(createSeadragonViewer, { runtime, mode: "authenticated" });
     await loadModule(page);
-    const [original, cropped] = await page.evaluate(async (size) => {
+    const cropped = await page.evaluate(async (size) => {
       const {
         inputs: [input],
         handles,
@@ -232,21 +248,37 @@ for (const overlap of [0, 1])
           column: 0,
           row: 0,
         };
-        return await Promise.all(
-          [size, size - 1].map(async (width) => {
-            const tile = await ViewerScanner.readViewerTile(request, { width, height: size });
-            if (!tile.ok || !tile.buffer) throw new Error(JSON.stringify(tile));
-            return [...new Uint8Array(tile.buffer)];
-          }),
-        );
+        const original = await ViewerScanner.readViewerTile(request, { width: size, height: size });
+        const cropped = await ViewerScanner.readViewerTile(request, {
+          width: size - 40,
+          height: size,
+        });
+        if (!original.ok || !cropped.ok || !original.buffer || !cropped.buffer)
+          throw new Error(JSON.stringify({ original, cropped }));
+        const fullPixels = new Uint8Array(original.buffer);
+        const croppedPixels = new Uint8Array(cropped.buffer);
+        const stride = cropped.width * 4;
+        return {
+          width: cropped.width,
+          height: cropped.height,
+          bytes: croppedPixels.length,
+          matches: croppedPixels.every(
+            (value, i) =>
+              value === fullPixels[Math.floor(i / stride) * original.width * 4 + (i % stride)],
+          ),
+          differentEdges: croppedPixels[stride - 4] !== fullPixels[original.width * 4 - 4],
+        };
       } finally {
         ViewerScanner.releaseViewerTiles(handles);
       }
     }, size);
-    if (!overlap) assert.deepEqual(Buffer.from(original), jpeg);
-    else assert.equal((await sharp(Buffer.from(original)).metadata()).format, "png");
-    const { width, height, format } = await sharp(Buffer.from(cropped)).metadata();
-    assert.deepEqual({ width, height, format }, { width: size - 1, height: size, format: "png" });
+    assert.deepEqual(cropped, {
+      width: size - 40,
+      height: size,
+      bytes: (size - 40) * size * 4,
+      matches: true,
+      differentEdges: true,
+    });
   });
 
 for (const runtime of seadragonVersions) {

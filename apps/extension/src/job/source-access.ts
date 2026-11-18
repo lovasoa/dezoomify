@@ -8,7 +8,9 @@ import {
   requestedByteRange,
   SizeLimitError,
   SOURCE_FETCH_BYTE_LIMIT,
+  type TilePixels,
   TimeoutError,
+  VIEWER_TILE_BYTE_LIMIT,
   validateByteRangeLength,
   validateByteRangeResponse,
   validateRequestHeaders,
@@ -72,14 +74,24 @@ function viewerResource(uri: unknown): ResourceRequest {
   return { uri, headers: [], purpose: "tile" };
 }
 
-function viewerBytes(result: Record<string, unknown>): ArrayBuffer {
+function viewerPixels(result: Record<string, unknown>, extent: Size): TilePixels {
+  const { width, height, buffer } = result;
   if (
     result.ok !== true ||
-    !(result.buffer instanceof ArrayBuffer) ||
-    result.buffer.byteLength > SOURCE_FETCH_BYTE_LIMIT
+    typeof width !== "number" ||
+    typeof height !== "number" ||
+    !Number.isSafeInteger(width) ||
+    !Number.isSafeInteger(height) ||
+    width < 1 ||
+    height < 1 ||
+    width > extent.width ||
+    height > extent.height ||
+    !(buffer instanceof ArrayBuffer) ||
+    buffer.byteLength > VIEWER_TILE_BYTE_LIMIT ||
+    buffer.byteLength !== width * height * 4
   )
-    throw new InternalError("Invalid viewer tile byte payload");
-  return result.buffer;
+    throw new InternalError("Invalid viewer tile pixel payload");
+  return { width, height, buffer };
 }
 
 function sameDocumentUrl(a: string, b: string): boolean {
@@ -874,7 +886,7 @@ export function createSourceAccess(
     request: ViewerTileRequest,
     extent: Size,
     signal: AbortSignal,
-  ): Promise<ArrayBuffer | ResourceRequest> {
+  ): Promise<TilePixels | ResourceRequest> {
     assertLive();
     signal.throwIfAborted();
     const channel = tileChannels.get(request.handle);
@@ -886,7 +898,7 @@ export function createSourceAccess(
     if (!isRecord(result)) throw new InternalError("Invalid viewer tile response");
     if (result.ok === false && isJobError(result.error)) throw errorFromPayload(result.error);
     if (result.ok === true && "url" in result) return viewerResource(result.url);
-    return viewerBytes(result);
+    return viewerPixels(result, extent);
   }
 
   function dispose() {

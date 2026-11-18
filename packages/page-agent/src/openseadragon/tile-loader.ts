@@ -4,19 +4,17 @@ import {
   isJobError,
   NetworkError,
   retryAfterMs,
-  SOURCE_FETCH_BYTE_LIMIT,
   unknownDetail,
 } from "@dezoomify/browser-runtime";
 import type { Error as JobError } from "@dezoomify/wasm-bindings";
 import { PageObject } from "../viewers/page-object.ts";
-import type { ViewerDrawable, ViewerTile } from "../viewers/session.ts";
+import type { ViewerTile } from "../viewers/session.ts";
 
 interface TileSource {
   getTileUrl(level: number, x: number, y: number): string | (() => string);
   getTilePostData?(level: number, x: number, y: number): unknown;
   getTileAjaxHeaders?(level: number, x: number, y: number): Record<string, string>;
   downloadTileStart?: unknown;
-  tileOverlap?: number;
 }
 
 interface ImageLoader {
@@ -79,14 +77,10 @@ export async function loadOpenSeadragonTile(
   const legacyDrawer = image.drawer;
   if (!loader && !legacyDrawer?.loadImage)
     throw new Error("OpenSeadragon image loader is unavailable");
-  return new Promise<ViewerDrawable>((resolve, reject) => {
+  const data = await new Promise<unknown>((resolve, reject) => {
     const callback = (result: unknown, error?: unknown, response?: unknown) => {
-      if (!result) return reject(loadFailure(error, response, src));
-      resolve({
-        image: result,
-        ownership: "transferred",
-        originalJpeg: image.loadTilesWithAjax ? originalJpeg(native, result, response) : undefined,
-      });
+      if (result) resolve(result);
+      else reject(loadFailure(error, response, src));
     };
     if (!loader) {
       // 0.9.x exposes a bounded drawer loader rather than a queued ImageLoader.
@@ -109,27 +103,7 @@ export async function loadOpenSeadragonTile(
       callback,
     });
   });
-}
-
-/** Older default AJAX loaders decode a JPEG before returning its XHR response. */
-function originalJpeg(source: TileSource, image: unknown, request: unknown): Blob | undefined {
-  try {
-    if (!(image instanceof HTMLImageElement) || !(request instanceof XMLHttpRequest)) return;
-    // Cropping decoded JPEGs during assembly can change colors at tile seams.
-    if ((source.tileOverlap ?? 0) !== 0) return;
-    const bytes: unknown = request.response;
-    if (
-      !(bytes instanceof ArrayBuffer) ||
-      bytes.byteLength < 3 ||
-      bytes.byteLength > SOURCE_FETCH_BYTE_LIMIT
-    )
-      return;
-    const [a, b, c] = new Uint8Array(bytes, 0, 3);
-    if (a === 0xff && b === 0xd8 && c === 0xff && usesDefaultDownload(source))
-      return new Blob([bytes], { type: "image/jpeg" });
-  } catch {
-    // Failure to reuse the response must leave the drawable usable.
-  }
+  return { image: data, ownership: "transferred" };
 }
 
 /** Find the library's base TileSource through its geometry API, even when its

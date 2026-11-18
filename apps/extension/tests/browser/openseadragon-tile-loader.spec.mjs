@@ -88,7 +88,7 @@ async function loadFixture(mode) {
     source.downloadTileStart = () => {
       throw new TypeError("broken adapter");
     };
-  else if (mode === "encoding-failure")
+  else if (mode === "invalid-image")
     source.downloadTileStart = (job) => job.finish({ width: 1, height: 1 }, null, "broken");
   else if (mode === "oversized")
     source.downloadTileStart = (job) =>
@@ -137,20 +137,13 @@ async function loadFixture(mode) {
   if (!result.ok) return result.error;
   if (result.url) return { url: result.url };
   const bytes = new Uint8Array(result.buffer);
-  const decoded = await createImageBitmap(new Blob([bytes]));
-  const canvas = document.createElement("canvas");
-  canvas.width = decoded.width;
-  canvas.height = decoded.height;
-  const context = canvas.getContext("2d");
-  context.drawImage(decoded, 0, 0);
-  decoded.close();
   const blobStillReadable = !blobUrl || (await fetch(blobUrl)).ok;
   if (blobUrl) URL.revokeObjectURL(blobUrl);
   return {
-    width: canvas.width,
-    height: canvas.height,
-    pixel: [...context.getImageData(0, 0, 1, 1).data],
-    bytes: [...bytes],
+    width: result.width,
+    height: result.height,
+    pixel: [...bytes.subarray(0, 4)],
+    pixelBytes: bytes.byteLength,
     closedBitmap: mode !== "custom-bitmap" || bitmap.width === 0,
     blobStillReadable,
   };
@@ -227,8 +220,7 @@ test("page transport returns readable tiles and original download failures", asy
       },
       `${mode}: ${JSON.stringify(result)}`,
     );
-    if (["ajax", "custom-blob", "blob-url"].includes(mode))
-      assert.deepEqual(Buffer.from(result.bytes), tile, `${mode}: preserve encoded bytes`);
+    assert.equal(result.pixelBytes, 256 * 256 * 4, `${mode}: complete RGBA tile`);
     const request = requests.find(
       (request) => new URL(request.url()).searchParams.get("mode") === mode,
     );
@@ -255,7 +247,7 @@ test("page transport returns readable tiles and original download failures", asy
   assert.match(http.request, /mode=http-failure/);
   for (const [mode, operation] of [
     ["exception", "loading"],
-    ["encoding-failure", "encoding"],
+    ["invalid-image", "reading pixels from"],
   ]) {
     const internal = await page.evaluate(loadFixture, mode);
     assert.equal(internal.kind, "internal");
