@@ -87,6 +87,10 @@ jobs:
       - name: Install pinned Firefox driver
         if: matrix.lane-group == 'extension'
         run: pnpm --filter dezoomify-extension-headless install:driver
+      - name: Report all JavaScript dependency advisories
+        if: matrix.lane-group == 'bindings+security'
+        continue-on-error: true
+        run: pnpm audit
       - name: CI lanes
         env:
           LANES: ${{ matrix.lane-group }}
