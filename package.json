@@ -23,7 +23,7 @@
     "sharp": "0.35.5",
     "typescript": "7.0.2",
     "vite": "^8.3.8",
-    "wrangler": "4.161.0"
+    "wrangler": "4.162.0"
   },
   "scripts": {
     "lint": "biome lint --error-on-warnings .",
