@@ -6,7 +6,7 @@
     "test": "playwright test"
   },
   "devDependencies": {
-    "@playwright/test": "1.65.0",
+    "@playwright/test": "1.65.1",
     "ol": "10.11.0",
     "ol6": "npm:ol@6.15.1",
     "openseadragon2": "npm:openseadragon@2.4.2",
