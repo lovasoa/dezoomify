@@ -107,7 +107,7 @@ test("website saves a no-CORS ZIF URL through real public-data relay policies", 
   }
 });
 
-test("website notice links to the working legacy app and can be dismissed", async ({ page }) => {
+test("website and legacy notices link to each other and can be dismissed", async ({ page }) => {
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await page.addInitScript(() => {
@@ -120,7 +120,14 @@ test("website notice links to the working legacy app and can be dismissed", asyn
   await notice.getByRole("link", { name: "Ouvrir l’ancienne version" }).click();
   await expect(page).toHaveURL(`${ADDR}/legacy/`);
   await expect(page.locator("#url")).toBeVisible();
-  await expect(page.getByText("Try the new Dezoomify")).toHaveCount(0);
+  const warning = page.getByRole("complementary", { name: "Legacy Dezoomify is going away" });
+  await expect(warning).toBeVisible();
+  await expect(warning.getByRole("link", { name: "new version" })).toHaveAttribute("href", "/");
+  await expect(warning.getByRole("link", { name: "report it on GitHub" })).toHaveAttribute(
+    "href", "https://github.com/dezoomify/dezoomify/issues/new?template=1_bug_report.md",
+  );
+  await warning.getByRole("button", { name: "Close", exact: true }).click();
+  await expect(warning).toBeHidden();
   assert.deepEqual(errors, [], "legacy scripts still initialize from the relocated directory");
   await page.goto(`${ADDR}/`);
   await notice.getByRole("button", { name: "Fermer", exact: true }).click();
