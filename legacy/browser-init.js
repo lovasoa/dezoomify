@@ -12,4 +12,10 @@
   if (startURL) {
     document.getElementById("url").value = startURL;
   }
+
+  var popup = document.getElementById("popup");
+  popup.querySelector("button").addEventListener("click", function () {
+    popup.hidden = true;
+  });
+  popup.hidden = false;
 })();
