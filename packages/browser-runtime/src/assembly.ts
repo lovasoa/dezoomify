@@ -5,6 +5,7 @@ import { canvasTooLargeFailure } from "./plan-gates.ts";
 import type { TileBitmap } from "./tile-decode.ts";
 import type { Canvas2DLike, PlacedTileGeometry, TileImageLike } from "./tile-draw.ts";
 import { drawPlacedTile } from "./tile-draw.ts";
+import type { TileRaster } from "./tile-pixels.ts";
 
 export type BrowserSaveDisposition = Extract<
   OutputDisposition,
@@ -23,7 +24,7 @@ export interface CanvasAssemblyDeps<C extends AssemblyCanvas = AssemblyCanvas> {
   signal?: AbortSignal;
   /** Transfer each returned bitmap to assembly, which closes it after painting
    * or release. Rejecting cancellation must not abandon late decoded pixels. */
-  decode(bytes: ArrayBuffer): Promise<TileBitmap>;
+  decode(input: TileRaster): Promise<TileBitmap>;
   processTile(recipe: TilePlacement["processing"], bytes: ArrayBuffer): ArrayBuffer;
   /** Allocate the output surface; called only after limit validation. */
   createCanvas(width: number, height: number): C;
@@ -54,7 +55,7 @@ export interface CanvasAssemblyDeps<C extends AssemblyCanvas = AssemblyCanvas> {
  * the assembly but keeps an already displayed canvas visible. */
 export interface CanvasAssembly {
   prepare(canvas?: { width: number; height: number } | null): void;
-  acquireTile(tile: number, placement: TilePlacement, bytes: ArrayBuffer): Promise<void>;
+  acquireTile(tile: number, placement: TilePlacement, raster: TileRaster): Promise<void>;
   /**
    * Display-only acquisition: hold an ordinary image element for assembly.
    * The canvas taints when it is drawn, so the job can only complete as
@@ -134,14 +135,14 @@ export function createCanvasAssembly<C extends AssemblyCanvas>(
   async function acquireTile(
     tile: number,
     placement: TilePlacement,
-    bytes: ArrayBuffer,
+    raster: TileRaster,
   ): Promise<void> {
     signal.throwIfAborted();
     placements.set(tile, placement);
-    let input: ArrayBuffer;
+    let input = raster;
     try {
-      input =
-        placement.processing === "none" ? bytes : deps.processTile(placement.processing, bytes);
+      if (raster instanceof ArrayBuffer && placement.processing !== "none")
+        input = deps.processTile(placement.processing, raster);
     } catch (error) {
       signal.throwIfAborted();
       throw tileError("processing-failed", error);

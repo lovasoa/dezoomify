@@ -1,5 +1,6 @@
 import type { DiagnosticRecorder } from "../../shared-ui/src/diagnostics.ts";
 import { tileError } from "./failure.ts";
+import type { TileRaster } from "./tile-pixels.ts";
 
 export interface TileBitmap {
   width: number;
@@ -7,13 +8,13 @@ export interface TileBitmap {
   close(): void;
 }
 export interface TileDecodeHost {
-  createImageBitmap?: (blob: unknown) => Promise<unknown>;
+  createImageBitmap?: (image: unknown) => Promise<unknown>;
   blobCtor?: new (parts: Array<unknown>, opts?: { type?: string }) => unknown;
 }
 export interface TileDecoder {
   /** Success transfers the bitmap to the caller, which must close it. Aborting
    * rejects the wait immediately; the native decoder may still be running. */
-  decode(bytes: ArrayBuffer, signal?: AbortSignal): Promise<TileBitmap>;
+  decode(input: TileRaster, signal?: AbortSignal): Promise<TileBitmap>;
   /** Reject pending waits and close their eventual results. Already returned
    * bitmaps remain the caller's responsibility. */
   dispose(): void;
@@ -29,7 +30,7 @@ export function createTileDecoder(
   const lifetime = new AbortController();
   const pending = new Set<Promise<void>>();
   return {
-    decode(bytes, signal) {
+    decode(input, signal) {
       const owned = signal ? AbortSignal.any([signal, lifetime.signal]) : lifetime.signal;
       if (owned.aborted) return Promise.reject({ kind: "cancelled" });
       const decode = host.createImageBitmap ?? globalThis.createImageBitmap;
@@ -40,7 +41,11 @@ export function createTileDecoder(
         const work = Promise.resolve()
           .then(() => {
             owned.throwIfAborted();
-            return decode(new BlobClass([bytes]) as Blob);
+            const image =
+              input instanceof ArrayBuffer
+                ? (new BlobClass([input]) as Blob)
+                : new ImageData(new Uint8ClampedArray(input.buffer), input.width, input.height);
+            return decode(image);
           })
           .then(
             (value) => {

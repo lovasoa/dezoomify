@@ -40,6 +40,7 @@ import type { SelectionLimits } from "./limits.ts";
 import { canvasTooLargeFailure } from "./plan-gates.ts";
 import type { TileDecoder } from "./tile-decode.ts";
 import type { TileImageLike } from "./tile-draw.ts";
+import type { TilePixels, TileRaster } from "./tile-pixels.ts";
 
 export interface BrowserHostDependencies {
   signal: AbortSignal;
@@ -54,14 +55,14 @@ export interface BrowserHostDependencies {
     interaction: Interaction,
   ): Promise<ResourceRead>;
   loadDisplayImage?(url: string, signal: AbortSignal): Promise<TileImageLike>;
-  /** Return owned encoded bytes or a validated HTTP request for one attempt.
+  /** Return owned RGBA pixels or a validated HTTP request for one attempt.
    * Retain the handle until settlement. Honor cancellation without clearing the viewer's queue.
    * Preserve typed load failures; never route handles through URL transports. */
   loadViewerTile?(
     request: ViewerTileRequest,
     extent: Size,
     signal: AbortSignal,
-  ): Promise<ArrayBuffer | ResourceRequest>;
+  ): Promise<TilePixels | ResourceRequest>;
   onProgress(progress: Progress): void;
   chooseImage(catalog: Catalog, signal: AbortSignal): Promise<number>;
   approveRetry(request: TileAcquisition, signal: AbortSignal): Promise<void>;
@@ -204,7 +205,7 @@ export class BrowserHost implements Host {
 
   private async measureTile(tile: Tile): Promise<ProbeOutcome> {
     try {
-      let resource: ArrayBuffer | TileImageLike;
+      let resource: TileRaster | TileImageLike;
       let width: number, height: number;
       try {
         resource = await this.loadTile(tile);
@@ -217,9 +218,11 @@ export class BrowserHost implements Host {
           } catch {
             // Bitmap cleanup is best-effort.
           }
-        } else {
+        } else if ("naturalWidth" in resource) {
           width = resource.naturalWidth;
           height = resource.naturalHeight;
+        } else {
+          ({ width, height } = resource);
         }
         this.signal.throwIfAborted();
       } catch (error) {
@@ -299,19 +302,17 @@ export class BrowserHost implements Host {
     }
   }
 
-  private async paintLoaded(tile: Tile, resource: ArrayBuffer | TileImageLike): Promise<void> {
+  private async paintLoaded(tile: Tile, resource: TileRaster | TileImageLike): Promise<void> {
     this.signal.throwIfAborted();
-    if (resource instanceof ArrayBuffer)
-      await this.deps.assembly.acquireTile(tile.index, tile.placement, resource);
-    else {
+    if ("naturalWidth" in resource) {
       this.deps.assembly.acquireDisplayTile(tile.index, tile.placement, resource);
       this.deps.diagnostics?.count("displayed_tiles");
-    }
+    } else await this.deps.assembly.acquireTile(tile.index, tile.placement, resource);
   }
 
   /** Resolve viewer handles in their source document; only returned resource
-   * requests enter URL transports. Rendered viewer pixels remain readable bytes. */
-  private async loadTile(tile: Tile): Promise<ArrayBuffer | TileImageLike> {
+   * requests enter URL transports. */
+  private async loadTile(tile: Tile): Promise<TileRaster | TileImageLike> {
     const source = tile.source;
     if (source.kind === "viewer") {
       const load = this.deps.loadViewerTile;
@@ -321,7 +322,7 @@ export class BrowserHost implements Host {
       if (!extent) throw new InternalError("Viewer tile plan has no expected pixel dimensions");
       try {
         const result = await load(source, extent, this.signal);
-        if (result instanceof ArrayBuffer) return result;
+        if ("buffer" in result) return result;
         this.signal.throwIfAborted();
         return await this.loadResourceTile(result, tile.placement.processing === "none");
       } catch (error) {

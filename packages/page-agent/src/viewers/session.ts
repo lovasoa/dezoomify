@@ -3,8 +3,7 @@ import {
   errorPayload,
   InternalError,
   isJobError,
-  SizeLimitError,
-  SOURCE_FETCH_BYTE_LIMIT,
+  type TilePixels,
   unknownDetail,
 } from "@dezoomify/browser-runtime";
 import type {
@@ -13,11 +12,11 @@ import type {
   ViewerLevel,
   ViewerTileRequest,
 } from "@dezoomify/wasm-bindings";
-import { imageBlob } from "./tile-image.ts";
+import { readTilePixels } from "./tile-image.ts";
 import type { MetadataContext, ViewerEvidence } from "./types.ts";
 
 export type ViewerTileResult =
-  | { ok: true; buffer: ArrayBuffer }
+  | ({ ok: true } & TilePixels)
   | { ok: true; url: string }
   | { ok: false; error: JobError };
 interface Session {
@@ -32,7 +31,7 @@ const loaders = new Map<string, Session>();
 export interface ViewerDrawable {
   image: unknown;
   /** Borrowed drawables belong to the viewer's cache. Transferred bitmaps are
-   * closed after encoding, including failed or cancelled reads. */
+   * closed after readback, including failed or cancelled reads. */
   ownership: "borrowed" | "transferred";
 }
 export type ViewerTile = ViewerDrawable | { url: string };
@@ -71,11 +70,10 @@ export function registerViewer(
         lifetime.signal.throwIfAborted();
         return { ok: true, url: result.url };
       }
-      operation = "encoding";
-      const blob = await imageBlob(result, extent);
+      operation = "reading pixels from";
+      const pixels = await readTilePixels(result, extent, lifetime.signal);
       lifetime.signal.throwIfAborted();
-      if (blob.size > SOURCE_FETCH_BYTE_LIMIT) throw new SizeLimitError(SOURCE_FETCH_BYTE_LIMIT);
-      return { ok: true, buffer: await blob.arrayBuffer() };
+      return { ok: true, ...pixels };
     } catch (cause) {
       const error = lifetime.signal.aborted
         ? new CancelledError()

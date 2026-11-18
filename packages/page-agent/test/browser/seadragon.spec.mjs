@@ -20,10 +20,8 @@ async function tileResponse(route) {
     });
   if (url.pathname.startsWith("/failure/"))
     return route.fulfill({ status: 503, body: "tile failure" });
-  if (
-    url.pathname.startsWith("/authenticated/") &&
-    route.request().headers().authorization !== "Bearer fixture"
-  )
+  const authenticated = url.pathname.startsWith("/authenticated/");
+  if (authenticated && route.request().headers().authorization !== "Bearer fixture")
     return route.fulfill({ status: 401, body: "Authentication required" });
   if (url.pathname.startsWith("/img/")) return route.fulfill({ status: 404, body: "" });
   if (/^\/(iiif|zoomify|image)\//.test(url.pathname))
@@ -33,7 +31,7 @@ async function tileResponse(route) {
       ? `/tiles/${url.searchParams.get("filename").replace("objectimages/image_files/", "")}`
       : url.pathname;
   const match = tilePath.match(
-    /^\/(?:tiles|second|custom|bounds|ajax|multi|authenticated)\/(\d+)\/(\d+)_(\d+)\.png$/,
+    /^\/(?:tiles|second|custom|bounds|ajax|multi|authenticated)\/(\d+)\/(\d+)_(\d+)\.(?:png|jpg)$/,
   );
   if (!match) throw new Error(`Unexpected fixture request: ${url}`);
   const [, level, x, y] = match.map(Number);
@@ -45,6 +43,16 @@ async function tileResponse(route) {
   const top = Math.max(0, y * 256 - 1);
   const width = Math.min(size.width, (x + 1) * 256 + 1) - left;
   const height = Math.min(size.height, (y + 1) * 256 + 1) - top;
+  if (authenticated) {
+    // Keep the padding on a JPEG block boundary so every visible pixel is black.
+    const body = await sharp({
+      create: { width: Math.ceil(width / 8) * 8, height, channels: 3, background: "black" },
+    })
+      .extend({ top: 0, bottom: 0, left: 0, right: 8, background: "white" })
+      .jpeg()
+      .toBuffer();
+    return route.fulfill({ contentType: "image/jpeg", body });
+  }
   const body = await sharp({
     create: { width, height, channels: 4, background: { r: 23, g: 87, b: 151, alpha: 1 } },
   })
@@ -57,20 +65,21 @@ async function tileResponse(route) {
   });
 }
 
-async function acquireTiles(page, input) {
+async function acquireTiles(page, input, mode) {
   const source = input.viewer;
+  const pixel = mode === "authenticated" ? [0, 0, 0, 255] : [23, 87, 151, 255];
   // Read the full-resolution grid and one fractional-size lower level.
   const levels = source.levels.filter((grid) => [8, 10].includes(grid.level));
   for (const grid of levels) {
     for (let row = 0; row < grid.grid_size.height; row++) {
       for (let column = 0; column < grid.grid_size.width; column++) {
-        await acquireTile(page, input.url, source, grid, column, row);
+        await acquireTile(page, input.url, source, grid, column, row, pixel);
       }
     }
   }
 }
 
-async function acquireTile(page, sourceUrl, source, grid, column, row) {
+async function acquireTile(page, sourceUrl, source, grid, column, row, pixel) {
   const left = Math.max(0, column * grid.tile_size.width - grid.overlap.width);
   const top = Math.max(0, row * grid.tile_size.height - grid.overlap.height);
   const width =
@@ -85,23 +94,30 @@ async function acquireTile(page, sourceUrl, source, grid, column, row) {
           { width, height },
         ),
       ).then((value) =>
-        value.ok && value.buffer ? { ...value, buffer: [...new Uint8Array(value.buffer)] } : value,
+        value.ok && value.buffer ? { ...value, buffer: new Uint8Array(value.buffer) } : value,
       ),
     { source, sourceUrl, grid, column, row, width, height },
   );
   assert.equal(result.ok, true, JSON.stringify(result));
-  const bytes = result.url
-    ? Buffer.from(
-        await page.evaluate(
-          async (url) => [...new Uint8Array(await (await fetch(url)).arrayBuffer())],
-          result.url,
-        ),
-      )
-    : Buffer.from(result.buffer);
-  const decoded = await sharp(bytes).raw().toBuffer({ resolveWithObject: true });
-  assert.deepEqual([decoded.info.width, decoded.info.height], [width, height]);
-  for (let offset = 0; offset < decoded.data.length; offset += 4)
-    assert.deepEqual([...decoded.data.subarray(offset, offset + 4)], [23, 87, 151, 255]);
+  let pixels;
+  if (result.url) {
+    const bytes = await page.evaluate(
+      async (url) => new Uint8Array(await (await fetch(url)).arrayBuffer()),
+      result.url,
+    );
+    const { data, info } = await sharp(Buffer.from(bytes))
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    assert.deepEqual([info.width, info.height], [width, height]);
+    pixels = data;
+  } else {
+    assert.deepEqual([result.width, result.height], [width, height]);
+    pixels = Buffer.from(result.buffer);
+  }
+  assert.ok(
+    pixels.equals(Buffer.alloc(width * height * 4, Buffer.from(pixel))),
+    `incorrect pixels at level ${grid.level}, column ${column}, row ${row}`,
+  );
 }
 
 async function checkObservation(page, runtime, mode) {
@@ -122,7 +138,7 @@ async function checkObservation(page, runtime, mode) {
   const live = result.inputs.filter((input) => input.kind === "observed-viewer");
   if (mode === "authenticated") assert.equal(live.length, 1);
   if (["custom", "expando", "global", "multi", "ajax", "authenticated"].includes(mode)) {
-    for (const input of live) await acquireTiles(page, input);
+    for (const input of live) await acquireTiles(page, input, mode);
   }
   for (const input of live) {
     await checkSession(page, input, mode);
@@ -202,6 +218,7 @@ function expectedImages(runtime, mode) {
 
 for (const runtime of seadragonVersions) {
   const modes = ["global", "closure", "custom"];
+  if (["5.0.1", "6.1.1"].includes(runtime.version)) modes.push("authenticated");
   if (runtime === seadragonVersions.at(-1)) {
     modes.push(
       "expando",
@@ -213,7 +230,6 @@ for (const runtime of seadragonVersions) {
       "iiif",
       "zoomify",
       "image",
-      "authenticated",
     );
   }
   // These releases cover the two supported AJAX loader contracts (GET and POST).

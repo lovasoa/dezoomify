@@ -114,6 +114,9 @@ test("async Host reads binary metadata and saves the full selected image", async
 test("viewer acquisition retries transport failures and keeps internal exceptions fatal", async () => {
   const sourceUrl = "https://iiif.nichibun.test/viewer";
   const size = { width: 256, height: 256 };
+  const pixel = [1, 2, 3, 255];
+  const rgba = new Uint8Array(size.width * size.height * 4);
+  rgba.set(pixel);
   const observation = {
     kind: "observed-viewer",
     url: sourceUrl,
@@ -163,12 +166,12 @@ test("viewer acquisition retries transport failures and keeps internal exception
         });
         assert.deepEqual(extent, size);
         if (++attempts === 1) throw failure;
-        return Uint8Array.of(1, 2, 3).buffer;
+        return { ...size, buffer: rgba.buffer };
       },
       assembly: {
         prepare() {},
-        async acquireTile(index, _placement, bytes) {
-          painted.push([index, ...new Uint8Array(bytes)]);
+        async acquireTile(index, _placement, { width, height, buffer }) {
+          painted.push({ index, width, height, pixel: [...new Uint8Array(buffer, 0, 4)] });
         },
         async finalizeOutput() {
           saved = true;
@@ -191,7 +194,7 @@ test("viewer acquisition retries transport failures and keeps internal exception
     );
     if (retries) {
       assert.equal((await job).disposition, "browser-save-ready");
-      assert.deepEqual(painted, [[0, 1, 2, 3]]);
+      assert.deepEqual(painted, [{ index: 0, ...size, pixel }]);
       assert.equal(attempts, 2);
       assert.equal(saved, true);
     } else {

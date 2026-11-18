@@ -283,7 +283,8 @@ test("live tile capabilities stay bound to their exact viewer frame and are rele
   const handle = "test-source";
   const request = { handle, source_url: viewerUrl, level: 10, column: 0, row: 0 };
   const extent = { width: 256, height: 256 };
-  const tile = { ok: true, buffer: new Uint8Array([1]).buffer };
+  const pixels = { width: 1, height: 1, buffer: new Uint8Array([1, 2, 3, 255]).buffer };
+  const tile = { ok: true, ...pixels };
   let tileReply = () => tile;
   const fake = fakeBrowser(async (injection) => {
     const frameId = injection.target.frameIds[0];
@@ -317,7 +318,13 @@ test("live tile capabilities stay bound to their exact viewer frame and are rele
     assert.ok((await observe("forbidden", new AbortController().signal)).length);
     await source.scan();
     const result = await source.loadViewerTile(request, extent, new AbortController().signal);
-    assert.deepEqual([...new Uint8Array(result)], [1]);
+    assert.deepEqual(result, pixels);
+    for (const malformed of [{ width: 257 }, { height: -1 }, { buffer: new ArrayBuffer(3) }]) {
+      tileReply = () => ({ ...tile, ...malformed });
+      await assert.rejects(source.loadViewerTile(request, extent, new AbortController().signal), {
+        kind: "internal",
+      });
+    }
     const resource = {
       uri: "https://tiles.example/tile?signature=exact",
       headers: [],
@@ -406,7 +413,9 @@ test("a rescan keeps every scan's viewer handles bound to its own channel", asyn
   });
   fake.setPortReply((message) => ({
     ok: true,
-    buffer: new Uint8Array([Number(message.request.handle.at(-1))]).buffer,
+    width: 1,
+    height: 1,
+    buffer: new Uint8Array([Number(message.request.handle.at(-1)), 0, 0, 255]).buffer,
   }));
   const source = createSourceAccess(fake.api, { tabId: 9, documentUrl: SOURCE_URL });
   const request = (order) => ({
@@ -426,7 +435,7 @@ test("a rescan keeps every scan's viewer handles bound to its own channel", asyn
         extent,
         new AbortController().signal,
       );
-      assert.deepEqual([...new Uint8Array(result)], [order]);
+      assert.deepEqual([...new Uint8Array(result.buffer)], [order, 0, 0, 255]);
     }
   } finally {
     source.dispose();

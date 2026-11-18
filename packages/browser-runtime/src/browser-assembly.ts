@@ -16,7 +16,7 @@ export function createBrowserAssembly(
 ) {
   return createCanvasAssembly({
     ...deps,
-    decode: (bytes) => deps.decoder.decode(bytes, deps.signal),
+    decode: (input) => deps.decoder.decode(input, deps.signal),
     createCanvas(width, height) {
       const element = deps.canvas();
       try {
