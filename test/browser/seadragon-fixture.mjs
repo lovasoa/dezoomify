@@ -58,7 +58,8 @@ export async function createSeadragonViewer({ runtime, mode }) {
         : mode === "query"
           ? `${location.origin}/imageproxy.aspx?&filename=objectimages/image_files/`
           : `${location.origin}/tiles/`;
-    return new library.DziTileSource(513, 385, 256, 1, base, "png");
+    const format = mode === "authenticated" ? "jpg" : "png";
+    return new library.DziTileSource(513, 385, 256, 1, base, format);
   }
   const source = fixtureSource();
   const element = document.getElementById("viewer");
